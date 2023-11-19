@@ -14,6 +14,12 @@ fastrand = "2.0.1"
 indicatif = "0.17.7"
 meval = "0.2.0"
 
+[lints.clippy]
+type_complexity = "allow"
+redundant_closure_call = "allow"
+rust_2018_idioms = "warn"
+unsafe_code = "forbid"
+
 [[bench]]
 name = "evaluation_benchmark"
 harness = false
