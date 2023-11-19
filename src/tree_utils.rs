@@ -5,7 +5,7 @@ pub(crate) fn construct<A, R, E>(
     recur_func: impl Fn(A, &mut Vec<(A, Option<Box<dyn Fn(E) -> E>>)>) -> Result<Option<R>, E>,
     arena: Option<Arena<R>>,
 ) -> Result<(Arena<R>, NodeId), E> {
-    let mut arena = arena.unwrap_or(Arena::new());
+    let mut arena = arena.unwrap_or_default();
     let mut call_stack = vec![(inital_args, None)];
     let mut result_stack: Vec<(NodeId, usize)> = Vec::new();
     let mut header = None;
@@ -45,6 +45,12 @@ pub(crate) fn construct<A, R, E>(
         }
     }
     Ok((arena, header.unwrap()))
+}
+
+#[derive(Debug, Clone)]
+pub struct Tree<T> {
+    pub arena: Arena<T>,
+    pub root: NodeId
 }
 
 #[cfg(test)]

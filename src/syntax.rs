@@ -2,8 +2,8 @@ use std::fmt::{Display, Debug};
 
 use crate::number::{MathEvalNumber, NativeFunction};
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
-use crate::tree_construct::construct;
-use indextree::{Arena, NodeId};
+use crate::tree_utils::{construct, Tree};
+use indextree::NodeId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EvaluationError<N, C> {
@@ -155,10 +155,7 @@ pub enum SyntaxError {
 }
 
 #[derive(Clone, Debug)]
-pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
-    pub arena: Arena<SyntaxNode<N, V, F>>,
-    pub node: NodeId,
-}
+pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(pub Tree<SyntaxNode<N,V,F>>);
 
 impl<V, N, F> SyntaxTree<N, V, F>
 where
@@ -170,13 +167,13 @@ where
         token_tree: &TokenTree<'_>,
         custom_constant_parser: impl Fn(&str) -> Option<N>,
     ) -> Result<SyntaxTree<N, V, F>, (SyntaxError, NodeId)> {
-        let (arena, tree_node) = (&token_tree.arena, token_tree.node);
+        let (arena, root) = (&token_tree.0.arena, token_tree.0.root);
         construct::<
             (NodeId, Option<usize>, Option<usize>),
             SyntaxNode<N, V, F>,
             (SyntaxError, NodeId),
         >(
-            (tree_node, None, None),
+            (root, None, None),
             |(token_node, start, end), call_stack| {
                 let children_count = token_node.children(arena).count();
                 let start = start.unwrap_or(0);
@@ -301,7 +298,7 @@ where
             },
             None,
         )
-        .map(|(arena, node)| SyntaxTree { arena, node })
+        .map(|(arena, node)| SyntaxTree(Tree { arena, root: node }))
     }
 }
 
@@ -309,7 +306,7 @@ where
 mod test {
     use super::*;
     use crate::tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
-    use crate::tree_construct::VecTree::{self, Leaf};
+    use crate::tree_utils::VecTree::{self, Leaf};
 
     #[derive(Debug, PartialEq, Eq, Clone, Copy)]
     enum CustomVar {
@@ -367,7 +364,7 @@ mod test {
                     &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
                     |_| None,
                 )
-                .map(|syntree| VecTree::new(&syntree.arena, syntree.node))
+                .map(|syntree| VecTree::new(&syntree.0.arena, syntree.0.root))
             };
         }
         assert_eq!(syntaxify!("0"), Ok(Leaf(SyntaxNode::Number(0.0))));

@@ -83,7 +83,7 @@ where
         function_to_pointer: impl Fn(&I) -> &'a dyn Fn(&[N]) -> Result<N, F>,
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, V, F>> = Vec::new();
-        let arena = &syntree.arena;
+        let arena = &syntree.0.arena;
         let descend_to_end = |node: NodeId| {
             node.traverse(arena)
                 .find_map(|n| match n {
@@ -97,7 +97,7 @@ where
             Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
             _ => false,
         };
-        let mut cursor = descend_to_end(syntree.node);
+        let mut cursor = descend_to_end(syntree.0.root);
 
         macro_rules! next {
             () => {
