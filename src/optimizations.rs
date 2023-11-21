@@ -169,7 +169,7 @@ where
                 ),
             };
             result.push(instruction);
-            if parent.is_none() {
+            if parent.is_none() || cursor == root {
                 break;
             } else {
                 next!();
@@ -316,7 +316,7 @@ mod test {
     }
 
     #[test]
-    fn test_mathexpression() {
+    fn test_mathassembly() {
         use crate::tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
         use std::f64::consts::PI;
         macro_rules! eval {

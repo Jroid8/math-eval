@@ -1,10 +1,10 @@
-use std::fmt::{Display, Debug};
+use std::fmt::{Debug, Display};
 
 use crate::number::{MathEvalNumber, NativeFunction};
 use crate::optimizations::MathAssembly;
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
-use indextree::NodeId;
+use indextree::{NodeEdge, NodeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EvaluationError<N, C> {
@@ -156,7 +156,9 @@ pub enum SyntaxError {
 }
 
 #[derive(Clone, Debug)]
-pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(pub Tree<SyntaxNode<N,V,F>>);
+pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+    pub Tree<SyntaxNode<N, V, F>>,
+);
 
 impl<V, N, F> SyntaxTree<N, V, F>
 where
@@ -302,8 +304,43 @@ where
         .map(|(arena, node)| SyntaxTree(Tree { arena, root: node }))
     }
 
-    pub fn to_asm<'a>(&self, function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>) -> MathAssembly<'a, N, V, F::Error> {
+    pub fn to_asm<'a>(
+        &self,
+        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>,
+    ) -> MathAssembly<'a, N, V, F::Error> {
         MathAssembly::new(&self.0.arena, self.0.root, function_to_pointer)
+    }
+
+    pub fn aot_evaluation<'a>(
+        &mut self,
+        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>,
+    ) -> Result<(), EvaluationError<N::Error, F::Error>>
+    where
+        F::Error: 'a,
+    {
+        let mut examin: Vec<NodeId> = Vec::new();
+        for node in self.0.root.traverse(&self.0.arena) {
+            if let NodeEdge::End(syn) = node {
+                match self.0.arena[syn].get() {
+                    SyntaxNode::Number(_) | SyntaxNode::Variable(_) => (),
+                    _ => examin.push(syn),
+                }
+            }
+        }
+        for node in examin {
+            if node
+                .children(&self.0.arena)
+                .all(|c| matches!(self.0.arena[c].get(), SyntaxNode::Number(_)))
+            {
+                let answer = MathAssembly::new(&self.0.arena, node, &function_to_pointer)
+                    .eval(|_| unreachable!())?;
+                *self.0.arena[node].get_mut() = SyntaxNode::Number(answer);
+                while let Some(c) = self.0.arena[node].first_child() {
+                    c.remove(&mut self.0.arena);
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -479,5 +516,27 @@ mod test {
                 )
             ))
         );
+    }
+
+    #[test]
+    fn test_aot_evaluation() {
+        macro_rules! compare {
+            ($i1:literal, $i2:literal) => {
+                let mut syn1 = SyntaxTree::<f64, CustomVar, ()>::new(
+                    &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
+                    |_| None,
+                ).unwrap();
+                syn1.aot_evaluation(|_| &|_| Ok(0.0)).unwrap();
+                let syn2 = SyntaxTree::<f64, CustomVar, ()>::new(
+                    &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
+                    |_| None,
+                ).unwrap();
+                assert_eq!(format!("{:?}",syn1.0.root.debug_pretty_print(&syn1.0.arena)), format!("{:?}",syn2.0.root.debug_pretty_print(&syn2.0.arena)));
+            };
+        }
+        compare!("16/8+11", "13");
+        compare!("sqrt(0)", "0");
+        compare!("sin(1/8+t)", "sin(0.125+t)");
+        compare!("max(80/5, x^2, min(1,sin(0)))+sqrt(121)", "max(16, x^2, 0)+11");
     }
 }

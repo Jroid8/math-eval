@@ -141,6 +141,7 @@ pub trait MathEvalNumber:
     + FromStr
     + Neg<Output = Self>
     + Copy
+    + 'static
 {
     type Error;
 
