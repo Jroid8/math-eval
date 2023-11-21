@@ -1,6 +1,7 @@
 use std::fmt::{Display, Debug};
 
 use crate::number::{MathEvalNumber, NativeFunction};
+use crate::optimizations::MathAssembly;
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
 use indextree::NodeId;
@@ -299,6 +300,10 @@ where
             None,
         )
         .map(|(arena, node)| SyntaxTree(Tree { arena, root: node }))
+    }
+
+    pub fn to_asm<'a>(&self, function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>) -> MathAssembly<'a, N, V, F::Error> {
+        MathAssembly::new(&self.0.arena, self.0.root, function_to_pointer)
     }
 }
 

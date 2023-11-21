@@ -1,6 +1,5 @@
 use indicatif::{ProgressBar, ProgressStyle};
 use math_eval::{
-    optimizations::MathExpression,
     syntax::{FunctionIdentifier, SyntaxTree, VariableIdentifier},
     tokenizer::{token_stream::TokenStream, token_tree::TokenTree},
 };
@@ -65,9 +64,15 @@ fn test_random() {
     let gen_var = || -> f64 {
         fastrand::f64() * 10f64.powi(fastrand::i32(f64::MIN_10_EXP..=f64::MAX_10_EXP/5))
     };
-    macro_rules! expressify {
-        ($st:expr) => {
-            MathExpression::<'_, f64, MyVar, IllegalValue>::new($st, |fi: &MyFunc| match fi {
+    let progress_bar = ProgressBar::new(10).with_style(ProgressStyle::default_bar().progress_chars("#>-"));
+    for s in 1..=10 {
+        for _ in 0..400 {
+            let (x, y, z, t) = (gen_var(), gen_var(), gen_var(), gen_var());
+            let input = generate(2usize.pow(s));
+            let tokenstream = TokenStream::new(&input).unwrap();
+            let tokentree = TokenTree::new(&tokenstream).unwrap();
+            let syntree = SyntaxTree::<f64, MyVar, MyFunc>::new(&tokentree, |_| None).unwrap();
+            let mut expr = syntree.to_asm(|fi: &MyFunc| match fi {
                 MyFunc::Dist => &|input: &[f64]| Ok(input[0] * input[0] + input[1] * input[1]),
                 MyFunc::Dot => &|input: &[f64]| Ok(input[0] * input[1] + input[1] * input[1]),
                 MyFunc::Give => &|input: &[f64]| {
@@ -77,18 +82,7 @@ fn test_random() {
                         Ok(input[0])
                     }
                 },
-            })
-        };
-    }
-    let progress_bar = ProgressBar::new(10).with_style(ProgressStyle::default_bar().progress_chars("#>-"));
-    for s in 1..=10 {
-        for _ in 0..400 {
-            let (x, y, z, t) = (gen_var(), gen_var(), gen_var(), gen_var());
-            let input = generate(2usize.pow(s));
-            let tokenstream = TokenStream::new(&input).unwrap();
-            let tokentree = TokenTree::new(&tokenstream).unwrap();
-            let syntree = SyntaxTree::<f64, MyVar, MyFunc>::new(&tokentree, |_| None).unwrap();
-            let mut expr = expressify!(&syntree);
+            });
             expr.eval(|var| match var {
                 MyVar::X => x,
                 MyVar::Y => y,

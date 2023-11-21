@@ -2,7 +2,7 @@ use criterion::{
     black_box, criterion_group, criterion_main, Bencher, BenchmarkId, Criterion, Throughput,
 };
 use math_eval::{
-    optimizations::MathExpression,
+    optimizations::MathAssembly,
     syntax::{FunctionIdentifier, SyntaxTree, VariableIdentifier},
     tokenizer::{token_stream::TokenStream, token_tree::TokenTree},
 };
@@ -64,18 +64,16 @@ fn slope(input: &[f64]) -> f64 {
     (input[3] - input[1]) / (input[2] - input[0])
 }
 
-fn to_expr(input: &str) -> MathExpression<'_, f64, MyVar, ()> {
-    MathExpression::<'_, f64, MyVar, ()>::new(
-        &SyntaxTree::<f64, MyVar, MyFunc>::new(
-            &TokenTree::new(&TokenStream::new(input).unwrap()).unwrap(),
-            |_| None,
-        )
-        .unwrap(),
-        |fi: &MyFunc| match fi {
-            MyFunc::Dist => &|input: &[f64]| Ok(dist(input)),
-            MyFunc::Slope => &|input: &[f64]| Ok(slope(input)),
-        },
+fn to_expr(input: &str) -> MathAssembly<'_, f64, MyVar, ()> {
+    SyntaxTree::<f64, MyVar, MyFunc>::new(
+        &TokenTree::new(&TokenStream::new(input).unwrap()).unwrap(),
+        |_| None,
     )
+    .unwrap()
+    .to_asm(|fi: &MyFunc| match fi {
+        MyFunc::Dist => &|input: &[f64]| Ok(dist(input)),
+        MyFunc::Slope => &|input: &[f64]| Ok(slope(input)),
+    })
 }
 
 fn meval_bencher(b: &mut Bencher, input: &str) {

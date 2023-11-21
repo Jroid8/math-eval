@@ -1,11 +1,11 @@
-use indextree::NodeId;
+use indextree::{Arena, NodeId};
 use smallvec::SmallVec;
 use std::{fmt::Debug, usize};
 
 use crate::{
     number::{MathEvalNumber, NativeFunction},
     syntax::{
-        BiOperation, EvaluationError, FunctionIdentifier, SyntaxNode, SyntaxTree, UnOperation,
+        BiOperation, EvaluationError, FunctionIdentifier, SyntaxNode, UnOperation,
         VariableIdentifier,
     },
 };
@@ -68,22 +68,22 @@ where
 }
 
 #[derive(Clone)]
-pub struct MathExpression<'a, N: MathEvalNumber, V: VariableIdentifier, F> {
+pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F> {
     instructions: Vec<Instruction<'a, N, V, F>>,
     stack: Stack<N>,
 }
 
-impl<'a, N, V, F> MathExpression<'a, N, V, F>
+impl<'a, N, V, F> MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
 {
     pub fn new<I: FunctionIdentifier>(
-        syntree: &SyntaxTree<N, V, I>,
+        arena: &Arena<SyntaxNode<N, V, I>>,
+        root: NodeId,
         function_to_pointer: impl Fn(&I) -> &'a dyn Fn(&[N]) -> Result<N, F>,
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, V, F>> = Vec::new();
-        let arena = &syntree.0.arena;
         let descend_to_end = |node: NodeId| {
             node.traverse(arena)
                 .find_map(|n| match n {
@@ -97,7 +97,7 @@ where
             Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
             _ => false,
         };
-        let mut cursor = descend_to_end(syntree.0.root);
+        let mut cursor = descend_to_end(root);
 
         macro_rules! next {
             () => {
@@ -187,14 +187,20 @@ where
                 Instruction::BiOperation(_, lhs, rhs) | Instruction::NFDual(_, lhs, rhs) => {
                     input_stack_effect(lhs) + input_stack_effect(rhs)
                 }
-                Instruction::UnOperation(_, val) | Instruction::NFSingle(_, val) | Instruction::NFSingleError(_, val) => input_stack_effect(val),
-                Instruction::NFFlexible(_, arg_count) | Instruction::CustomFunction(_, arg_count) => -(*arg_count as i32),
+                Instruction::UnOperation(_, val)
+                | Instruction::NFSingle(_, val)
+                | Instruction::NFSingleError(_, val) => input_stack_effect(val),
+                Instruction::NFFlexible(_, arg_count)
+                | Instruction::CustomFunction(_, arg_count) => -(*arg_count as i32),
             } + 1;
             if stack_len > stack_capacity {
                 stack_capacity = stack_len;
             }
         }
-        MathExpression { instructions: result, stack: Stack::with_capacity(stack_capacity as usize) }
+        MathAssembly {
+            instructions: result,
+            stack: Stack::with_capacity(stack_capacity as usize),
+        }
     }
 
     pub fn eval(
@@ -315,21 +321,17 @@ mod test {
         use std::f64::consts::PI;
         macro_rules! eval {
             ($input:literal) => {
-                MathExpression::<'_, f64, MyVar, ()>::new(
-                    &SyntaxTree::<f64, MyVar, MyFunc>::new(
-                        &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
-                        |_| None,
-                    )
-                    .unwrap(),
-                    |fi: &MyFunc| match fi {
-                        MyFunc::Dist => {
-                            &|input: &[f64]| Ok((input[0] * input[0] + input[1] * input[1]).sqrt())
-                        }
-                        MyFunc::Dot => {
-                            &|input: &[f64]| Ok(input[0] * input[1] + input[1] * input[1])
-                        }
-                    },
+                crate::syntax::SyntaxTree::<f64, MyVar, MyFunc>::new(
+                    &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
+                    |_| None,
                 )
+                .unwrap()
+                .to_asm(|fi: &MyFunc| match fi {
+                    MyFunc::Dist => {
+                        &|input: &[f64]| Ok((input[0] * input[0] + input[1] * input[1]).sqrt())
+                    }
+                    MyFunc::Dot => &|input: &[f64]| Ok(input[0] * input[1] + input[1] * input[1]),
+                })
                 .eval(|var| match var {
                     MyVar::X => 1.0,
                     MyVar::Y => 8.0,
