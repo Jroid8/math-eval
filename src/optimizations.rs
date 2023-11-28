@@ -169,7 +169,7 @@ where
                 ),
             };
             result.push(instruction);
-            if parent.is_none() || cursor == root {
+            if cursor == root {
                 break;
             } else {
                 next!();
