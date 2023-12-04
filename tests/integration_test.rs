@@ -62,9 +62,10 @@ impl FunctionIdentifier for MyFunc {
 #[test]
 fn test_random() {
     let gen_var = || -> f64 {
-        fastrand::f64() * 10f64.powi(fastrand::i32(f64::MIN_10_EXP..=f64::MAX_10_EXP/5))
+        fastrand::f64() * 10f64.powi(fastrand::i32(f64::MIN_10_EXP..=f64::MAX_10_EXP / 5))
     };
-    let progress_bar = ProgressBar::new(10).with_style(ProgressStyle::default_bar().progress_chars("#>-"));
+    let progress_bar =
+        ProgressBar::new(10).with_style(ProgressStyle::default_bar().progress_chars("#>-"));
     for s in 1..=10 {
         for _ in 0..400 {
             let (x, y, z, t) = (gen_var(), gen_var(), gen_var(), gen_var());
@@ -88,7 +89,8 @@ fn test_random() {
                 MyVar::Y => y,
                 MyVar::Z => z,
                 MyVar::T => t,
-            }).unwrap();
+            })
+            .unwrap();
         }
         progress_bar.inc(1);
     }

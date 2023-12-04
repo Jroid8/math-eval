@@ -13,6 +13,7 @@ pub enum EvaluationError<N, C> {
     Custom(C),
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct DivisionByZero;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -320,24 +321,130 @@ where
     {
         let mut examin: Vec<NodeId> = Vec::new();
         for node in self.0.root.traverse(&self.0.arena) {
-            if let NodeEdge::End(syn) = node {
-                match self.0.arena[syn].get() {
+            if let NodeEdge::End(node) = node {
+                match self.0.arena[node].get() {
                     SyntaxNode::Number(_) | SyntaxNode::Variable(_) => (),
-                    _ => examin.push(syn),
+                    _ => examin.push(node),
                 }
             }
         }
         for node in examin {
-            if node
-                .children(&self.0.arena)
-                .all(|c| matches!(self.0.arena[c].get(), SyntaxNode::Number(_)))
-            {
+            if node.children(&self.0.arena).all(|c| self.is_number(c)) {
                 let answer = MathAssembly::new(&self.0.arena, node, &function_to_pointer)
                     .eval(|_| unreachable!())?;
                 *self.0.arena[node].get_mut() = SyntaxNode::Number(answer);
                 while let Some(c) = self.0.arena[node].first_child() {
                     c.remove(&mut self.0.arena);
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn is_number(&self, node: NodeId) -> bool {
+        matches!(self.0.arena[node].get(), SyntaxNode::Number(_))
+    }
+
+    pub fn displacing_simplification(&mut self) -> Result<(), DivisionByZero> {
+        self._displacing_simplification(BiOperation::Add, BiOperation::Sub, 0.0.into())
+            .and_then(|_| {
+                self._displacing_simplification(BiOperation::Mul, BiOperation::Div, 1.0.into())
+            })
+    }
+
+    fn _displacing_simplification(
+        &mut self,
+        pos: BiOperation,
+        neg: BiOperation,
+        inital_value: N,
+    ) -> Result<(), DivisionByZero> {
+        let is_targeting_opr = |node: NodeId| matches!(self.0.arena[node].get(), SyntaxNode::BiOperation(opr) if *opr == pos || *opr == neg);
+        let mut found: Vec<NodeId> = Vec::new();
+        let mul_opr = |target: BiOperation, side: usize, parent: BiOperation| {
+            if side == 0 {
+                parent
+            } else if target == parent {
+                pos
+            } else {
+                neg
+            }
+        };
+        for node in self.0.root.traverse(&self.0.arena) {
+            if let NodeEdge::End(upper) = node {
+                if is_targeting_opr(upper)
+                    && upper.children(&self.0.arena).all(|lower| {
+                        is_targeting_opr(lower)
+                            && lower
+                                .children(&self.0.arena)
+                                .any(|lowest| self.is_number(lowest))
+                            || self.is_number(lower)
+                    })
+                {
+                    found.push(upper);
+                }
+            }
+        }
+        for upper in found {
+            let SyntaxNode::BiOperation(upper_opr) = self.0.arena[upper].get() else {
+                panic!();
+            };
+            let mut symbols: [Option<(NodeId, bool)>; 2] = [None, None];
+            let mut lhs = inital_value;
+            for (upper_side, lower) in upper.children(&self.0.arena).enumerate() {
+                match self.0.arena[lower].get() {
+                    SyntaxNode::BiOperation(lower_opr) => {
+                        for (lower_side, lowest) in lower.children(&self.0.arena).enumerate() {
+                            let opr = mul_opr(
+                                *lower_opr,
+                                lower_side,
+                                if upper_side == 0 { pos } else { *upper_opr },
+                            );
+                            match self.0.arena[lowest].get() {
+                                SyntaxNode::Number(value) => lhs = opr.eval(lhs, *value)?,
+                                _ => {
+                                    symbols[symbols[0].is_some() as usize] =
+                                        Some((lowest, opr == neg))
+                                }
+                            }
+                        }
+                    }
+                    SyntaxNode::Number(value) => {
+                        lhs = (mul_opr(*upper_opr, upper_side, pos)).eval(lhs, *value)?
+                    }
+                    _ => panic!(),
+                }
+            }
+            let symb1 = symbols[0].unwrap();
+            symb1.0.detach(&mut self.0.arena);
+            if let Some((sym, _)) = symbols[1] {
+                sym.detach(&mut self.0.arena);
+            }
+            while let Some(child) = upper.children(&self.0.arena).next() {
+                child.remove_subtree(&mut self.0.arena);
+            }
+            upper.append_value(SyntaxNode::Number(lhs), &mut self.0.arena);
+            if let Some(symb2) = symbols[1] {
+                if symb1.1 == symb2.1 {
+                    *self.0.arena[upper].get_mut() =
+                        SyntaxNode::BiOperation(if symb1.1 { neg } else { pos });
+                    let lower = upper.append_value(SyntaxNode::BiOperation(pos), &mut self.0.arena);
+                    lower.append(symb1.0, &mut self.0.arena);
+                    lower.append(symb2.0, &mut self.0.arena);
+                } else {
+                    *self.0.arena[upper].get_mut() = SyntaxNode::BiOperation(pos);
+                    let lower = upper.append_value(SyntaxNode::BiOperation(neg), &mut self.0.arena);
+                    if symb2.1 {
+                        lower.append(symb1.0, &mut self.0.arena);
+                        lower.append(symb2.0, &mut self.0.arena);
+                    } else {
+                        lower.append(symb2.0, &mut self.0.arena);
+                        lower.append(symb1.0, &mut self.0.arena);
+                    }
+                }
+            } else {
+                *self.0.arena[upper].get_mut() =
+                    SyntaxNode::BiOperation(if symb1.1 { neg } else { pos });
+                upper.append(symb1.0, &mut self.0.arena);
             }
         }
         Ok(())
@@ -525,18 +632,55 @@ mod test {
                 let mut syn1 = SyntaxTree::<f64, CustomVar, ()>::new(
                     &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
                     |_| None,
-                ).unwrap();
+                )
+                .unwrap();
                 syn1.aot_evaluation(|_| &|_| Ok(0.0)).unwrap();
                 let syn2 = SyntaxTree::<f64, CustomVar, ()>::new(
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
                     |_| None,
-                ).unwrap();
-                assert_eq!(format!("{:?}",syn1.0.root.debug_pretty_print(&syn1.0.arena)), format!("{:?}",syn2.0.root.debug_pretty_print(&syn2.0.arena)));
+                )
+                .unwrap();
+                assert_eq!(
+                    format!("{:?}", syn1.0.root.debug_pretty_print(&syn1.0.arena)),
+                    format!("{:?}", syn2.0.root.debug_pretty_print(&syn2.0.arena))
+                );
             };
         }
         compare!("16/8+11", "13");
         compare!("sqrt(0)", "0");
         compare!("sin(1/8+t)", "sin(0.125+t)");
-        compare!("max(80/5, x^2, min(1,sin(0)))+sqrt(121)", "max(16, x^2, 0)+11");
+        compare!(
+            "max(80/5, x^2, min(1,sin(0)))+sqrt(121)",
+            "max(16, x^2, 0)+11"
+        );
+    }
+
+    #[test]
+    fn test_displacing_simplification() {
+        macro_rules! compare {
+            ($i1:literal, $i2:literal) => {
+                let mut syn1 = SyntaxTree::<f64, CustomVar, ()>::new(
+                    &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
+                    |_| None,
+                )
+                .unwrap();
+                syn1.displacing_simplification().unwrap();
+                let syn2 = SyntaxTree::<f64, CustomVar, ()>::new(
+                    &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
+                    |_| None,
+                )
+                .unwrap();
+                assert_eq!(
+                    format!("{:?}", syn1.0.root.debug_pretty_print(&syn1.0.arena)),
+                    format!("{:?}", syn2.0.root.debug_pretty_print(&syn2.0.arena))
+                );
+            };
+        }
+        compare!("x/1/8", "0.125*x");
+        compare!("(x/16)/(y*4)", "0.015625*(x/y)");
+        compare!("(7/x)/(y/2)", "14/(x*y)");
+        compare!("(x/4)/(4/y)", "0.0625*(x*y)");
+        compare!("10-x+12", "22-x");
+        compare!("x*pi*2", "6.283185307179586*x");
     }
 }

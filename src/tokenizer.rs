@@ -58,8 +58,8 @@ pub mod token_stream {
 pub mod token_tree {
     use indextree::Arena;
 
-    use crate::tree_utils::Tree;
     use crate::tokenizer::token_stream::{Token, TokenStream};
+    use crate::tree_utils::Tree;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum TokenNode<'a> {
@@ -133,10 +133,7 @@ pub mod token_tree {
                 }
             }
             if current_node == root {
-                Ok(TokenTree(Tree {
-                    arena,
-                    root,
-                }))
+                Ok(TokenTree(Tree { arena, root }))
             } else {
                 Err(TokenTreeError::MissingCloseParenthesis)
             }

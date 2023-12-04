@@ -50,7 +50,7 @@ pub(crate) fn construct<A, R, E>(
 #[derive(Debug, Clone)]
 pub struct Tree<T> {
     pub arena: Arena<T>,
-    pub root: NodeId
+    pub root: NodeId,
 }
 
 #[cfg(test)]
