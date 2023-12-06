@@ -6,7 +6,7 @@ use math_eval::{
     tokenizer::{token_stream::TokenStream, token_tree::TokenTree},
 };
 use meval::{Context, Expr};
-use std::cmp::min;
+use std::{cmp::min, time::Duration};
 
 #[derive(Clone, Debug, Copy)]
 enum MyVar {
@@ -78,11 +78,13 @@ macro_rules! to_expr {
         )
         .unwrap();
         expr.aot_evaluation(custom_functions).unwrap();
+        expr.displacing_simplification().unwrap();
+        expr.aot_evaluation(custom_functions).unwrap();
         expr.to_asm(custom_functions)
     }};
 }
 
-fn meval_bencher(b: &mut Bencher, input: &str) {
+fn meval_bencher(b: &mut Bencher<'_>, input: &str) {
     let mut context = Context::new();
     context.funcn("dist", dist, 2);
     context.funcn("slope", slope, 4);
@@ -101,7 +103,7 @@ fn meval_bencher(b: &mut Bencher, input: &str) {
     })
 }
 
-fn matheval_bencher(b: &mut Bencher, input: &str) {
+fn matheval_bencher(b: &mut Bencher<'_>, input: &str) {
     let mut expr = to_expr!(input);
     let (mut x, mut y, mut t) = (0.0, 0.0, 0.0);
     b.iter(|| {
@@ -136,6 +138,7 @@ fn get_throughput(input: &str) -> u64 {
 
 fn hardcoded(crit: &mut Criterion) {
     let mut group = crit.benchmark_group("Hardcoded");
+    group.measurement_time(Duration::from_secs(10));
     for input in MATH_EXPRESSIONS {
         group.bench_with_input(
             BenchmarkId::new("math-eval", input.1),
@@ -149,8 +152,9 @@ fn hardcoded(crit: &mut Criterion) {
 
 fn random(crit: &mut Criterion) {
     let mut group = crit.benchmark_group("Random");
-    fastrand::seed(2606283414);
-    for size in (2usize..=12).map(|i| i.pow(2)) {
+    group.measurement_time(Duration::from_secs(10));
+    fastrand::seed(3072918474);
+    for size in (2usize..=15).map(|i| i.pow(2)) {
         let input = generate(size);
         let name = format!("{size}:{}", &input[..min(input.len(), 20)]);
         group.throughput(Throughput::Elements(get_throughput(&input)));

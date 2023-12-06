@@ -59,6 +59,20 @@ impl FunctionIdentifier for MyFunc {
     }
 }
 
+fn custom_functions<'a>(fi: &MyFunc) -> &'a dyn Fn(&[f64]) -> Result<f64,IllegalValue> {
+    match fi {
+        MyFunc::Dist => &|input: &[f64]| Ok(input[0] * input[0] + input[1] * input[1]),
+        MyFunc::Dot => &|input: &[f64]| Ok(input[0] * input[1] + input[1] * input[1]),
+        MyFunc::Give => &|input: &[f64]| {
+            if input[0] == -333.0 {
+                Err(IllegalValue)
+            } else {
+                Ok(input[0])
+            }
+        },
+    }
+}
+
 #[test]
 fn test_random() {
     let gen_var = || -> f64 {
@@ -72,18 +86,11 @@ fn test_random() {
             let input = generate(2usize.pow(s));
             let tokenstream = TokenStream::new(&input).unwrap();
             let tokentree = TokenTree::new(&tokenstream).unwrap();
-            let syntree = SyntaxTree::<f64, MyVar, MyFunc>::new(&tokentree, |_| None).unwrap();
-            let mut expr = syntree.to_asm(|fi: &MyFunc| match fi {
-                MyFunc::Dist => &|input: &[f64]| Ok(input[0] * input[0] + input[1] * input[1]),
-                MyFunc::Dot => &|input: &[f64]| Ok(input[0] * input[1] + input[1] * input[1]),
-                MyFunc::Give => &|input: &[f64]| {
-                    if input[0] == -333.0 {
-                        Err(IllegalValue)
-                    } else {
-                        Ok(input[0])
-                    }
-                },
-            });
+            let mut syntree = SyntaxTree::<f64, MyVar, MyFunc>::new(&tokentree, |_| None).unwrap();
+            syntree.aot_evaluation(custom_functions).unwrap();
+            syntree.displacing_simplification().unwrap();
+            syntree.aot_evaluation(custom_functions).unwrap();
+            let mut expr = syntree.to_asm(custom_functions);
             expr.eval(|var| match var {
                 MyVar::X => x,
                 MyVar::Y => y,
