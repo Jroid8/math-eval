@@ -97,39 +97,6 @@ impl NativeFunction {
     }
 }
 
-impl Display for NativeFunction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                NativeFunction::Sin => "sin",
-                NativeFunction::Cos => "cos",
-                NativeFunction::Tan => "tan",
-                NativeFunction::Cot => "cot",
-                NativeFunction::Asin => "asin",
-                NativeFunction::Acos => "acos",
-                NativeFunction::Atan => "atan",
-                NativeFunction::Acot => "acot",
-                NativeFunction::Log => "log",
-                NativeFunction::Ln => "ln",
-                NativeFunction::Exp => "exp",
-                NativeFunction::Floor => "floor",
-                NativeFunction::Ceil => "ceil",
-                NativeFunction::Round => "round",
-                NativeFunction::Trunc => "trunc",
-                NativeFunction::Frac => "frac",
-                NativeFunction::Abs => "abs",
-                NativeFunction::Sign => "sign",
-                NativeFunction::Sqrt => "sqrt",
-                NativeFunction::Cbrt => "cbrt",
-                NativeFunction::Max => "max",
-                NativeFunction::Min => "min",
-            }
-        )
-    }
-}
-
 // don't forget to #[inline]
 pub trait MathEvalNumber:
     Add<Output = Self>
@@ -141,6 +108,7 @@ pub trait MathEvalNumber:
     + FromStr
     + Neg<Output = Self>
     + Copy
+    + Debug
     + 'static
 {
     type Error;

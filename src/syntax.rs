@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 
 use crate::number::{MathEvalNumber, NativeFunction};
 use crate::optimizations::MathAssembly;
@@ -90,13 +90,7 @@ impl BiOperation {
     }
 }
 
-impl Display for BiOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_char())
-    }
-}
-
-pub trait VariableIdentifier: Clone + Debug {
+pub trait VariableIdentifier: Clone {
     fn parse(input: &str) -> Option<Self>;
 }
 
@@ -106,7 +100,7 @@ impl VariableIdentifier for () {
     }
 }
 
-pub trait FunctionIdentifier: Copy + Eq {
+pub trait FunctionIdentifier: Clone + Eq {
     type Error;
 
     fn parse(input: &str) -> Option<Self>;
@@ -212,11 +206,9 @@ where
                             .map(|nf| (SyntaxNode::NativeFunction(nf), 1, None))
                             .or_else(|| {
                                 F::parse(func).map(|cf| {
-                                    (
-                                        SyntaxNode::CustomFunction(cf),
-                                        cf.minimum_arg_count(),
-                                        cf.maximum_arg_count(),
-                                    )
+                                    let (min, max) =
+                                        (cf.minimum_arg_count(), cf.maximum_arg_count());
+                                    (SyntaxNode::CustomFunction(cf), min, max)
                                 })
                             }) {
                             Some((f, min_args, max_args)) => {
@@ -308,7 +300,7 @@ where
     pub fn to_asm<'a>(
         &self,
         function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>,
-    ) -> MathAssembly<'a, N, V, F::Error> {
+    ) -> MathAssembly<'a, N, V, F> {
         MathAssembly::new(&self.0.arena, self.0.root, function_to_pointer)
     }
 

@@ -34,22 +34,47 @@ where
     }
 }
 
-pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F> {
+pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
     Source(Input<N, V>),
     BiOperation(BiOperation, Input<N, V>, Input<N, V>),
     UnOperation(UnOperation, Input<N, V>),
-    NFSingle(fn(N) -> N, Input<N, V>),
-    NFSingleError(fn(N) -> Result<N, N::Error>, Input<N, V>),
-    NFDual(fn(N, N) -> Result<N, N::Error>, Input<N, V>, Input<N, V>),
-    NFFlexible(fn(&[N]) -> N, u8),
-    CustomFunction(&'a dyn Fn(&[N]) -> Result<N, F>, u8),
+    NFSingle(fn(N) -> N, Input<N, V>, NativeFunction),
+    NFSingleError(fn(N) -> Result<N, N::Error>, Input<N, V>, NativeFunction),
+    NFDual(
+        fn(N, N) -> Result<N, N::Error>,
+        Input<N, V>,
+        Input<N, V>,
+        NativeFunction,
+    ),
+    NFFlexible(fn(&[N]) -> N, u8, NativeFunction),
+    CustomFunction(&'a dyn Fn(&[N]) -> Result<N, F::Error>, u8, F),
+}
+
+impl<N, V, F> Debug for Instruction<'_, N, V, F>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier + Debug,
+    F: FunctionIdentifier + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Source(arg0) => f.debug_tuple("Source").field(arg0).finish(),
+            Self::BiOperation(arg0, arg1, arg2) => f.debug_tuple("BiOperation").field(arg0).field(arg1).field(arg2).finish(),
+            Self::UnOperation(arg0, arg1) => f.debug_tuple("UnOperation").field(arg0).field(arg1).finish(),
+            Self::NFSingle(_, arg1, arg2) => f.debug_tuple("NFSingle").field(arg2).field(arg1).finish(),
+            Self::NFSingleError(_, arg1, arg2) => f.debug_tuple("NFSingleError").field(arg2).field(arg1).finish(),
+            Self::NFDual(_, arg1, arg2, arg3) => f.debug_tuple("NFDual").field(arg3).field(arg1).field(arg2).finish(),
+            Self::NFFlexible(_, arg1, arg2) => f.debug_tuple("NFFlexible").field(arg2).field(arg1).finish(),
+            Self::CustomFunction(_, arg1, arg2) => f.debug_tuple("CustomFunction").field(arg2).field(arg1).finish(),
+        }
+    }
 }
 
 impl<N, V, F> Clone for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
-    F: Clone,
+    F: FunctionIdentifier,
 {
     fn clone(&self) -> Self {
         match self {
@@ -58,30 +83,50 @@ where
                 Self::BiOperation(*arg0, arg1.clone(), arg2.clone())
             }
             Self::UnOperation(arg0, arg1) => Self::UnOperation(*arg0, arg1.clone()),
-            Self::NFSingle(arg0, arg1) => Self::NFSingle(*arg0, arg1.clone()),
-            Self::NFSingleError(arg0, arg1) => Self::NFSingleError(*arg0, arg1.clone()),
-            Self::NFDual(arg0, arg1, arg2) => Self::NFDual(*arg0, arg1.clone(), arg2.clone()),
-            Self::NFFlexible(arg0, arg1) => Self::NFFlexible(*arg0, *arg1),
-            Self::CustomFunction(arg0, arg1) => Self::CustomFunction(*arg0, *arg1),
+            Self::NFSingle(arg0, arg1, arg2) => Self::NFSingle(*arg0, arg1.clone(), *arg2),
+            Self::NFSingleError(arg0, arg1, arg2) => {
+                Self::NFSingleError(*arg0, arg1.clone(), *arg2)
+            }
+            Self::NFDual(arg0, arg1, arg2, arg3) => {
+                Self::NFDual(*arg0, arg1.clone(), arg2.clone(), *arg3)
+            }
+            Self::NFFlexible(arg0, arg1, arg2) => Self::NFFlexible(*arg0, *arg1, *arg2),
+            Self::CustomFunction(arg0, arg1, arg2) => {
+                Self::CustomFunction(*arg0, *arg1, arg2.clone())
+            }
         }
     }
 }
 
 #[derive(Clone)]
-pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F> {
+pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
     instructions: Vec<Instruction<'a, N, V, F>>,
     stack: Stack<N>,
 }
 
+impl<'a, N, V, F> Debug for MathAssembly<'a, N, V, F>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier + Debug,
+    F: FunctionIdentifier + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for line in &self.instructions {
+            writeln!(f, "{line:?}")?
+        }
+        Ok(())
+    }
+}
 impl<'a, N, V, F> MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
+    F: FunctionIdentifier,
 {
-    pub fn new<I: FunctionIdentifier>(
-        arena: &Arena<SyntaxNode<N, V, I>>,
+    pub fn new(
+        arena: &Arena<SyntaxNode<N, V, F>>,
         root: NodeId,
-        function_to_pointer: impl Fn(&I) -> &'a dyn Fn(&[N]) -> Result<N, F>,
+        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>,
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, V, F>> = Vec::new();
         let descend_to_end = |node: NodeId| {
@@ -143,7 +188,7 @@ where
                 }
                 SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
                     crate::number::NFPointer::Single(p) => {
-                        Instruction::NFSingle(p, children_as_input.next().unwrap())
+                        Instruction::NFSingle(p, children_as_input.next().unwrap(), *nf)
                     }
                     crate::number::NFPointer::Dual(p) => Instruction::NFDual(
                         p,
@@ -155,17 +200,19 @@ where
                             } else {
                                 panic!()
                             }),
+                        *nf,
                     ),
                     crate::number::NFPointer::SingleWithError(p) => {
-                        Instruction::NFSingleError(p, children_as_input.next().unwrap())
+                        Instruction::NFSingleError(p, children_as_input.next().unwrap(), *nf)
                     }
                     crate::number::NFPointer::Flexible(p) => {
-                        Instruction::NFFlexible(p, cursor.children(arena).count() as u8)
+                        Instruction::NFFlexible(p, cursor.children(arena).count() as u8, *nf)
                     }
                 },
                 SyntaxNode::CustomFunction(cf) => Instruction::CustomFunction(
                     function_to_pointer(cf),
                     cursor.children(arena).count() as u8,
+                    cf.clone(),
                 ),
             };
             result.push(instruction);
@@ -184,14 +231,14 @@ where
         for instr in &result {
             stack_len += match instr {
                 Instruction::Source(_) => 0,
-                Instruction::BiOperation(_, lhs, rhs) | Instruction::NFDual(_, lhs, rhs) => {
+                Instruction::BiOperation(_, lhs, rhs) | Instruction::NFDual(_, lhs, rhs, _) => {
                     input_stack_effect(lhs) + input_stack_effect(rhs)
                 }
                 Instruction::UnOperation(_, val)
-                | Instruction::NFSingle(_, val)
-                | Instruction::NFSingleError(_, val) => input_stack_effect(val),
-                Instruction::NFFlexible(_, arg_count)
-                | Instruction::CustomFunction(_, arg_count) => -(*arg_count as i32),
+                | Instruction::NFSingle(_, val, _)
+                | Instruction::NFSingleError(_, val, _) => input_stack_effect(val),
+                Instruction::NFFlexible(_, arg_count, _)
+                | Instruction::CustomFunction(_, arg_count, _) => -(*arg_count as i32),
             } + 1;
             if stack_len > stack_capacity {
                 stack_capacity = stack_len;
@@ -206,7 +253,7 @@ where
     pub fn eval(
         &mut self,
         variable_substituter: impl Fn(&V) -> N,
-    ) -> Result<N, EvaluationError<N::Error, F>> {
+    ) -> Result<N, EvaluationError<N::Error, F::Error>> {
         self.stack.clear();
         for instr in &self.instructions {
             let result = match &instr {
@@ -227,17 +274,17 @@ where
                         return Err(EvaluationError::DivisionByZero);
                     }
                 }
-                Instruction::NFSingle(func, input) => {
+                Instruction::NFSingle(func, input, _) => {
                     let input = input.get(&variable_substituter, &mut self.stack);
                     func(input)
                 }
-                Instruction::NFSingleError(func, input) => {
+                Instruction::NFSingleError(func, input, _) => {
                     match func(input.get(&variable_substituter, &mut self.stack)) {
                         Ok(result) => result,
                         Err(e) => return Err(EvaluationError::NumberTypeSpecific(e)),
                     }
                 }
-                Instruction::NFDual(func, inp1, inp2) => {
+                Instruction::NFDual(func, inp1, inp2, _) => {
                     match func(
                         inp1.get(&variable_substituter, &mut self.stack),
                         inp2.get(&variable_substituter, &mut self.stack),
@@ -246,13 +293,13 @@ where
                         Err(e) => return Err(EvaluationError::NumberTypeSpecific(e)),
                     }
                 }
-                Instruction::NFFlexible(func, arg_count) => {
+                Instruction::NFFlexible(func, arg_count, _) => {
                     let arg_count = *arg_count as usize;
                     let result = func(&self.stack[self.stack.len() - arg_count..]);
                     self.stack.truncate(self.stack.len() - arg_count);
                     result
                 }
-                Instruction::CustomFunction(func, arg_count) => {
+                Instruction::CustomFunction(func, arg_count, _) => {
                     let arg_count = *arg_count as usize;
                     let result = match func(&self.stack[self.stack.len() - arg_count..]) {
                         Ok(res) => res,
