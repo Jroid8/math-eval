@@ -1,4 +1,5 @@
 use indextree::{Arena, NodeId};
+use std::fmt::Debug;
 
 pub(crate) fn construct<A, R, E>(
     inital_args: A,
@@ -47,10 +48,19 @@ pub(crate) fn construct<A, R, E>(
     Ok((arena, header.unwrap()))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Tree<T> {
     pub arena: Arena<T>,
     pub root: NodeId,
+}
+
+impl<T> Debug for Tree<T>
+where
+    T: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.root.debug_pretty_print(&self.arena))
+    }
 }
 
 #[cfg(test)]
@@ -76,18 +86,6 @@ where
             Self::Leaf(t)
         }
     }
-    // pub(crate) fn into_itertree(&self, arena: &mut Arena<T>) -> NodeId {
-    //     match self {
-    //         VecTree::Leaf(end_node) => arena.new_node(end_node.clone()),
-    //         VecTree::Branch(node, branches) => {
-    //             let node = arena.new_node(node.clone());
-    //             for b in branches {
-    //                 node.append(b.into_itertree(arena), arena);
-    //             }
-    //             node
-    //         }
-    //     }
-    // }
 }
 
 #[cfg(test)]
