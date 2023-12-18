@@ -59,7 +59,7 @@ impl FunctionIdentifier for MyFunc {
     }
 }
 
-fn custom_functions<'a>(fi: &MyFunc) -> &'a dyn Fn(&[f64]) -> Result<f64,IllegalValue> {
+fn custom_functions<'a>(fi: &MyFunc) -> &'a dyn Fn(&[f64]) -> Result<f64, IllegalValue> {
     match fi {
         MyFunc::Dist => &|input: &[f64]| Ok(input[0] * input[0] + input[1] * input[1]),
         MyFunc::Dot => &|input: &[f64]| Ok(input[0] * input[1] + input[1] * input[1]),

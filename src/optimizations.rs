@@ -59,13 +59,39 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Source(arg0) => f.debug_tuple("Source").field(arg0).finish(),
-            Self::BiOperation(arg0, arg1, arg2) => f.debug_tuple("BiOperation").field(arg0).field(arg1).field(arg2).finish(),
-            Self::UnOperation(arg0, arg1) => f.debug_tuple("UnOperation").field(arg0).field(arg1).finish(),
-            Self::NFSingle(_, arg1, arg2) => f.debug_tuple("NFSingle").field(arg2).field(arg1).finish(),
-            Self::NFSingleError(_, arg1, arg2) => f.debug_tuple("NFSingleError").field(arg2).field(arg1).finish(),
-            Self::NFDual(_, arg1, arg2, arg3) => f.debug_tuple("NFDual").field(arg3).field(arg1).field(arg2).finish(),
-            Self::NFFlexible(_, arg1, arg2) => f.debug_tuple("NFFlexible").field(arg2).field(arg1).finish(),
-            Self::CustomFunction(_, arg1, arg2) => f.debug_tuple("CustomFunction").field(arg2).field(arg1).finish(),
+            Self::BiOperation(arg0, arg1, arg2) => f
+                .debug_tuple("BiOperation")
+                .field(arg0)
+                .field(arg1)
+                .field(arg2)
+                .finish(),
+            Self::UnOperation(arg0, arg1) => f
+                .debug_tuple("UnOperation")
+                .field(arg0)
+                .field(arg1)
+                .finish(),
+            Self::NFSingle(_, arg1, arg2) => {
+                f.debug_tuple("NFSingle").field(arg2).field(arg1).finish()
+            }
+            Self::NFSingleError(_, arg1, arg2) => f
+                .debug_tuple("NFSingleError")
+                .field(arg2)
+                .field(arg1)
+                .finish(),
+            Self::NFDual(_, arg1, arg2, arg3) => f
+                .debug_tuple("NFDual")
+                .field(arg3)
+                .field(arg1)
+                .field(arg2)
+                .finish(),
+            Self::NFFlexible(_, arg1, arg2) => {
+                f.debug_tuple("NFFlexible").field(arg2).field(arg1).finish()
+            }
+            Self::CustomFunction(_, arg1, arg2) => f
+                .debug_tuple("CustomFunction")
+                .field(arg2)
+                .field(arg1)
+                .finish(),
         }
     }
 }
