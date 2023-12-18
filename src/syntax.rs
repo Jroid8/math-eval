@@ -199,7 +199,7 @@ where
                             .map(Some)
                             .ok_or(SyntaxError::UnknownVariableOrConstant),
                         TokenNode::Parentheses => {
-                            call_stack.push(((current_node, None, None), None));
+                            call_stack.push((current_node, None, None));
                             Ok(None)
                         }
                         TokenNode::Function(func) => match NativeFunction::parse(func)
@@ -224,7 +224,7 @@ where
                                         current_node
                                             .children(arena)
                                             .enumerate()
-                                            .map(|(_, id)| ((id, None, None), None)),
+                                            .map(|(_, id)| (id, None, None)),
                                     );
                                     Ok(Some(f))
                                 }
@@ -244,9 +244,8 @@ where
                                 if !matches!(arena[last].get(), TokenNode::Operation(_))
                                     && !matches!(arena[token].get(), TokenNode::Operation(_))
                                 {
-                                    call_stack.push(((token_node, Some(start), Some(index)), None));
-                                    call_stack
-                                        .push(((token_node, Some(index + 1), Some(end)), None));
+                                    call_stack.push((token_node, Some(start), Some(index)));
+                                    call_stack.push((token_node, Some(index + 1), Some(end)));
                                     return Ok(Some(SyntaxNode::BiOperation(BiOperation::Mul)));
                                 }
                                 last = token;
@@ -261,13 +260,11 @@ where
                             return if index == 0 {
                                 match opr {
                                     BiOperation::Add => {
-                                        call_stack
-                                            .push(((token_node, Some(start + 1), Some(end)), None));
+                                        call_stack.push((token_node, Some(start + 1), Some(end)));
                                         Ok(None)
                                     }
                                     BiOperation::Sub => {
-                                        call_stack
-                                            .push(((token_node, Some(start + 1), Some(end)), None));
+                                        call_stack.push((token_node, Some(start + 1), Some(end)));
                                         Ok(Some(SyntaxNode::UnOperation(UnOperation::Neg)))
                                     }
                                     _ => Err((SyntaxError::MisplacedOperator, token_node)),
@@ -275,8 +272,8 @@ where
                             } else if index == end {
                                 Err((SyntaxError::MisplacedOperator, token_node))
                             } else {
-                                call_stack.push(((token_node, Some(start), Some(index - 1)), None));
-                                call_stack.push(((token_node, Some(index + 1), Some(end)), None));
+                                call_stack.push((token_node, Some(start), Some(index - 1)));
+                                call_stack.push((token_node, Some(index + 1), Some(end)));
                                 Ok(Some(SyntaxNode::BiOperation(opr)))
                             };
                         }
@@ -285,7 +282,7 @@ where
                         && *arena[token_node.children(arena).nth(end - 1).unwrap()].get()
                             == TokenNode::Operation('!')
                     {
-                        call_stack.push(((token_node, Some(start), Some(end - 1)), None));
+                        call_stack.push((token_node, Some(start), Some(end - 1)));
                         Ok(Some(SyntaxNode::UnOperation(UnOperation::Fac)))
                     } else {
                         Err((SyntaxError::MisplacedOperator, token_node))
@@ -294,7 +291,7 @@ where
             },
             None,
         )
-        .map(|(arena, node)| SyntaxTree(Tree { arena, root: node }))
+        .map(|tree| SyntaxTree(tree))
     }
 
     pub fn to_asm<'a>(

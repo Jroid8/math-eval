@@ -3,15 +3,20 @@ use std::fmt::Debug;
 
 pub(crate) fn construct<A, R, E>(
     inital_args: A,
-    recur_func: impl Fn(A, &mut Vec<(A, Option<Box<dyn Fn(E) -> E>>)>) -> Result<Option<R>, E>,
+    recur_func: impl Fn(A, &mut Vec<A>) -> Result<Option<R>, E>,
     arena: Option<Arena<R>>,
-) -> Result<(Arena<R>, NodeId), E> {
+) -> Result<Tree<R>, E> {
+    // anyone can convert a recursive algorithm to an iterative one by knowing why and where they need recursion
+    // In my case I needed recursion to prepare the children of every node before constructing the parent.
+    // local variables where only used to pass the right arguments to itself, and the result was never transformed.
+    // this function is a recursion simulator that gives me these features without actual recursion
     let mut arena = arena.unwrap_or_default();
-    let mut call_stack = vec![(inital_args, None)];
+    let mut call_stack = vec![inital_args];
+    // stores nodes that are waiting for their children to be prepared and attached, and also the number of children it needs
+    // each node is the parent of every node that comes after it
     let mut result_stack: Vec<(NodeId, usize)> = Vec::new();
     let mut header = None;
-    let mut stack_trace: Vec<Box<dyn Fn(E) -> E>> = Vec::new();
-    while let Some((current_call, error_modifier)) = call_stack.pop() {
+    while let Some(current_call) = call_stack.pop() {
         let prev_len = call_stack.len();
         match recur_func(current_call, &mut call_stack) {
             Ok(Some(result)) => {
@@ -20,32 +25,27 @@ pub(crate) fn construct<A, R, E>(
                     node.prepend(result_node, &mut arena);
                     if node.children(&arena).count() == *req {
                         result_stack.pop();
-                        stack_trace.pop();
                     }
                 } else {
                     header = Some(result_node);
                 }
                 let req_children = call_stack.len() - prev_len;
+                // if the size of the call stack is increased then this node must be waiting for it's children
                 if req_children > 0 {
                     result_stack.push((result_node, req_children));
-                    if let Some(error_modifier) = error_modifier {
-                        stack_trace.push(error_modifier);
-                    }
                 }
             }
+            // in some cases like (x) or +x, the function just calls itself again and directly returns it's result
             Ok(None) => (),
             Err(e) => {
-                return Err(stack_trace.iter().fold(
-                    match error_modifier {
-                        Some(em) => em(e),
-                        None => e,
-                    },
-                    |acc, f| f(acc),
-                ));
+                return Err(e);
             }
         }
     }
-    Ok((arena, header.unwrap()))
+    Ok(Tree {
+        arena,
+        root: header.unwrap(),
+    })
 }
 
 #[derive(Clone)]
@@ -60,6 +60,16 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.root.debug_pretty_print(&self.arena))
+    }
+}
+
+#[cfg(test)]
+impl<T> Tree<T>
+where
+    T: Clone,
+{
+    fn to_vectree(&self) -> VecTree<T> {
+        VecTree::new(&self.arena, self.root)
     }
 }
 
@@ -184,30 +194,25 @@ mod test {
     fn test_construct() {
         macro_rules! create {
             ($input:expr) => {{
-                super::construct::<&Input, Tree, usize>(
+                super::construct::<&Input, Tree, ()>(
                     &$input,
                     |input, cs| match input {
                         Input::A(v) => {
-                            cs.extend(v.iter().enumerate().map(|(i, a)| {
-                                (
-                                    a,
-                                    Some(Box::new(move |e| e + i) as Box<dyn Fn(usize) -> usize>),
-                                )
-                            }));
+                            cs.extend(v);
                             Ok(Some(Tree::A))
                         }
                         Input::B(a, b) => {
-                            cs.push((a, None));
-                            cs.push((b, Some(Box::new(|e| e + 1))));
+                            cs.push(a);
+                            cs.push(b);
                             Ok(Some(Tree::B))
                         }
                         Input::C(c) => {
-                            cs.push((c, None));
+                            cs.push(c);
                             Ok(None)
                         }
                         Input::End(i) => {
                             if *i == 999 {
-                                Err(0)
+                                Err(())
                             } else {
                                 Ok(Some(Tree::End(*i)))
                             }
@@ -215,7 +220,7 @@ mod test {
                     },
                     None,
                 )
-                .map(|(arena, node)| VecTree::new(&arena, node))
+                .map(|tree| tree.to_vectree())
             }};
         }
 
@@ -300,76 +305,6 @@ mod test {
                 )
             )
         );
-
-        assert_eq!(create!(Input::End(999)), Err(0));
-        assert_eq!(
-            create!(Input::B(Box::new(Input::End(1)), Box::new(Input::End(999)))),
-            Err(1)
-        );
-        assert_eq!(
-            create!(Input::B(
-                Box::new(Input::End(1)),
-                Box::new(Input::B(
-                    Box::new(Input::End(111)),
-                    Box::new(Input::End(999)),
-                ))
-            )),
-            Err(2)
-        );
-        assert_eq!(
-            create!(Input::A(vec![
-                Input::End(1),
-                Input::End(2),
-                Input::End(999)
-            ])),
-            Err(2)
-        );
-        assert_eq!(
-            create!(Input::A(vec![
-                Input::End(1),
-                Input::End(3),
-                Input::B(Box::new(Input::End(999)), Box::new(Input::End(1))),
-                Input::End(6),
-            ])),
-            Err(2)
-        );
-        assert_eq!(
-            create!(Input::A(vec![
-                Input::End(1),
-                Input::End(7),
-                Input::B(Box::new(Input::End(1)), Box::new(Input::End(999))),
-                Input::End(34),
-                Input::End(0),
-            ])),
-            Err(3)
-        );
-        assert_eq!(
-            create!(Input::A(vec![
-                Input::End(1),
-                Input::End(7),
-                Input::End(34),
-                Input::A(vec![
-                    Input::End(321),
-                    Input::End(31),
-                    Input::A(vec![Input::End(448), Input::End(999)])
-                ]),
-                Input::End(0),
-            ])),
-            Err(6)
-        );
-        assert_eq!(
-            create!(Input::A(vec![
-                Input::B(Box::new(Input::End(1)), Box::new(Input::End(9))),
-                Input::B(Box::new(Input::End(1)), Box::new(Input::End(9))),
-                Input::B(Box::new(Input::End(1)), Box::new(Input::End(9))),
-                Input::A(vec![
-                    Input::End(321),
-                    Input::A(vec![Input::End(448), Input::End(999)]),
-                    Input::End(31),
-                ]),
-                Input::B(Box::new(Input::End(1)), Box::new(Input::End(9))),
-            ])),
-            Err(5)
-        );
+        assert_eq!(create!(Input::End(999)), Err(()));
     }
 }
