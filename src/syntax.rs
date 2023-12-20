@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 use crate::number::{MathEvalNumber, NativeFunction};
 use crate::optimizations::MathAssembly;
@@ -28,6 +28,19 @@ impl UnOperation {
             UnOperation::Fac => value.factorial(),
             UnOperation::Neg => Ok(-value),
         }
+    }
+
+    pub fn as_char(&self) -> char {
+        match self {
+            UnOperation::Fac => '!',
+            UnOperation::Neg => '-',
+        }
+    }
+}
+
+impl Display for UnOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_char())
     }
 }
 
@@ -87,6 +100,12 @@ impl BiOperation {
             BiOperation::Pow => '^',
             BiOperation::Mod => '%',
         }
+    }
+}
+
+impl Display for BiOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_char())
     }
 }
 
@@ -440,6 +459,56 @@ where
     }
 }
 
+impl<V, N, F> Display for SyntaxTree<N, V, F>
+where
+    N: MathEvalNumber + Display,
+    V: VariableIdentifier + Display,
+    F: FunctionIdentifier + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for edge in self.0.root.traverse(&self.0.arena) {
+            match edge {
+                NodeEdge::Start(node) => match self.0.arena[node].get() {
+                    SyntaxNode::Number(num) => std::fmt::Display::fmt(num, f)?,
+                    SyntaxNode::Variable(var) => var.fmt(f)?,
+                    SyntaxNode::BiOperation(_) => (),
+                    SyntaxNode::UnOperation(opr) => std::fmt::Display::fmt(opr, f)?,
+                    SyntaxNode::NativeFunction(nf) => {
+                        std::fmt::Display::fmt(nf, f)?;
+                        f.write_str("(")?
+                    }
+                    SyntaxNode::CustomFunction(cf) => {
+                        cf.fmt(f)?;
+                        f.write_str("(")?
+                    }
+                },
+                NodeEdge::End(node) => {
+                    match self.0.arena[node].get() {
+                        SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_) => {
+                            f.write_str(")")?
+                        }
+                        _ => (),
+                    };
+                    if node.following_siblings(&self.0.arena).nth(1).is_some() {
+                        match node
+                            .ancestors(&self.0.arena)
+                            .nth(1)
+                            .map(|p| self.0.arena[p].get())
+                        {
+                            Some(SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_)) => {
+                                f.write_str(", ")?
+                            }
+                            Some(SyntaxNode::BiOperation(opr)) => std::fmt::Display::fmt(&opr, f)?,
+                            _ => (),
+                        }
+                    }
+                }
+            };
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -464,6 +533,16 @@ mod test {
         }
     }
 
+    impl Display for CustomVar {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(match self {
+                CustomVar::X => "x",
+                CustomVar::Y => "y",
+                CustomVar::T => "t",
+            })
+        }
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum CustomFunc {
         Dot,
@@ -485,6 +564,14 @@ mod test {
 
         fn maximum_arg_count(&self) -> Option<u8> {
             Some(2)
+        }
+    }
+
+    impl Display for CustomFunc {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(match self {
+                CustomFunc::Dot => "dot",
+            })
         }
     }
 
@@ -618,21 +705,18 @@ mod test {
     fn test_aot_evaluation() {
         macro_rules! compare {
             ($i1:literal, $i2:literal) => {
-                let mut syn1 = SyntaxTree::<f64, CustomVar, ()>::new(
+                let mut syn1 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
                     |_| None,
                 )
                 .unwrap();
                 syn1.aot_evaluation(|_| &|_| Ok(0.0)).unwrap();
-                let syn2 = SyntaxTree::<f64, CustomVar, ()>::new(
+                let syn2 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
                     |_| None,
                 )
                 .unwrap();
-                assert_eq!(
-                    format!("{:?}", syn1.0.root.debug_pretty_print(&syn1.0.arena)),
-                    format!("{:?}", syn2.0.root.debug_pretty_print(&syn2.0.arena))
-                );
+                assert_eq!(format!("{}", syn1), format!("{}", syn2));
             };
         }
         compare!("16/8+11", "13");
@@ -648,21 +732,18 @@ mod test {
     fn test_displacing_simplification() {
         macro_rules! compare {
             ($i1:literal, $i2:literal) => {
-                let mut syn1 = SyntaxTree::<f64, CustomVar, ()>::new(
+                let mut syn1 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
                     |_| None,
                 )
                 .unwrap();
                 syn1.displacing_simplification().unwrap();
-                let syn2 = SyntaxTree::<f64, CustomVar, ()>::new(
+                let syn2 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
                     |_| None,
                 )
                 .unwrap();
-                assert_eq!(
-                    format!("{:?}", syn1.0.root.debug_pretty_print(&syn1.0.arena)),
-                    format!("{:?}", syn2.0.root.debug_pretty_print(&syn2.0.arena))
-                );
+                assert_eq!(format!("{}", syn1), format!("{}", syn2));
             };
         }
         compare!("x/1/8", "0.125*x");
@@ -671,5 +752,26 @@ mod test {
         compare!("(x/4)/(4/y)", "0.0625*(x*y)");
         compare!("10-x+12", "22-x");
         compare!("x*pi*2", "6.283185307179586*x");
+    }
+
+    #[test]
+    fn test_syntax_display() {
+        macro_rules! test {
+            ($input:literal) => {
+                let syn = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
+                    &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
+                    |_| None,
+                ).unwrap();
+                assert_eq!($input, syn.to_string());
+            };
+        }
+        test!("x");
+        test!("1+x");
+        test!("sin(x)");
+        test!("dot(x, y)");
+        test!("min(1, x)");
+        test!("min(1, x, y^2)");
+        test!("min(1, x, y^2, x*y+1)");
+        test!("min(1, x, y^2, x*y+1, sin(x*cos(y)+1))");
     }
 }
