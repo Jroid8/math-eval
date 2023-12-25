@@ -5,7 +5,7 @@ pub mod token_stream {
         sequence::tuple,
     };
 
-    #[derive(Debug, PartialEq, Eq, Clone)]
+    #[derive(Debug, PartialEq, Eq, Clone, Hash)]
     pub enum Token {
         Number(String),
         Operation(char),
@@ -16,7 +16,7 @@ pub mod token_stream {
         Comma,
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
     pub struct TokenStream(pub Vec<Token>);
 
     impl TokenStream {
@@ -61,7 +61,7 @@ pub mod token_tree {
     use crate::tokenizer::token_stream::{Token, TokenStream};
     use crate::tree_utils::Tree;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum TokenNode<'a> {
         Number(&'a str),
         Operation(char),
@@ -71,14 +71,14 @@ pub mod token_tree {
         Argument,
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub enum TokenTreeError {
         CommaOutsideFunction(usize),
         MissingOpenParenthesis(usize),
         MissingCloseParenthesis,
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct TokenTree<'a>(pub Tree<TokenNode<'a>>);
 
     impl<'a> TokenTree<'a> {

@@ -6,7 +6,7 @@ use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
 use indextree::{NodeEdge, NodeId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EvaluationError<N, C> {
     DivisionByZero,
     NumberTypeSpecific(N),
@@ -16,7 +16,7 @@ pub enum EvaluationError<N, C> {
 #[derive(Debug, Clone, Copy)]
 pub struct DivisionByZero;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnOperation {
     Fac,
     Neg,
@@ -44,7 +44,7 @@ impl Display for UnOperation {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BiOperation {
     Add,
     Sub,
@@ -144,7 +144,7 @@ impl FunctionIdentifier for () {
 }
 
 // 72 bytes in size
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxNode<N, V, F>
 where
     N: MathEvalNumber,
@@ -159,7 +159,7 @@ where
     CustomFunction(F),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxError {
     NumberParsingError,
     MisplacedOperator,
@@ -169,7 +169,7 @@ pub enum SyntaxError {
     TooManyArguments,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
     pub Tree<SyntaxNode<N, V, F>>,
 );
@@ -761,7 +761,8 @@ mod test {
                 let syn = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
                     |_| None,
-                ).unwrap();
+                )
+                .unwrap();
                 assert_eq!($input, syn.to_string());
             };
         }

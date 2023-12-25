@@ -12,7 +12,7 @@ use crate::{
 
 type Stack<N> = SmallVec<[N; 16]>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Input<N: MathEvalNumber, V: VariableIdentifier> {
     Literal(N),
     Variable(V),
@@ -34,6 +34,7 @@ where
     }
 }
 
+#[derive(Copy)]
 pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
     Source(Input<N, V>),
     BiOperation(BiOperation, Input<N, V>, Input<N, V>),
@@ -124,7 +125,7 @@ where
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
     instructions: Vec<Instruction<'a, N, V, F>>,
     stack: Stack<N>,
@@ -137,9 +138,11 @@ where
     F: FunctionIdentifier + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "MathAssembly[")?;
         for line in &self.instructions {
-            writeln!(f, "{line:?}")?
+            writeln!(f, "\t{line:?}")?
         }
+        writeln!(f, "]")?;
         Ok(())
     }
 }

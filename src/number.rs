@@ -4,7 +4,7 @@ use std::{
     str::FromStr,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash)]
 pub enum NFPointer<N: MathEvalNumber> {
     Single(fn(N) -> N),
     Dual(fn(N, N) -> Result<N, N::Error>),
@@ -12,7 +12,7 @@ pub enum NFPointer<N: MathEvalNumber> {
     Flexible(fn(&[N]) -> N),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum NativeFunction {
     Sin,
     Cos,
