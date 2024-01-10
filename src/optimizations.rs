@@ -1,4 +1,4 @@
-use indextree::{Arena, NodeId};
+use indextree::{Arena, NodeEdge, NodeId};
 use smallvec::SmallVec;
 use std::{fmt::Debug, usize};
 
@@ -158,97 +158,73 @@ where
         function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>,
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, V, F>> = Vec::new();
-        let descend_to_end = |node: NodeId| {
-            node.traverse(arena)
-                .find_map(|n| match n {
-                    indextree::NodeEdge::End(id) => Some(id),
-                    _ => None,
-                })
-                .unwrap()
-        };
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
             Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
             Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
             _ => false,
         };
-        let mut cursor = descend_to_end(root);
 
-        macro_rules! next {
-            () => {
-                cursor = if let Some(sibling) = cursor.following_siblings(&arena).nth(1) {
-                    descend_to_end(sibling)
-                } else {
-                    cursor.ancestors(&arena).nth(1).unwrap()
-                }
-            };
-        }
-
-        loop {
-            let mut children_as_input = cursor.children(arena).map(|c| match arena[c].get() {
-                SyntaxNode::Number(num) => Input::Literal(*num),
-                SyntaxNode::Variable(var) => Input::Variable(var.clone()),
-                _ => Input::Memory,
-            });
-            let parent = cursor.ancestors(arena).nth(1);
-            let instruction = match arena[cursor].get() {
-                SyntaxNode::Number(num) => {
-                    if is_fixed_input(parent) {
-                        next!();
-                        continue;
-                    } else {
-                        Instruction::Source(Input::Literal(*num))
+        for current in root.traverse(arena) {
+            if let NodeEdge::End(cursor) = current {
+                let mut children_as_input = cursor.children(arena).map(|c| match arena[c].get() {
+                    SyntaxNode::Number(num) => Input::Literal(*num),
+                    SyntaxNode::Variable(var) => Input::Variable(var.clone()),
+                    _ => Input::Memory,
+                });
+                let parent = cursor.ancestors(arena).nth(1);
+                let instruction = match arena[cursor].get() {
+                    SyntaxNode::Number(num) => {
+                        if is_fixed_input(parent) {
+                            continue;
+                        } else {
+                            Instruction::Source(Input::Literal(*num))
+                        }
                     }
-                }
-                SyntaxNode::Variable(var) => {
-                    if is_fixed_input(parent) {
-                        next!();
-                        continue;
-                    } else {
-                        Instruction::Source(Input::Variable(var.clone()))
+                    SyntaxNode::Variable(var) => {
+                        if is_fixed_input(parent) {
+                            continue;
+                        } else {
+                            Instruction::Source(Input::Variable(var.clone()))
+                        }
                     }
-                }
-                SyntaxNode::BiOperation(opr) => Instruction::BiOperation(
-                    *opr,
-                    children_as_input.next().unwrap(),
-                    children_as_input.next().unwrap(),
-                ),
-                SyntaxNode::UnOperation(opr) => {
-                    Instruction::UnOperation(*opr, children_as_input.next().unwrap())
-                }
-                SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
-                    crate::number::NFPointer::Single(p) => {
-                        Instruction::NFSingle(p, children_as_input.next().unwrap(), *nf)
-                    }
-                    crate::number::NFPointer::Dual(p) => Instruction::NFDual(
-                        p,
+                    SyntaxNode::BiOperation(opr) => Instruction::BiOperation(
+                        *opr,
                         children_as_input.next().unwrap(),
-                        children_as_input
-                            .next()
-                            .unwrap_or(if *nf == NativeFunction::Log {
-                                Input::Literal(10.0.into())
-                            } else {
-                                panic!()
-                            }),
-                        *nf,
+                        children_as_input.next().unwrap(),
                     ),
-                    crate::number::NFPointer::SingleWithError(p) => {
-                        Instruction::NFSingleError(p, children_as_input.next().unwrap(), *nf)
+                    SyntaxNode::UnOperation(opr) => {
+                        Instruction::UnOperation(*opr, children_as_input.next().unwrap())
                     }
-                    crate::number::NFPointer::Flexible(p) => {
-                        Instruction::NFFlexible(p, cursor.children(arena).count() as u8, *nf)
-                    }
-                },
-                SyntaxNode::CustomFunction(cf) => Instruction::CustomFunction(
-                    function_to_pointer(cf),
-                    cursor.children(arena).count() as u8,
-                    cf.clone(),
-                ),
-            };
-            result.push(instruction);
-            if cursor == root {
-                break;
-            } else {
-                next!();
+                    SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
+                        crate::number::NFPointer::Single(p) => {
+                            Instruction::NFSingle(p, children_as_input.next().unwrap(), *nf)
+                        }
+                        crate::number::NFPointer::Dual(p) => Instruction::NFDual(
+                            p,
+                            children_as_input.next().unwrap(),
+                            children_as_input
+                                .next()
+                                .unwrap_or(if *nf == NativeFunction::Log {
+                                    Input::Literal(10.0.into())
+                                } else {
+                                    panic!()
+                                }),
+                            *nf,
+                        ),
+                        crate::number::NFPointer::SingleWithError(p) => {
+                            Instruction::NFSingleError(p, children_as_input.next().unwrap(), *nf)
+                        }
+                        crate::number::NFPointer::Flexible(p) => {
+                            Instruction::NFFlexible(p, cursor.children(arena).count() as u8, *nf)
+                        }
+                    },
+                    SyntaxNode::CustomFunction(cf) => Instruction::CustomFunction(
+                        function_to_pointer(cf),
+                        cursor.children(arena).count() as u8,
+                        cf.clone(),
+                    ),
+                };
+                result.push(instruction);
             }
         }
         let mut stack_capacity = 0;
