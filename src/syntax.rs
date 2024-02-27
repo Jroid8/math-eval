@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Display};
 
 use crate::number::{MathEvalNumber, NativeFunction};
-use crate::optimizations::MathAssembly;
+use crate::asm::MathAssembly;
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
 use indextree::{NodeEdge, NodeId};
