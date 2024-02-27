@@ -40,13 +40,7 @@ pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionId
     BiOperation(BiOperation, Input<N, V>, Input<N, V>),
     UnOperation(UnOperation, Input<N, V>),
     NFSingle(fn(N) -> N, Input<N, V>, NativeFunction),
-    NFSingleError(fn(N) -> Result<N, N::Error>, Input<N, V>, NativeFunction),
-    NFDual(
-        fn(N, N) -> Result<N, N::Error>,
-        Input<N, V>,
-        Input<N, V>,
-        NativeFunction,
-    ),
+    NFDual(fn(N, N) -> N, Input<N, V>, Input<N, V>, NativeFunction),
     NFFlexible(fn(&[N]) -> N, u8, NativeFunction),
     CustomFunction(&'a dyn Fn(&[N]) -> Result<N, F::Error>, u8, F),
 }
@@ -74,11 +68,6 @@ where
             Self::NFSingle(_, arg1, arg2) => {
                 f.debug_tuple("NFSingle").field(arg2).field(arg1).finish()
             }
-            Self::NFSingleError(_, arg1, arg2) => f
-                .debug_tuple("NFSingleError")
-                .field(arg2)
-                .field(arg1)
-                .finish(),
             Self::NFDual(_, arg1, arg2, arg3) => f
                 .debug_tuple("NFDual")
                 .field(arg3)
@@ -111,9 +100,6 @@ where
             }
             Self::UnOperation(arg0, arg1) => Self::UnOperation(*arg0, arg1.clone()),
             Self::NFSingle(arg0, arg1, arg2) => Self::NFSingle(*arg0, arg1.clone(), *arg2),
-            Self::NFSingleError(arg0, arg1, arg2) => {
-                Self::NFSingleError(*arg0, arg1.clone(), *arg2)
-            }
             Self::NFDual(arg0, arg1, arg2, arg3) => {
                 Self::NFDual(*arg0, arg1.clone(), arg2.clone(), *arg3)
             }
@@ -211,9 +197,6 @@ where
                                 }),
                             *nf,
                         ),
-                        crate::number::NFPointer::SingleWithError(p) => {
-                            Instruction::NFSingleError(p, children_as_input.next().unwrap(), *nf)
-                        }
                         crate::number::NFPointer::Flexible(p) => {
                             Instruction::NFFlexible(p, cursor.children(arena).count() as u8, *nf)
                         }
@@ -239,9 +222,9 @@ where
                 Instruction::BiOperation(_, lhs, rhs) | Instruction::NFDual(_, lhs, rhs, _) => {
                     input_stack_effect(lhs) + input_stack_effect(rhs)
                 }
-                Instruction::UnOperation(_, val)
-                | Instruction::NFSingle(_, val, _)
-                | Instruction::NFSingleError(_, val, _) => input_stack_effect(val),
+                Instruction::UnOperation(_, val) | Instruction::NFSingle(_, val, _) => {
+                    input_stack_effect(val)
+                }
                 Instruction::NFFlexible(_, arg_count, _)
                 | Instruction::CustomFunction(_, arg_count, _) => -(*arg_count as i32),
             } + 1;
@@ -283,21 +266,10 @@ where
                     let input = input.get(&variable_substituter, &mut self.stack);
                     func(input)
                 }
-                Instruction::NFSingleError(func, input, _) => {
-                    match func(input.get(&variable_substituter, &mut self.stack)) {
-                        Ok(result) => result,
-                        Err(e) => return Err(EvaluationError::NumberTypeSpecific(e)),
-                    }
-                }
-                Instruction::NFDual(func, inp1, inp2, _) => {
-                    match func(
-                        inp1.get(&variable_substituter, &mut self.stack),
-                        inp2.get(&variable_substituter, &mut self.stack),
-                    ) {
-                        Ok(result) => result,
-                        Err(e) => return Err(EvaluationError::NumberTypeSpecific(e)),
-                    }
-                }
+                Instruction::NFDual(func, inp1, inp2, _) => func(
+                    inp1.get(&variable_substituter, &mut self.stack),
+                    inp2.get(&variable_substituter, &mut self.stack),
+                ),
                 Instruction::NFFlexible(func, arg_count, _) => {
                     let arg_count = *arg_count as usize;
                     let result = func(&self.stack[self.stack.len() - arg_count..]);

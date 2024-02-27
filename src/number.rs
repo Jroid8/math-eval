@@ -7,8 +7,7 @@ use std::{
 #[derive(Debug, Clone, Copy, Hash)]
 pub enum NFPointer<N: MathEvalNumber> {
     Single(fn(N) -> N),
-    Dual(fn(N, N) -> Result<N, N::Error>),
-    SingleWithError(fn(N) -> Result<N, N::Error>),
+    Dual(fn(N, N) -> N),
     Flexible(fn(&[N]) -> N),
 }
 
@@ -72,12 +71,12 @@ impl NativeFunction {
             NativeFunction::Cos => NFPointer::Single(N::cos),
             NativeFunction::Tan => NFPointer::Single(N::tan),
             NativeFunction::Cot => NFPointer::Single(N::cot),
-            NativeFunction::Asin => NFPointer::SingleWithError(N::asin),
-            NativeFunction::Acos => NFPointer::SingleWithError(N::acos),
-            NativeFunction::Atan => NFPointer::SingleWithError(N::atan),
-            NativeFunction::Acot => NFPointer::SingleWithError(N::acot),
+            NativeFunction::Asin => NFPointer::Single(N::asin),
+            NativeFunction::Acos => NFPointer::Single(N::acos),
+            NativeFunction::Atan => NFPointer::Single(N::atan),
+            NativeFunction::Acot => NFPointer::Single(N::acot),
             NativeFunction::Log => NFPointer::Dual(N::log),
-            NativeFunction::Ln => NFPointer::SingleWithError(N::ln),
+            NativeFunction::Ln => NFPointer::Single(N::ln),
             NativeFunction::Exp => NFPointer::Single(N::exp),
             NativeFunction::Floor => NFPointer::Single(N::floor),
             NativeFunction::Ceil => NFPointer::Single(N::ceil),
@@ -86,7 +85,7 @@ impl NativeFunction {
             NativeFunction::Frac => NFPointer::Single(N::frac),
             NativeFunction::Abs => NFPointer::Single(N::abs),
             NativeFunction::Sign => NFPointer::Single(N::sign),
-            NativeFunction::Sqrt => NFPointer::SingleWithError(N::sqrt),
+            NativeFunction::Sqrt => NFPointer::Single(N::sqrt),
             NativeFunction::Cbrt => NFPointer::Single(N::cbrt),
             NativeFunction::Max => NFPointer::Flexible(N::max),
             NativeFunction::Min => NFPointer::Flexible(N::min),
@@ -149,12 +148,12 @@ pub trait MathEvalNumber:
     fn cos(argument: Self) -> Self;
     fn tan(argument: Self) -> Self;
     fn cot(argument: Self) -> Self;
-    fn asin(argument: Self) -> Result<Self, Self::Error>;
-    fn acos(argument: Self) -> Result<Self, Self::Error>;
-    fn atan(argument: Self) -> Result<Self, Self::Error>;
-    fn acot(argument: Self) -> Result<Self, Self::Error>;
-    fn log(argument: Self, base: Self) -> Result<Self, Self::Error>;
-    fn ln(argument: Self) -> Result<Self, Self::Error>;
+    fn asin(argument: Self) -> Self;
+    fn acos(argument: Self) -> Self;
+    fn atan(argument: Self) -> Self;
+    fn acot(argument: Self) -> Self;
+    fn log(argument: Self, base: Self) -> Self;
+    fn ln(argument: Self) -> Self;
     fn exp(argument: Self) -> Self;
     fn floor(argument: Self) -> Self;
     fn ceil(argument: Self) -> Self;
@@ -163,7 +162,7 @@ pub trait MathEvalNumber:
     fn frac(argument: Self) -> Self;
     fn abs(argument: Self) -> Self;
     fn sign(argument: Self) -> Self;
-    fn sqrt(argument: Self) -> Result<Self, Self::Error>;
+    fn sqrt(argument: Self) -> Self;
     fn cbrt(argument: Self) -> Self;
     fn max(argument: &[Self]) -> Self;
     fn min(argument: &[Self]) -> Self;
@@ -206,35 +205,35 @@ impl MathEvalNumber for f64 {
         cos / sin
     }
 
-    fn asin(argument: Self) -> Result<Self, Self::Error> {
-        Ok(argument.asin())
+    fn asin(argument: Self) -> Self {
+        argument.asin()
     }
 
-    fn acos(argument: Self) -> Result<Self, Self::Error> {
-        Ok(argument.acos())
+    fn acos(argument: Self) -> Self {
+        argument.acos()
     }
 
-    fn atan(argument: Self) -> Result<Self, Self::Error> {
-        Ok(argument.atan())
+    fn atan(argument: Self) -> Self {
+        argument.atan()
     }
 
-    fn acot(argument: Self) -> Result<Self, Self::Error> {
-        Ok((-argument).atan() + std::f64::consts::FRAC_PI_2)
+    fn acot(argument: Self) -> Self {
+        (-argument).atan() + std::f64::consts::FRAC_PI_2
     }
 
-    fn log(argument: Self, base: Self) -> Result<Self, Self::Error> {
+    fn log(argument: Self, base: Self) -> Self {
         // log2 and log10 are more accurate than log(2) and log(10) as mentioned by the docs: https://doc.rust-lang.org/std/primitive.f64.html#method.log
-        Ok(if base == 10.0 {
+        if base == 10.0 {
             argument.log10()
         } else if base == 2.0 {
             argument.log2()
         } else {
             argument.log(base)
-        })
+        }
     }
 
-    fn ln(argument: Self) -> Result<Self, Self::Error> {
-        Ok(argument.ln())
+    fn ln(argument: Self) -> Self {
+        argument.ln()
     }
 
     fn exp(argument: Self) -> Self {
@@ -276,8 +275,8 @@ impl MathEvalNumber for f64 {
         }
     }
 
-    fn sqrt(argument: Self) -> Result<Self, Self::Error> {
-        Ok(argument.sqrt())
+    fn sqrt(argument: Self) -> Self {
+        argument.sqrt()
     }
 
     fn cbrt(argument: Self) -> Self {

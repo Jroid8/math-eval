@@ -145,7 +145,7 @@ fn hardcoded(crit: &mut Criterion) {
             input.0,
             matheval_bencher,
         );
-        group.bench_with_input(BenchmarkId::new("meval", input.1), input.0, meval_bencher);
+        // group.bench_with_input(BenchmarkId::new("meval", input.1), input.0, meval_bencher);
     }
     group.finish();
 }
@@ -163,11 +163,11 @@ fn random(crit: &mut Criterion) {
             input.as_str(),
             matheval_bencher,
         );
-        group.bench_with_input(
-            BenchmarkId::new("meval", &name),
-            input.as_str(),
-            meval_bencher,
-        );
+        // group.bench_with_input(
+        //     BenchmarkId::new("meval", &name),
+        //     input.as_str(),
+        //     meval_bencher,
+        // );
     }
     group.finish();
 }
