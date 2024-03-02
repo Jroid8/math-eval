@@ -28,48 +28,33 @@ impl VariableIdentifier for MyVar {
 enum MyFunc {
     Dist,
     Dot,
-    Give,
 }
 
 #[derive(Debug)]
 struct IllegalValue;
 
 impl FunctionIdentifier for MyFunc {
-    type Error = IllegalValue;
-
     fn parse(input: &str) -> Option<Self> {
         match input {
             "dist" => Some(Self::Dist),
             "dot" => Some(Self::Dot),
-            "give" => Some(Self::Give),
             _ => None,
         }
     }
 
     fn minimum_arg_count(&self) -> u8 {
-        if *self == MyFunc::Give {
-            1
-        } else {
-            2
-        }
+        2
     }
 
     fn maximum_arg_count(&self) -> Option<u8> {
-        Some(if *self == MyFunc::Give { 1 } else { 2 })
+        Some(2)
     }
 }
 
-fn custom_functions<'a>(fi: &MyFunc) -> &'a dyn Fn(&[f64]) -> Result<f64, IllegalValue> {
+fn custom_functions<'a>(fi: &MyFunc) -> &'a dyn Fn(&[f64]) -> f64 {
     match fi {
-        MyFunc::Dist => &|input: &[f64]| Ok(input[0] * input[0] + input[1] * input[1]),
-        MyFunc::Dot => &|input: &[f64]| Ok(input[0] * input[1] + input[1] * input[1]),
-        MyFunc::Give => &|input: &[f64]| {
-            if input[0] == -333.0 {
-                Err(IllegalValue)
-            } else {
-                Ok(input[0])
-            }
-        },
+        MyFunc::Dist => &|input: &[f64]| input[0] * input[0] + input[1] * input[1],
+        MyFunc::Dot => &|input: &[f64]| input[0] * input[1] + input[1] * input[1],
     }
 }
 

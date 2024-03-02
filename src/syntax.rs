@@ -1,19 +1,12 @@
 use std::fmt::{Debug, Display};
 
-use crate::number::{MathEvalNumber, NativeFunction};
 use crate::asm::MathAssembly;
+use crate::number::{MathEvalNumber, NativeFunction};
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
 use indextree::{NodeEdge, NodeId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EvaluationError<N, C> {
-    DivisionByZero,
-    NumberTypeSpecific(N),
-    Custom(C),
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DivisionByZero;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -23,10 +16,10 @@ pub enum UnOperation {
 }
 
 impl UnOperation {
-    pub fn eval<N: MathEvalNumber>(self, value: N) -> Result<N, N::Error> {
+    pub fn eval<N: MathEvalNumber>(self, value: N) -> N {
         match self {
             UnOperation::Fac => value.factorial(),
-            UnOperation::Neg => Ok(-value),
+            UnOperation::Neg => -value,
         }
     }
 
@@ -120,16 +113,12 @@ impl VariableIdentifier for () {
 }
 
 pub trait FunctionIdentifier: Clone + Eq {
-    type Error;
-
     fn parse(input: &str) -> Option<Self>;
     fn minimum_arg_count(&self) -> u8;
     fn maximum_arg_count(&self) -> Option<u8>;
 }
 
 impl FunctionIdentifier for () {
-    type Error = ();
-
     fn parse(_: &str) -> Option<Self> {
         None
     }
@@ -315,18 +304,15 @@ where
 
     pub fn to_asm<'a>(
         &self,
-        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>,
+        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
     ) -> MathAssembly<'a, N, V, F> {
         MathAssembly::new(&self.0.arena, self.0.root, function_to_pointer)
     }
 
     pub fn aot_evaluation<'a>(
         &mut self,
-        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>,
-    ) -> Result<(), EvaluationError<N::Error, F::Error>>
-    where
-        F::Error: 'a,
-    {
+        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
+    ) -> Result<(), DivisionByZero> {
         let mut examin: Vec<NodeId> = Vec::new();
         for node in self.0.root.traverse(&self.0.arena) {
             if let NodeEdge::End(node) = node {
@@ -549,8 +535,6 @@ mod test {
     }
 
     impl FunctionIdentifier for CustomFunc {
-        type Error = ();
-
         fn parse(input: &str) -> Option<Self> {
             match input {
                 "dot" => Some(CustomFunc::Dot),
@@ -710,7 +694,7 @@ mod test {
                     |_| None,
                 )
                 .unwrap();
-                syn1.aot_evaluation(|_| &|_| Ok(0.0)).unwrap();
+                syn1.aot_evaluation(|_| &|_| 0.0).unwrap();
                 let syn2 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
                     |_| None,

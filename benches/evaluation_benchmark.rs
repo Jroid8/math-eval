@@ -33,8 +33,6 @@ enum MyFunc {
 }
 
 impl FunctionIdentifier for MyFunc {
-    type Error = ();
-
     fn parse(input: &str) -> Option<Self> {
         match input {
             "dist" => Some(MyFunc::Dist),
@@ -63,10 +61,10 @@ fn slope(input: &[f64]) -> f64 {
     (input[3] - input[1]) / (input[2] - input[0])
 }
 
-fn custom_functions<'a>(identifier: &MyFunc) -> &'a dyn Fn(&[f64]) -> Result<f64, ()> {
+fn custom_functions<'a>(identifier: &MyFunc) -> &'a dyn Fn(&[f64]) -> f64 {
     match identifier {
-        MyFunc::Dist => &|input: &[f64]| Ok(dist(input)),
-        MyFunc::Slope => &|input: &[f64]| Ok(slope(input)),
+        MyFunc::Dist => &|input: &[f64]| dist(input),
+        MyFunc::Slope => &|input: &[f64]| slope(input),
     }
 }
 

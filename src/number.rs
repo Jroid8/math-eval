@@ -139,8 +139,6 @@ pub trait MathEvalNumber:
     + Debug
     + 'static
 {
-    type Error;
-
     fn modulo(self, rhs: Self) -> Self;
     fn pow(self, rhs: Self) -> Self;
     fn parse_constant(input: &str) -> Option<Self>;
@@ -166,12 +164,10 @@ pub trait MathEvalNumber:
     fn cbrt(argument: Self) -> Self;
     fn max(argument: &[Self]) -> Self;
     fn min(argument: &[Self]) -> Self;
-    fn factorial(self) -> Result<Self, Self::Error>;
+    fn factorial(self) -> Self;
 }
 
 impl MathEvalNumber for f64 {
-    type Error = ();
-
     fn pow(self, rhs: Self) -> Self {
         self.powf(rhs)
     }
@@ -291,11 +287,11 @@ impl MathEvalNumber for f64 {
         argument.iter().copied().fold(f64::MAX, f64::min)
     }
 
-    fn factorial(self) -> Result<Self, Self::Error> {
+    fn factorial(self) -> Self {
         let mut result = 1.0;
         for v in 2..=(self as u32) {
             result *= v as f64;
         }
-        Ok(result)
+        result
     }
 }

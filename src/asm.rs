@@ -5,7 +5,7 @@ use std::{fmt::Debug, usize};
 use crate::{
     number::{MathEvalNumber, NativeFunction},
     syntax::{
-        BiOperation, EvaluationError, FunctionIdentifier, SyntaxNode, UnOperation,
+        BiOperation, DivisionByZero, FunctionIdentifier, SyntaxNode, UnOperation,
         VariableIdentifier,
     },
 };
@@ -42,7 +42,7 @@ pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionId
     NFSingle(fn(N) -> N, Input<N, V>, NativeFunction),
     NFDual(fn(N, N) -> N, Input<N, V>, Input<N, V>, NativeFunction),
     NFFlexible(fn(&[N]) -> N, u8, NativeFunction),
-    CustomFunction(&'a dyn Fn(&[N]) -> Result<N, F::Error>, u8, F),
+    CustomFunction(&'a dyn Fn(&[N]) -> N, u8, F),
 }
 
 impl<N, V, F> Debug for Instruction<'_, N, V, F>
@@ -141,7 +141,7 @@ where
     pub fn new(
         arena: &Arena<SyntaxNode<N, V, F>>,
         root: NodeId,
-        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> Result<N, F::Error>,
+        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, V, F>> = Vec::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
@@ -238,10 +238,7 @@ where
         }
     }
 
-    pub fn eval(
-        &mut self,
-        variable_substituter: impl Fn(&V) -> N,
-    ) -> Result<N, EvaluationError<N::Error, F::Error>> {
+    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N) -> Result<N, DivisionByZero> {
         self.stack.clear();
         for instr in &self.instructions {
             let result = match &instr {
@@ -249,18 +246,10 @@ where
                 Instruction::BiOperation(opr, lhs, rhs) => {
                     let rhs = rhs.get(&variable_substituter, &mut self.stack);
                     let lhs = lhs.get(&variable_substituter, &mut self.stack);
-                    if let Ok(res) = opr.eval(lhs, rhs) {
-                        res
-                    } else {
-                        return Err(EvaluationError::DivisionByZero);
-                    }
+                    opr.eval(lhs, rhs)?
                 }
                 Instruction::UnOperation(opr, val) => {
-                    if let Ok(res) = opr.eval(val.get(&variable_substituter, &mut self.stack)) {
-                        res
-                    } else {
-                        return Err(EvaluationError::DivisionByZero);
-                    }
+                    opr.eval(val.get(&variable_substituter, &mut self.stack))
                 }
                 Instruction::NFSingle(func, input, _) => {
                     let input = input.get(&variable_substituter, &mut self.stack);
@@ -278,10 +267,7 @@ where
                 }
                 Instruction::CustomFunction(func, arg_count, _) => {
                     let arg_count = *arg_count as usize;
-                    let result = match func(&self.stack[self.stack.len() - arg_count..]) {
-                        Ok(res) => res,
-                        Err(e) => return Err(EvaluationError::Custom(e)),
-                    };
+                    let result = func(&self.stack[self.stack.len() - arg_count..]);
                     self.stack.truncate(self.stack.len() - arg_count);
                     result
                 }
@@ -320,8 +306,6 @@ mod test {
     }
 
     impl FunctionIdentifier for MyFunc {
-        type Error = ();
-
         fn parse(input: &str) -> Option<Self> {
             match input {
                 "dist" => Some(MyFunc::Dist),
@@ -352,9 +336,9 @@ mod test {
                 .unwrap()
                 .to_asm(|fi: &MyFunc| match fi {
                     MyFunc::Dist => {
-                        &|input: &[f64]| Ok((input[0] * input[0] + input[1] * input[1]).sqrt())
+                        &|input: &[f64]| (input[0] * input[0] + input[1] * input[1]).sqrt()
                     }
-                    MyFunc::Dot => &|input: &[f64]| Ok(input[0] * input[1] + input[1] * input[1]),
+                    MyFunc::Dot => &|input: &[f64]| input[0] * input[1] + input[1] * input[1],
                 })
                 .eval(|var| match var {
                     MyVar::X => 1.0,
