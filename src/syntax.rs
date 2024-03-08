@@ -6,9 +6,6 @@ use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
 use indextree::{NodeEdge, NodeId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DivisionByZero;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnOperation {
     Fac,
@@ -68,20 +65,14 @@ impl BiOperation {
             _ => None,
         }
     }
-    pub fn eval<N: MathEvalNumber>(self, lhs: N, rhs: N) -> Result<N, DivisionByZero> {
+    pub fn eval<N: MathEvalNumber>(self, lhs: N, rhs: N) -> N {
         match self {
-            BiOperation::Add => Ok(lhs + rhs),
-            BiOperation::Sub => Ok(lhs - rhs),
-            BiOperation::Mul => Ok(lhs * rhs),
-            BiOperation::Div => {
-                if rhs == 0.0.into() {
-                    Err(DivisionByZero)
-                } else {
-                    Ok(lhs / rhs)
-                }
-            }
-            BiOperation::Pow => Ok(lhs.pow(rhs)),
-            BiOperation::Mod => Ok(lhs.modulo(rhs)),
+            BiOperation::Add => lhs + rhs,
+            BiOperation::Sub => lhs - rhs,
+            BiOperation::Mul => lhs * rhs,
+            BiOperation::Div => lhs / rhs,
+            BiOperation::Pow => lhs.pow(rhs),
+            BiOperation::Mod => lhs.modulo(rhs),
         }
     }
     pub fn as_char(self) -> char {
@@ -312,7 +303,7 @@ where
     pub fn aot_evaluation<'a>(
         &mut self,
         function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
-    ) -> Result<(), DivisionByZero> {
+    ) {
         let mut examin: Vec<NodeId> = Vec::new();
         for node in self.0.root.traverse(&self.0.arena) {
             if let NodeEdge::End(node) = node {
@@ -325,33 +316,25 @@ where
         for node in examin {
             if node.children(&self.0.arena).all(|c| self.is_number(c)) {
                 let answer = MathAssembly::new(&self.0.arena, node, &function_to_pointer)
-                    .eval(|_| unreachable!())?;
+                    .eval(|_| unreachable!());
                 *self.0.arena[node].get_mut() = SyntaxNode::Number(answer);
                 while let Some(c) = self.0.arena[node].first_child() {
                     c.remove(&mut self.0.arena);
                 }
             }
         }
-        Ok(())
     }
 
     fn is_number(&self, node: NodeId) -> bool {
         matches!(self.0.arena[node].get(), SyntaxNode::Number(_))
     }
 
-    pub fn displacing_simplification(&mut self) -> Result<(), DivisionByZero> {
-        self._displacing_simplification(BiOperation::Add, BiOperation::Sub, 0.0.into())
-            .and_then(|_| {
-                self._displacing_simplification(BiOperation::Mul, BiOperation::Div, 1.0.into())
-            })
+    pub fn displacing_simplification(&mut self) {
+        self._displacing_simplification(BiOperation::Add, BiOperation::Sub, 0.0.into());
+        self._displacing_simplification(BiOperation::Mul, BiOperation::Div, 1.0.into());
     }
 
-    fn _displacing_simplification(
-        &mut self,
-        pos: BiOperation,
-        neg: BiOperation,
-        inital_value: N,
-    ) -> Result<(), DivisionByZero> {
+    fn _displacing_simplification(&mut self, pos: BiOperation, neg: BiOperation, inital_value: N) {
         let is_targeting_opr = |node: NodeId| matches!(self.0.arena[node].get(), SyntaxNode::BiOperation(opr) if *opr == pos || *opr == neg);
         let mut found: Vec<NodeId> = Vec::new();
         let mul_opr = |target: BiOperation, side: usize, parent: BiOperation| {
@@ -394,7 +377,7 @@ where
                                 if upper_side == 0 { pos } else { *upper_opr },
                             );
                             match self.0.arena[lowest].get() {
-                                SyntaxNode::Number(value) => lhs = opr.eval(lhs, *value)?,
+                                SyntaxNode::Number(value) => lhs = opr.eval(lhs, *value),
                                 _ => {
                                     symbols[symbols[0].is_some() as usize] =
                                         Some((lowest, opr == neg))
@@ -403,7 +386,7 @@ where
                         }
                     }
                     SyntaxNode::Number(value) => {
-                        lhs = (mul_opr(*upper_opr, upper_side, pos)).eval(lhs, *value)?
+                        lhs = (mul_opr(*upper_opr, upper_side, pos)).eval(lhs, *value)
                     }
                     _ => panic!(),
                 }
@@ -441,7 +424,6 @@ where
                 upper.append(symb1.0, &mut self.0.arena);
             }
         }
-        Ok(())
     }
 }
 
@@ -694,7 +676,7 @@ mod test {
                     |_| None,
                 )
                 .unwrap();
-                syn1.aot_evaluation(|_| &|_| 0.0).unwrap();
+                syn1.aot_evaluation(|_| &|_| 0.0);
                 let syn2 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
                     |_| None,
@@ -721,7 +703,7 @@ mod test {
                     |_| None,
                 )
                 .unwrap();
-                syn1.displacing_simplification().unwrap();
+                syn1.displacing_simplification();
                 let syn2 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
                     |_| None,

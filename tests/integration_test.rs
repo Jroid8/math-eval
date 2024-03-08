@@ -72,17 +72,16 @@ fn test_random() {
             let tokenstream = TokenStream::new(&input).unwrap();
             let tokentree = TokenTree::new(&tokenstream).unwrap();
             let mut syntree = SyntaxTree::<f64, MyVar, MyFunc>::new(&tokentree, |_| None).unwrap();
-            syntree.aot_evaluation(custom_functions).unwrap();
-            syntree.displacing_simplification().unwrap();
-            syntree.aot_evaluation(custom_functions).unwrap();
+            syntree.aot_evaluation(custom_functions);
+            syntree.displacing_simplification();
+            syntree.aot_evaluation(custom_functions);
             let mut expr = syntree.to_asm(custom_functions);
             expr.eval(|var| match var {
                 MyVar::X => x,
                 MyVar::Y => y,
                 MyVar::Z => z,
                 MyVar::T => t,
-            })
-            .unwrap();
+            });
         }
         progress_bar.inc(1);
     }

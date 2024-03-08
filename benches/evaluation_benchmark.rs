@@ -75,9 +75,9 @@ macro_rules! to_expr {
             |_| None,
         )
         .unwrap();
-        expr.aot_evaluation(custom_functions).unwrap();
-        expr.displacing_simplification().unwrap();
-        expr.aot_evaluation(custom_functions).unwrap();
+        expr.aot_evaluation(custom_functions);
+        expr.displacing_simplification();
+        expr.aot_evaluation(custom_functions);
         expr.to_asm(custom_functions)
     }};
 }
@@ -111,7 +111,6 @@ fn matheval_bencher(b: &mut Bencher<'_>, input: &str) {
                 MyVar::Y => y,
                 MyVar::T => t,
             })
-            .unwrap(),
         );
         x += 1.0;
         y -= 1.0;

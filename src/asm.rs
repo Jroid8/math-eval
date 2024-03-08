@@ -5,7 +5,7 @@ use std::{fmt::Debug, usize};
 use crate::{
     number::{MathEvalNumber, NativeFunction},
     syntax::{
-        BiOperation, DivisionByZero, FunctionIdentifier, SyntaxNode, UnOperation,
+        BiOperation, FunctionIdentifier, SyntaxNode, UnOperation,
         VariableIdentifier,
     },
 };
@@ -238,7 +238,7 @@ where
         }
     }
 
-    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N) -> Result<N, DivisionByZero> {
+    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N) -> N {
         self.stack.clear();
         for instr in &self.instructions {
             let result = match &instr {
@@ -246,7 +246,7 @@ where
                 Instruction::BiOperation(opr, lhs, rhs) => {
                     let rhs = rhs.get(&variable_substituter, &mut self.stack);
                     let lhs = lhs.get(&variable_substituter, &mut self.stack);
-                    opr.eval(lhs, rhs)?
+                    opr.eval(lhs, rhs)
                 }
                 Instruction::UnOperation(opr, val) => {
                     opr.eval(val.get(&variable_substituter, &mut self.stack))
@@ -274,7 +274,7 @@ where
             };
             self.stack.push(result);
         }
-        Ok(self.stack.pop().unwrap())
+        self.stack.pop().unwrap()
     }
 }
 
@@ -348,17 +348,17 @@ mod test {
             };
         }
 
-        assert_eq!(eval!("10"), Ok(10.0));
-        assert_eq!(eval!("-y"), Ok(-8.0));
-        assert_eq!(eval!("abs(-x)"), Ok(1.0));
-        assert_eq!(eval!("4t"), Ok(6.0));
-        assert_eq!(eval!("10(7+x)"), Ok(80.0));
-        assert_eq!(eval!("5sin(pi*3/2)"), Ok(-5.0));
-        assert_eq!(eval!("max(cos(pi/2), 1)"), Ok(1.0));
-        assert_eq!(eval!("pi dist(y-5x,4)"), Ok(PI * 5.0));
+        assert_eq!(eval!("10"), 10.0);
+        assert_eq!(eval!("-y"), -8.0);
+        assert_eq!(eval!("abs(-x)"), 1.0);
+        assert_eq!(eval!("4t"), 6.0);
+        assert_eq!(eval!("10(7+x)"), 80.0);
+        assert_eq!(eval!("5sin(pi*3/2)"), -5.0);
+        assert_eq!(eval!("max(cos(pi/2), 1)"), 1.0);
+        assert_eq!(eval!("pi dist(y-5x,4)"), PI * 5.0);
         assert_eq!(
             eval!("sin(x*pi/10*(1.3+sin(t/10))+t*2+sin(y*pi*sin(t/17)+16*sin(t)))+0.05"),
-            Ok(0.356078696074944)
+            0.356078696074944
         );
     }
 }
