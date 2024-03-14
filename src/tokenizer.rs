@@ -75,7 +75,7 @@ pub mod token_tree {
     pub enum TokenTreeError {
         CommaOutsideFunction(usize),
         MissingOpenParenthesis(usize),
-        MissingCloseParenthesis,
+        MissingCloseParenthesis(usize),
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,7 +135,24 @@ pub mod token_tree {
             if current_node == root {
                 Ok(TokenTree(Tree { arena, root }))
             } else {
-                Err(TokenTreeError::MissingCloseParenthesis)
+                let mut parens = 0;
+                let mut unclosed_paren: Option<usize> = None;
+                for (index, token) in tokens.0.iter().enumerate().rev() {
+                    match *token {
+                        Token::CloseParen => {
+                            parens += 1;
+                        },
+                        Token::OpenParen | Token::Function(_) => {
+                            if parens == 0 {
+                                unclosed_paren = Some(index)
+                            } else {
+                                parens -= 1;
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                Err(TokenTreeError::MissingCloseParenthesis(unclosed_paren.unwrap()))
             }
         }
     }
@@ -320,23 +337,23 @@ mod test {
 
         assert_eq!(
             treefy!(OpenParen),
-            Err(TokenTreeError::MissingCloseParenthesis)
+            Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
             treefy!(OpenParen, Number("11".to_string())),
-            Err(TokenTreeError::MissingCloseParenthesis)
+            Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
             treefy!(Number("11".to_string()), OpenParen),
-            Err(TokenTreeError::MissingCloseParenthesis)
+            Err(TokenTreeError::MissingCloseParenthesis(1))
         );
         assert_eq!(
             treefy!(Function("sin".to_string()), Number("121".to_string())),
-            Err(TokenTreeError::MissingCloseParenthesis)
+            Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
             treefy!(Number("121".to_string()), Function("sin".to_string())),
-            Err(TokenTreeError::MissingCloseParenthesis)
+            Err(TokenTreeError::MissingCloseParenthesis(1))
         );
         assert_eq!(
             treefy!(
@@ -345,7 +362,7 @@ mod test {
                 Number("121".to_string()),
                 CloseParen
             ),
-            Err(TokenTreeError::MissingCloseParenthesis)
+            Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
             treefy!(CloseParen),
