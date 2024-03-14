@@ -1,10 +1,11 @@
-use std::ops::{Range, RangeInclusive};
+use std::ops::RangeInclusive;
 
+use indextree::{NodeEdge, NodeId};
 use number::MathEvalNumber;
-use syntax::{FunctionIdentifier, SyntaxTree, VariableIdentifier, SyntaxError};
+use syntax::{FunctionIdentifier, SyntaxError, SyntaxTree, VariableIdentifier};
 use tokenizer::{
     token_stream::{Token, TokenStream},
-    token_tree::{TokenTree, TokenTreeError},
+    token_tree::{self, TokenNode, TokenTree, TokenTreeError},
 };
 
 pub mod asm;
@@ -66,6 +67,59 @@ fn token2range(
     token2index(input, token_stream, token_index)..=index
 }
 
+fn tokennode2range(
+    input: &str,
+    token_tree: &TokenTree<'_>,
+    target: NodeId,
+) -> RangeInclusive<usize> {
+    let mut index = 0;
+    macro_rules! count_space {
+        () => {
+            while input.chars().nth(index).unwrap().is_whitespace() {
+                index += 1
+            }
+        };
+    }
+    for node in token_tree.0.root.traverse(&token_tree.0.arena).skip(1) {
+        match node {
+            NodeEdge::Start(node) => {
+                if *token_tree.0.arena[node].get() != TokenNode::Argument {
+                    count_space!();
+                }
+                let old = index;
+                index += match token_tree.0.arena[node].get() {
+                    TokenNode::Number(s) | TokenNode::Variable(s) => s.len(),
+                    TokenNode::Operation(_) => 1,
+                    TokenNode::Parentheses => 1,
+                    TokenNode::Function(f) => f.len() + 1,
+                    TokenNode::Argument => 0,
+                };
+                if node == target {
+                    return old..=index - 1;
+                }
+            }
+            NodeEdge::End(node) => match token_tree.0.arena[node].get() {
+                TokenNode::Argument => {
+                    if node
+                        .following_siblings(&token_tree.0.arena)
+                        .nth(1)
+                        .is_some()
+                    {
+                        count_space!();
+                        index += 1;
+                    }
+                }
+                TokenNode::Parentheses | TokenNode::Function(_) => {
+                    count_space!();
+                    index += 1
+                }
+                _ => (),
+            },
+        }
+    }
+    unreachable!()
+}
+
 pub fn parse<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
@@ -117,4 +171,16 @@ fn test_token2range() {
     assert_eq!(token2range(input, &ts, 1), 5..=6);
     assert_eq!(token2range(input, &ts, 2), 7..=7);
     assert_eq!(token2range(input, &ts, 3), 9..=9);
+}
+
+#[test]
+fn test_tokennode2range() {
+    let input = " max(1, -18) * sin(pi)";
+    let ts = TokenStream::new(input).unwrap();
+    let tt = TokenTree::new(&ts).unwrap();
+    println!("{:?}", tt.0.arena[tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()].get());
+    assert_eq!(tokennode2range(input, &tt, tt.0.root.descendants(&tt.0.arena).nth(3).unwrap()), 5..=5);
+    assert_eq!(tokennode2range(input, &tt, tt.0.root.descendants(&tt.0.arena).nth(6).unwrap()), 9..=10);
+    assert_eq!(tokennode2range(input, &tt, tt.0.root.children(&tt.0.arena).nth(1).unwrap()), 13..=13);
+    assert_eq!(tokennode2range(input, &tt, tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()), 19..=20);
 }
