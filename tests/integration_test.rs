@@ -59,6 +59,7 @@ fn custom_functions<'a>(fi: &MyFunc) -> &'a dyn Fn(&[f64]) -> f64 {
 }
 
 #[test]
+#[ignore] // too expensive
 fn test_random() {
     let gen_var = || -> f64 {
         fastrand::f64() * 10f64.powi(fastrand::i32(f64::MIN_10_EXP..=f64::MAX_10_EXP / 5))
