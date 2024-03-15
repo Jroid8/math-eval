@@ -157,10 +157,10 @@ pub fn parse<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
 fn test_token2index() {
     let input = " sin(pi) +1";
     let ts = TokenStream::new(input).unwrap();
-    assert_eq!(token2index(input, &ts, 4), 9);
-    assert_eq!(token2index(input, &ts, 5), 10);
+    assert_eq!(token2index(input, &ts, 3), 9);
+    assert_eq!(token2index(input, &ts, 4), 10);
     assert_eq!(token2index(input, &ts, 0), 1);
-    assert_eq!(token2index(input, &ts, 1), 4);
+    assert_eq!(token2index(input, &ts, 1), 5);
 }
 
 #[test]
