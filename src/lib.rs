@@ -1,5 +1,6 @@
 use std::ops::RangeInclusive;
 
+use asm::MathAssembly;
 use indextree::{NodeEdge, NodeId};
 use number::MathEvalNumber;
 use syntax::{FunctionIdentifier, SyntaxError, SyntaxTree, VariableIdentifier};
@@ -35,6 +36,11 @@ pub enum ParsingErrorKind {
     MissingOpenParenthesis,
     MissingCloseParenthesis,
     NumberParsingError,
+    MisplacedOperator,
+    UnknownVariableOrConstant,
+    UnknownFunction,
+    NotEnoughArguments,
+    TooManyArguments,
 }
 
 fn token2index(input: &str, token_stream: &TokenStream, token_index: usize) -> usize {
@@ -120,10 +126,11 @@ fn tokennode2range(
     unreachable!()
 }
 
-pub fn parse<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
-) -> Result<SyntaxTree<N, V, F>, ParsingError> {
+    function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
+) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|i| ParsingError {
         kind: ParsingErrorKind::UnexpectedCharacter,
         at: i..=i,
@@ -142,15 +149,22 @@ pub fn parse<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
             at: token2range(input, &token_stream, i),
         },
     })?;
-    let syntax_tree = SyntaxTree::new(&token_tree, custom_constant_parser).map_err(|(err, node)| match err {
-        SyntaxError::NumberParsingError => todo!(),
-        SyntaxError::MisplacedOperator => todo!(),
-        SyntaxError::UnknownVariableOrConstant => todo!(),
-        SyntaxError::UnknownFunction => todo!(),
-        SyntaxError::NotEnoughArguments => todo!(),
-        SyntaxError::TooManyArguments => todo!(),
-    });
-    todo!()
+    let syntax_tree =
+        SyntaxTree::new(&token_tree, custom_constant_parser).map_err(|(err, node)| {
+            let at = tokennode2range(input, &token_tree, node);
+            let kind = match err {
+                SyntaxError::NumberParsingError => ParsingErrorKind::NumberParsingError,
+                SyntaxError::MisplacedOperator => ParsingErrorKind::MisplacedOperator,
+                SyntaxError::UnknownVariableOrConstant => {
+                    ParsingErrorKind::UnknownVariableOrConstant
+                }
+                SyntaxError::UnknownFunction => ParsingErrorKind::UnknownFunction,
+                SyntaxError::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
+                SyntaxError::TooManyArguments => ParsingErrorKind::TooManyArguments,
+            };
+            ParsingError { at, kind }
+        })?;
+    Ok(MathAssembly::new(&syntax_tree.0.arena, syntax_tree.0.root, function_to_pointer))
 }
 
 #[test]
@@ -178,9 +192,36 @@ fn test_tokennode2range() {
     let input = " max(1, -18) * sin(pi)";
     let ts = TokenStream::new(input).unwrap();
     let tt = TokenTree::new(&ts).unwrap();
-    println!("{:?}", tt.0.arena[tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()].get());
-    assert_eq!(tokennode2range(input, &tt, tt.0.root.descendants(&tt.0.arena).nth(3).unwrap()), 5..=5);
-    assert_eq!(tokennode2range(input, &tt, tt.0.root.descendants(&tt.0.arena).nth(6).unwrap()), 9..=10);
-    assert_eq!(tokennode2range(input, &tt, tt.0.root.children(&tt.0.arena).nth(1).unwrap()), 13..=13);
-    assert_eq!(tokennode2range(input, &tt, tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()), 19..=20);
+    println!(
+        "{:?}",
+        tt.0.arena[tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()].get()
+    );
+    assert_eq!(
+        tokennode2range(
+            input,
+            &tt,
+            tt.0.root.descendants(&tt.0.arena).nth(3).unwrap()
+        ),
+        5..=5
+    );
+    assert_eq!(
+        tokennode2range(
+            input,
+            &tt,
+            tt.0.root.descendants(&tt.0.arena).nth(6).unwrap()
+        ),
+        9..=10
+    );
+    assert_eq!(
+        tokennode2range(input, &tt, tt.0.root.children(&tt.0.arena).nth(1).unwrap()),
+        13..=13
+    );
+    assert_eq!(
+        tokennode2range(
+            input,
+            &tt,
+            tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()
+        ),
+        19..=20
+    );
 }
