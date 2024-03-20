@@ -6,7 +6,7 @@ use number::MathEvalNumber;
 use syntax::{FunctionIdentifier, SyntaxError, SyntaxTree, VariableIdentifier};
 use tokenizer::{
     token_stream::{Token, TokenStream},
-    token_tree::{self, TokenNode, TokenTree, TokenTreeError},
+    token_tree::{TokenNode, TokenTree, TokenTreeError},
 };
 
 pub mod asm;
