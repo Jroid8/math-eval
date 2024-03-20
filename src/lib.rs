@@ -129,7 +129,7 @@ fn tokennode2range(
 pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
-    function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
+    function_to_pointer: &impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
 ) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|i| ParsingError {
         kind: ParsingErrorKind::UnexpectedCharacter,
@@ -149,8 +149,8 @@ pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier
             at: token2range(input, &token_stream, i),
         },
     })?;
-    let syntax_tree =
-        SyntaxTree::new(&token_tree, custom_constant_parser).map_err(|(err, node)| {
+    let mut syntax_tree = SyntaxTree::new(&token_tree, custom_constant_parser)
+        .map_err(|(err, node)| {
             let at = tokennode2range(input, &token_tree, node);
             let kind = match err {
                 SyntaxError::NumberParsingError => ParsingErrorKind::NumberParsingError,
@@ -164,7 +164,13 @@ pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier
             };
             ParsingError { at, kind }
         })?;
-    Ok(MathAssembly::new(&syntax_tree.0.arena, syntax_tree.0.root, function_to_pointer))
+    syntax_tree.aot_evaluation(function_to_pointer);
+    syntax_tree.displacing_simplification();
+    Ok(MathAssembly::new(
+        &syntax_tree.0.arena,
+        syntax_tree.0.root,
+        function_to_pointer,
+    ))
 }
 
 #[test]
