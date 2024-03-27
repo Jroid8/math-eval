@@ -103,7 +103,7 @@ impl VariableIdentifier for () {
     }
 }
 
-pub trait FunctionIdentifier: Clone + Eq {
+pub trait FunctionIdentifier: Clone {
     fn parse(input: &str) -> Option<Self>;
     fn minimum_arg_count(&self) -> u8;
     fn maximum_arg_count(&self) -> Option<u8>;

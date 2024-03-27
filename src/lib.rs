@@ -1,4 +1,4 @@
-use std::ops::RangeInclusive;
+use std::{collections::HashMap, ops::RangeInclusive};
 
 use asm::MathAssembly;
 use indextree::{NodeEdge, NodeId};
@@ -149,8 +149,8 @@ pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier
             at: token2range(input, &token_stream, i),
         },
     })?;
-    let mut syntax_tree = SyntaxTree::new(&token_tree, custom_constant_parser)
-        .map_err(|(err, node)| {
+    let mut syntax_tree =
+        SyntaxTree::new(&token_tree, custom_constant_parser).map_err(|(err, node)| {
             let at = tokennode2range(input, &token_tree, node);
             let kind = match err {
                 SyntaxError::NumberParsingError => ParsingErrorKind::NumberParsingError,
@@ -171,6 +171,38 @@ pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier
         syntax_tree.0.root,
         function_to_pointer,
     ))
+}
+
+#[derive(Clone)]
+pub struct ParserBuilder<'a, N>
+where
+    N: MathEvalNumber,
+{
+    constants: HashMap<String, N>,
+    functions: HashMap<String, &'a dyn Fn(&[N]) -> N>,
+}
+
+impl<'a, N> ParserBuilder<'a, N>
+where
+    N: MathEvalNumber,
+{
+    #[allow(clippy::new_without_default)] // it required N to implement Default when it's not necessary
+    pub fn new() -> Self {
+        ParserBuilder {
+            constants: HashMap::default(),
+            functions: HashMap::default(),
+        }
+    }
+
+    pub fn add_constant<S: Into<String>>(mut self, name: S, value: N) -> Self {
+        self.constants.insert(name.into(), value);
+        self
+    }
+
+    pub fn add_function<S: Into<String>>(mut self, name: S, func: &'a dyn Fn(&[N]) -> N) -> Self {
+        self.functions.insert(name.into(), func);
+        self
+    }
 }
 
 #[test]
