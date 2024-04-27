@@ -32,26 +32,7 @@ enum MyFunc {
     Slope,
 }
 
-impl FunctionIdentifier for MyFunc {
-    fn parse(input: &str) -> Option<Self> {
-        match input {
-            "dist" => Some(MyFunc::Dist),
-            "slope" => Some(MyFunc::Slope),
-            _ => None,
-        }
-    }
-
-    fn minimum_arg_count(&self) -> u8 {
-        match self {
-            MyFunc::Dist => 2,
-            MyFunc::Slope => 4,
-        }
-    }
-
-    fn maximum_arg_count(&self) -> Option<u8> {
-        Some(self.minimum_arg_count())
-    }
-}
+impl FunctionIdentifier for MyFunc {}
 
 fn dist(input: &[f64]) -> f64 {
     (input[0] * input[0] + input[1] * input[1]).sqrt()
@@ -73,6 +54,11 @@ macro_rules! to_expr {
         let mut expr = SyntaxTree::<f64, MyVar, MyFunc>::new(
             &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
             |_| None,
+            |input| match input {
+                "dist" => Some((MyFunc::Dist, 2, Some(2))),
+                "slope" => Some((MyFunc::Slope, 4, Some(4))),
+                _ => None,
+            },
         )
         .unwrap();
         expr.aot_evaluation(custom_functions);
@@ -105,13 +91,11 @@ fn matheval_bencher(b: &mut Bencher<'_>, input: &str) {
     let mut expr = to_expr!(input);
     let (mut x, mut y, mut t) = (0.0, 0.0, 0.0);
     b.iter(|| {
-        black_box(
-            expr.eval(|var| match var {
-                MyVar::X => x,
-                MyVar::Y => y,
-                MyVar::T => t,
-            })
-        );
+        black_box(expr.eval(|var| match var {
+            MyVar::X => x,
+            MyVar::Y => y,
+            MyVar::T => t,
+        }));
         x += 1.0;
         y -= 1.0;
         t += 0.0625;

@@ -103,25 +103,9 @@ impl VariableIdentifier for () {
     }
 }
 
-pub trait FunctionIdentifier: Clone + Eq {
-    fn parse(input: &str) -> Option<Self>;
-    fn minimum_arg_count(&self) -> u8;
-    fn maximum_arg_count(&self) -> Option<u8>;
-}
+pub trait FunctionIdentifier: Clone {}
 
-impl FunctionIdentifier for () {
-    fn parse(_: &str) -> Option<Self> {
-        None
-    }
-
-    fn minimum_arg_count(&self) -> u8 {
-        0
-    }
-
-    fn maximum_arg_count(&self) -> Option<u8> {
-        None
-    }
-}
+impl FunctionIdentifier for () {}
 
 // 72 bytes in size
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -163,6 +147,7 @@ where
     pub fn new(
         token_tree: &TokenTree<'_>,
         custom_constant_parser: impl Fn(&str) -> Option<N>,
+        custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     ) -> Result<SyntaxTree<N, V, F>, (SyntaxError, NodeId)> {
         let (arena, root) = (&token_tree.0.arena, token_tree.0.root);
         construct::<
@@ -204,11 +189,8 @@ where
                         TokenNode::Function(func) => match NativeFunction::parse(func)
                             .map(|nf| (SyntaxNode::NativeFunction(nf), 1, None))
                             .or_else(|| {
-                                F::parse(func).map(|cf| {
-                                    let (min, max) =
-                                        (cf.minimum_arg_count(), cf.maximum_arg_count());
-                                    (SyntaxNode::CustomFunction(cf), min, max)
-                                })
+                                custom_function_parser(func)
+                                    .map(|cf| (SyntaxNode::CustomFunction(cf.0), cf.1, cf.2))
                             }) {
                             Some((f, min_args, max_args)) => {
                                 let arg_count = current_node.children(arena).count();
@@ -516,22 +498,7 @@ mod test {
         Dot,
     }
 
-    impl FunctionIdentifier for CustomFunc {
-        fn parse(input: &str) -> Option<Self> {
-            match input {
-                "dot" => Some(CustomFunc::Dot),
-                _ => None,
-            }
-        }
-
-        fn minimum_arg_count(&self) -> u8 {
-            2
-        }
-
-        fn maximum_arg_count(&self) -> Option<u8> {
-            Some(2)
-        }
-    }
+    impl FunctionIdentifier for CustomFunc {}
 
     impl Display for CustomFunc {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -551,9 +518,13 @@ mod test {
     fn test_syntaxify() {
         macro_rules! syntaxify {
             ($input:literal) => {
-                SyntaxTree::<f64, CustomVar, ()>::new(
+                SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
                     |_| None,
+                    |input| match input {
+                        "dot" => Some((CustomFunc::Dot, 2, Some(2))),
+                        _ => None,
+                    },
                 )
                 .map(|syntree| VecTree::new(&syntree.0.arena, syntree.0.root))
             };
@@ -644,6 +615,14 @@ mod test {
             ))
         );
         assert_eq!(
+            syntaxify!("dot(2,4)"),
+            Ok(branch!(
+                SyntaxNode::CustomFunction(CustomFunc::Dot),
+                Leaf(SyntaxNode::Number(2.0)),
+                Leaf(SyntaxNode::Number(4.0))
+            ))
+        );
+        assert_eq!(
             syntaxify!("max(2, x, 8y, x*y+1)"),
             Ok(branch!(
                 SyntaxNode::NativeFunction(NativeFunction::Max),
@@ -674,11 +653,13 @@ mod test {
                 let mut syn1 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
                     |_| None,
+                    |_| None,
                 )
                 .unwrap();
                 syn1.aot_evaluation(|_| &|_| 0.0);
                 let syn2 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
+                    |_| None,
                     |_| None,
                 )
                 .unwrap();
@@ -701,11 +682,13 @@ mod test {
                 let mut syn1 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
                     |_| None,
+                    |_| None,
                 )
                 .unwrap();
                 syn1.displacing_simplification();
                 let syn2 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
+                    |_| None,
                     |_| None,
                 )
                 .unwrap();
@@ -727,6 +710,10 @@ mod test {
                 let syn = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
                     &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
                     |_| None,
+                    |input| match input {
+                        "dot" => Some((CustomFunc::Dot, 2, Some(2))),
+                        _ => None,
+                    },
                 )
                 .unwrap();
                 assert_eq!($input, syn.to_string());

@@ -30,26 +30,10 @@ enum MyFunc {
     Dot,
 }
 
+impl FunctionIdentifier for MyFunc {}
+
 #[derive(Debug)]
 struct IllegalValue;
-
-impl FunctionIdentifier for MyFunc {
-    fn parse(input: &str) -> Option<Self> {
-        match input {
-            "dist" => Some(Self::Dist),
-            "dot" => Some(Self::Dot),
-            _ => None,
-        }
-    }
-
-    fn minimum_arg_count(&self) -> u8 {
-        2
-    }
-
-    fn maximum_arg_count(&self) -> Option<u8> {
-        Some(2)
-    }
-}
 
 fn custom_functions<'a>(fi: &MyFunc) -> &'a dyn Fn(&[f64]) -> f64 {
     match fi {
@@ -72,7 +56,16 @@ fn test_random() {
             let input = generate(2usize.pow(s));
             let tokenstream = TokenStream::new(&input).unwrap();
             let tokentree = TokenTree::new(&tokenstream).unwrap();
-            let mut syntree = SyntaxTree::<f64, MyVar, MyFunc>::new(&tokentree, |_| None).unwrap();
+            let mut syntree = SyntaxTree::<f64, MyVar, MyFunc>::new(
+                &tokentree,
+                |_| None,
+                |input| match input {
+                    "dist" => Some((MyFunc::Dist, 2, Some(2))),
+                    "dot" => Some((MyFunc::Dot, 2, Some(2))),
+                    _ => None,
+                },
+            )
+            .unwrap();
             syntree.aot_evaluation(custom_functions);
             syntree.displacing_simplification();
             syntree.aot_evaluation(custom_functions);

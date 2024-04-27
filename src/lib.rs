@@ -129,6 +129,7 @@ fn tokennode2range(
 pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
+    custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     function_to_pointer: &impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
 ) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|i| ParsingError {
@@ -149,7 +150,7 @@ pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier
             at: token2range(input, &token_stream, i),
         },
     })?;
-    let mut syntax_tree = SyntaxTree::new(&token_tree, custom_constant_parser)
+    let mut syntax_tree = SyntaxTree::new(&token_tree, custom_constant_parser, custom_function_parser)
         .map_err(|(err, node)| {
             let at = tokennode2range(input, &token_tree, node);
             let kind = match err {

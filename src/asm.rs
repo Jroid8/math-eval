@@ -4,10 +4,7 @@ use std::{fmt::Debug, usize};
 
 use crate::{
     number::{MathEvalNumber, NativeFunction},
-    syntax::{
-        BiOperation, FunctionIdentifier, SyntaxNode, UnOperation,
-        VariableIdentifier,
-    },
+    syntax::{BiOperation, FunctionIdentifier, SyntaxNode, UnOperation, VariableIdentifier},
 };
 
 type Stack<N> = SmallVec<[N; 16]>;
@@ -305,23 +302,7 @@ mod test {
         Dot,
     }
 
-    impl FunctionIdentifier for MyFunc {
-        fn parse(input: &str) -> Option<Self> {
-            match input {
-                "dist" => Some(MyFunc::Dist),
-                "dot" => Some(MyFunc::Dot),
-                _ => None,
-            }
-        }
-
-        fn minimum_arg_count(&self) -> u8 {
-            2
-        }
-
-        fn maximum_arg_count(&self) -> Option<u8> {
-            Some(2)
-        }
-    }
+    impl FunctionIdentifier for MyFunc {}
 
     #[test]
     fn test_mathassembly() {
@@ -332,6 +313,11 @@ mod test {
                 crate::syntax::SyntaxTree::<f64, MyVar, MyFunc>::new(
                     &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
                     |_| None,
+                    |input| match input {
+                        "dist" => Some((MyFunc::Dist, 2, Some(2))),
+                        "dot" => Some((MyFunc::Dot, 2, Some(2))),
+                        _ => None,
+                    },
                 )
                 .unwrap()
                 .to_asm(|fi: &MyFunc| match fi {
