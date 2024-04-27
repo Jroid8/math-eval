@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use asm::MathAssembly;
 use indextree::{NodeEdge, NodeId};
 use number::MathEvalNumber;
-use syntax::{FunctionIdentifier, SyntaxError, SyntaxTree, VariableIdentifier};
+use syntax::{SyntaxError, SyntaxTree};
 use tokenizer::{
     token_stream::{Token, TokenStream},
     token_tree::{TokenNode, TokenTree, TokenTreeError},
@@ -126,7 +126,7 @@ fn tokennode2range(
     unreachable!()
 }
 
-pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,

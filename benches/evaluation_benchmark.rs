@@ -2,7 +2,7 @@ use criterion::{
     black_box, criterion_group, criterion_main, Bencher, BenchmarkId, Criterion, Throughput,
 };
 use math_eval::{
-    syntax::{FunctionIdentifier, SyntaxTree, VariableIdentifier},
+    syntax::SyntaxTree,
     tokenizer::{token_stream::TokenStream, token_tree::TokenTree},
 };
 use meval::{Context, Expr};
@@ -15,15 +15,11 @@ enum MyVar {
     T,
 }
 
-impl VariableIdentifier for MyVar {}
-
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum MyFunc {
     Dist,
     Slope,
 }
-
-impl FunctionIdentifier for MyFunc {}
 
 fn dist(input: &[f64]) -> f64 {
     (input[0] * input[0] + input[1] * input[1]).sqrt()

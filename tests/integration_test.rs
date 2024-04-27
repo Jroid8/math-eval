@@ -1,6 +1,6 @@
 use indicatif::{ProgressBar, ProgressStyle};
 use math_eval::{
-    syntax::{FunctionIdentifier, SyntaxTree, VariableIdentifier},
+    syntax::SyntaxTree,
     tokenizer::{token_stream::TokenStream, token_tree::TokenTree},
 };
 
@@ -12,15 +12,11 @@ enum MyVar {
     T,
 }
 
-impl VariableIdentifier for MyVar {}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MyFunc {
     Dist,
     Dot,
 }
-
-impl FunctionIdentifier for MyFunc {}
 
 #[derive(Debug)]
 struct IllegalValue;

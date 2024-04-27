@@ -93,21 +93,13 @@ impl Display for BiOperation {
     }
 }
 
-pub trait VariableIdentifier: Clone {}
-
-impl VariableIdentifier for () {}
-
-pub trait FunctionIdentifier: Clone {}
-
-impl FunctionIdentifier for () {}
-
 // 72 bytes in size
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxNode<N, V, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: Clone,
+    F: Clone,
 {
     Number(N),
     Variable(V),
@@ -128,15 +120,15 @@ pub enum SyntaxError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+pub struct SyntaxTree<N: MathEvalNumber, V: Clone, F: Clone>(
     pub Tree<SyntaxNode<N, V, F>>,
 );
 
 impl<V, N, F> SyntaxTree<N, V, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: Clone,
+    F: Clone,
 {
     pub fn new(
         token_tree: &TokenTree<'_>,
@@ -409,8 +401,8 @@ where
 impl<V, N, F> Display for SyntaxTree<N, V, F>
 where
     N: MathEvalNumber + Display,
-    V: VariableIdentifier + Display,
-    F: FunctionIdentifier + Display,
+    V: Clone + Display,
+    F: Clone + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for edge in self.0.root.traverse(&self.0.arena) {
@@ -469,8 +461,6 @@ mod test {
         T,
     }
 
-    impl VariableIdentifier for CustomVar {}
-
     impl Display for CustomVar {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.write_str(match self {
@@ -485,8 +475,6 @@ mod test {
     enum CustomFunc {
         Dot,
     }
-
-    impl FunctionIdentifier for CustomFunc {}
 
     impl Display for CustomFunc {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

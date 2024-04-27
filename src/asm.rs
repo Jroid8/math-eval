@@ -4,13 +4,13 @@ use std::{fmt::Debug, usize};
 
 use crate::{
     number::{MathEvalNumber, NativeFunction},
-    syntax::{BiOperation, FunctionIdentifier, SyntaxNode, UnOperation, VariableIdentifier},
+    syntax::{BiOperation, SyntaxNode, UnOperation},
 };
 
 type Stack<N> = SmallVec<[N; 16]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Input<N: MathEvalNumber, V: VariableIdentifier> {
+pub enum Input<N: MathEvalNumber, V: Clone> {
     Literal(N),
     Variable(V),
     Memory,
@@ -19,7 +19,7 @@ pub enum Input<N: MathEvalNumber, V: VariableIdentifier> {
 impl<N, V> Input<N, V>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
+    V: Clone,
 {
     #[inline]
     fn get(&self, variable_evaluator: &impl Fn(&V) -> N, stack: &mut Stack<N>) -> N {
@@ -32,7 +32,7 @@ where
 }
 
 #[derive(Copy)]
-pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
+pub enum Instruction<'a, N: MathEvalNumber, V: Clone, F: Clone> {
     Source(Input<N, V>),
     BiOperation(BiOperation, Input<N, V>, Input<N, V>),
     UnOperation(UnOperation, Input<N, V>),
@@ -45,8 +45,8 @@ pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionId
 impl<N, V, F> Debug for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier + Debug,
-    F: FunctionIdentifier + Debug,
+    V: Clone + Debug,
+    F: Clone + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -86,8 +86,8 @@ where
 impl<N, V, F> Clone for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: Clone,
+    F: Clone,
 {
     fn clone(&self) -> Self {
         match self {
@@ -109,7 +109,7 @@ where
 }
 
 #[derive(Clone, Default)]
-pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
+pub struct MathAssembly<'a, N: MathEvalNumber, V: Clone, F: Clone> {
     instructions: Vec<Instruction<'a, N, V, F>>,
     stack: Stack<N>,
 }
@@ -117,8 +117,8 @@ pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: Functio
 impl<'a, N, V, F> Debug for MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier + Debug,
-    F: FunctionIdentifier + Debug,
+    V: Clone + Debug,
+    F: Clone + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "MathAssembly[")?;
@@ -132,8 +132,8 @@ where
 impl<'a, N, V, F> MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: Clone,
+    F: Clone,
 {
     pub fn new(
         arena: &Arena<SyntaxNode<N, V, F>>,
@@ -285,15 +285,11 @@ mod test {
         T,
     }
 
-    impl VariableIdentifier for MyVar {}
-
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum MyFunc {
         Dist,
         Dot,
     }
-
-    impl FunctionIdentifier for MyFunc {}
 
     #[test]
     fn test_mathassembly() {
