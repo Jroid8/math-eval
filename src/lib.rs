@@ -130,6 +130,7 @@ pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
+    custom_variable_parser: impl Fn(&str) -> Option<V>,
     function_to_pointer: &impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
 ) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|i| ParsingError {
@@ -150,21 +151,24 @@ pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier
             at: token2range(input, &token_stream, i),
         },
     })?;
-    let mut syntax_tree = SyntaxTree::new(&token_tree, custom_constant_parser, custom_function_parser)
-        .map_err(|(err, node)| {
-            let at = tokennode2range(input, &token_tree, node);
-            let kind = match err {
-                SyntaxError::NumberParsingError => ParsingErrorKind::NumberParsingError,
-                SyntaxError::MisplacedOperator => ParsingErrorKind::MisplacedOperator,
-                SyntaxError::UnknownVariableOrConstant => {
-                    ParsingErrorKind::UnknownVariableOrConstant
-                }
-                SyntaxError::UnknownFunction => ParsingErrorKind::UnknownFunction,
-                SyntaxError::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
-                SyntaxError::TooManyArguments => ParsingErrorKind::TooManyArguments,
-            };
-            ParsingError { at, kind }
-        })?;
+    let mut syntax_tree = SyntaxTree::new(
+        &token_tree,
+        custom_constant_parser,
+        custom_function_parser,
+        custom_variable_parser,
+    )
+    .map_err(|(err, node)| {
+        let at = tokennode2range(input, &token_tree, node);
+        let kind = match err {
+            SyntaxError::NumberParsingError => ParsingErrorKind::NumberParsingError,
+            SyntaxError::MisplacedOperator => ParsingErrorKind::MisplacedOperator,
+            SyntaxError::UnknownVariableOrConstant => ParsingErrorKind::UnknownVariableOrConstant,
+            SyntaxError::UnknownFunction => ParsingErrorKind::UnknownFunction,
+            SyntaxError::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
+            SyntaxError::TooManyArguments => ParsingErrorKind::TooManyArguments,
+        };
+        ParsingError { at, kind }
+    })?;
     syntax_tree.aot_evaluation(function_to_pointer);
     syntax_tree.displacing_simplification();
     Ok(MathAssembly::new(

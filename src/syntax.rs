@@ -93,15 +93,9 @@ impl Display for BiOperation {
     }
 }
 
-pub trait VariableIdentifier: Clone {
-    fn parse(input: &str) -> Option<Self>;
-}
+pub trait VariableIdentifier: Clone {}
 
-impl VariableIdentifier for () {
-    fn parse(_: &str) -> Option<Self> {
-        None
-    }
-}
+impl VariableIdentifier for () {}
 
 pub trait FunctionIdentifier: Clone {}
 
@@ -148,6 +142,7 @@ where
         token_tree: &TokenTree<'_>,
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
+        custom_variable_parser: impl Fn(&str) -> Option<V>,
     ) -> Result<SyntaxTree<N, V, F>, (SyntaxError, NodeId)> {
         let (arena, root) = (&token_tree.0.arena, token_tree.0.root);
         construct::<
@@ -179,7 +174,9 @@ where
                         TokenNode::Variable(var) => N::parse_constant(var)
                             .map(|c| SyntaxNode::Number(c))
                             .or_else(|| custom_constant_parser(var).map(|c| SyntaxNode::Number(c)))
-                            .or_else(|| V::parse(var).map(|v| SyntaxNode::Variable(v)))
+                            .or_else(|| {
+                                custom_variable_parser(var).map(|v| SyntaxNode::Variable(v))
+                            })
                             .map(Some)
                             .ok_or(SyntaxError::UnknownVariableOrConstant),
                         TokenNode::Parentheses => {
@@ -472,16 +469,7 @@ mod test {
         T,
     }
 
-    impl VariableIdentifier for CustomVar {
-        fn parse(input: &str) -> Option<Self> {
-            match input {
-                "x" => Some(Self::X),
-                "y" => Some(Self::Y),
-                "t" => Some(Self::T),
-                _ => None,
-            }
-        }
-    }
+    impl VariableIdentifier for CustomVar {}
 
     impl Display for CustomVar {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -523,6 +511,12 @@ mod test {
                     |_| None,
                     |input| match input {
                         "dot" => Some((CustomFunc::Dot, 2, Some(2))),
+                        _ => None,
+                    },
+                    |input| match input {
+                        "x" => Some(CustomVar::X),
+                        "y" => Some(CustomVar::Y),
+                        "t" => Some(CustomVar::T),
                         _ => None,
                     },
                 )
@@ -654,6 +648,12 @@ mod test {
                     &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
                     |_| None,
                     |_| None,
+                    |input| match input {
+                        "x" => Some(CustomVar::X),
+                        "y" => Some(CustomVar::Y),
+                        "t" => Some(CustomVar::T),
+                        _ => None,
+                    },
                 )
                 .unwrap();
                 syn1.aot_evaluation(|_| &|_| 0.0);
@@ -661,6 +661,12 @@ mod test {
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
                     |_| None,
                     |_| None,
+                    |input| match input {
+                        "x" => Some(CustomVar::X),
+                        "y" => Some(CustomVar::Y),
+                        "t" => Some(CustomVar::T),
+                        _ => None,
+                    },
                 )
                 .unwrap();
                 assert_eq!(format!("{}", syn1), format!("{}", syn2));
@@ -683,6 +689,12 @@ mod test {
                     &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
                     |_| None,
                     |_| None,
+                    |input| match input {
+                        "x" => Some(CustomVar::X),
+                        "y" => Some(CustomVar::Y),
+                        "t" => Some(CustomVar::T),
+                        _ => None,
+                    },
                 )
                 .unwrap();
                 syn1.displacing_simplification();
@@ -690,6 +702,12 @@ mod test {
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
                     |_| None,
                     |_| None,
+                    |input| match input {
+                        "x" => Some(CustomVar::X),
+                        "y" => Some(CustomVar::Y),
+                        "t" => Some(CustomVar::T),
+                        _ => None,
+                    },
                 )
                 .unwrap();
                 assert_eq!(format!("{}", syn1), format!("{}", syn2));
@@ -712,6 +730,12 @@ mod test {
                     |_| None,
                     |input| match input {
                         "dot" => Some((CustomFunc::Dot, 2, Some(2))),
+                        _ => None,
+                    },
+                    |input| match input {
+                        "x" => Some(CustomVar::X),
+                        "y" => Some(CustomVar::Y),
+                        "t" => Some(CustomVar::T),
                         _ => None,
                     },
                 )

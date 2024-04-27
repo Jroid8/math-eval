@@ -15,16 +15,7 @@ enum MyVar {
     T,
 }
 
-impl VariableIdentifier for MyVar {
-    fn parse(input: &str) -> Option<Self> {
-        match input {
-            "x" => Some(MyVar::X),
-            "y" => Some(MyVar::Y),
-            "t" => Some(MyVar::T),
-            _ => None,
-        }
-    }
-}
+impl VariableIdentifier for MyVar {}
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum MyFunc {
@@ -57,6 +48,12 @@ macro_rules! to_expr {
             |input| match input {
                 "dist" => Some((MyFunc::Dist, 2, Some(2))),
                 "slope" => Some((MyFunc::Slope, 4, Some(4))),
+                _ => None,
+            },
+            |input| match input {
+                "x" => Some(MyVar::X),
+                "y" => Some(MyVar::Y),
+                "t" => Some(MyVar::T),
                 _ => None,
             },
         )

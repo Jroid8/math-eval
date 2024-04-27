@@ -285,16 +285,7 @@ mod test {
         T,
     }
 
-    impl VariableIdentifier for MyVar {
-        fn parse(input: &str) -> Option<Self> {
-            match input {
-                "x" => Some(MyVar::X),
-                "y" => Some(MyVar::Y),
-                "t" => Some(MyVar::T),
-                _ => None,
-            }
-        }
-    }
+    impl VariableIdentifier for MyVar {}
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum MyFunc {
@@ -316,6 +307,12 @@ mod test {
                     |input| match input {
                         "dist" => Some((MyFunc::Dist, 2, Some(2))),
                         "dot" => Some((MyFunc::Dot, 2, Some(2))),
+                        _ => None,
+                    },
+                    |input| match input {
+                        "x" => Some(MyVar::X),
+                        "y" => Some(MyVar::Y),
+                        "t" => Some(MyVar::T),
                         _ => None,
                     },
                 )
