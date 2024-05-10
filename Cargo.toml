@@ -19,7 +19,7 @@ type_complexity = "allow"
 redundant_closure_call = "allow"
 
 [lints.rust]
-rust_2018_idioms = "warn"
+rust_2018_idioms = { level = "warn", priority = -1}
 unsafe_code = "forbid"
 
 [[bench]]
