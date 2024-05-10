@@ -1,12 +1,11 @@
 use std::ops::RangeInclusive;
 
 use asm::MathAssembly;
-use indextree::{NodeEdge, NodeId};
 use number::MathEvalNumber;
-use syntax::{SyntaxError, SyntaxTree};
+use syntax::SyntaxTree;
 use tokenizer::{
-    token_stream::{Token, TokenStream},
-    token_tree::{TokenNode, TokenTree, TokenTreeError},
+    token_stream::TokenStream,
+    token_tree::TokenTree,
 };
 
 pub mod asm;
@@ -43,88 +42,6 @@ pub enum ParsingErrorKind {
     TooManyArguments,
 }
 
-fn token2index(input: &str, token_stream: &TokenStream, token_index: usize) -> usize {
-    let mut index = 0;
-    while input.chars().nth(index).unwrap().is_whitespace() {
-        index += 1
-    }
-    for token in &token_stream.0[..token_index] {
-        index += match token {
-            Token::Function(s) => s.len() + 1, // this token counts as both the function name and the opening parentheses
-            Token::Number(s) | Token::Variable(s) => s.len(),
-            Token::Operation(_) | Token::OpenParen | Token::CloseParen | Token::Comma => 1,
-        };
-        while input.chars().nth(index).unwrap().is_whitespace() {
-            index += 1
-        }
-    }
-    index
-}
-
-fn token2range(
-    input: &str,
-    token_stream: &TokenStream,
-    token_index: usize,
-) -> RangeInclusive<usize> {
-    let mut index = token2index(input, token_stream, token_index + 1) - 1;
-    while input.chars().nth(index).unwrap().is_whitespace() {
-        index -= 1;
-    }
-    token2index(input, token_stream, token_index)..=index
-}
-
-fn tokennode2range(
-    input: &str,
-    token_tree: &TokenTree<'_>,
-    target: NodeId,
-) -> RangeInclusive<usize> {
-    let mut index = 0;
-    macro_rules! count_space {
-        () => {
-            while input.chars().nth(index).unwrap().is_whitespace() {
-                index += 1
-            }
-        };
-    }
-    for node in token_tree.0.root.traverse(&token_tree.0.arena).skip(1) {
-        match node {
-            NodeEdge::Start(node) => {
-                if *token_tree.0.arena[node].get() != TokenNode::Argument {
-                    count_space!();
-                }
-                let old = index;
-                index += match token_tree.0.arena[node].get() {
-                    TokenNode::Number(s) | TokenNode::Variable(s) => s.len(),
-                    TokenNode::Operation(_) => 1,
-                    TokenNode::Parentheses => 1,
-                    TokenNode::Function(f) => f.len() + 1,
-                    TokenNode::Argument => 0,
-                };
-                if node == target {
-                    return old..=index - 1;
-                }
-            }
-            NodeEdge::End(node) => match token_tree.0.arena[node].get() {
-                TokenNode::Argument => {
-                    if node
-                        .following_siblings(&token_tree.0.arena)
-                        .nth(1)
-                        .is_some()
-                    {
-                        count_space!();
-                        index += 1;
-                    }
-                }
-                TokenNode::Parentheses | TokenNode::Function(_) => {
-                    count_space!();
-                    index += 1
-                }
-                _ => (),
-            },
-        }
-    }
-    unreachable!()
-}
 
 pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     input: &str,
@@ -133,42 +50,15 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     custom_variable_parser: impl Fn(&str) -> Option<V>,
     function_to_pointer: &impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
 ) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
-    let token_stream = TokenStream::new(input).map_err(|i| ParsingError {
-        kind: ParsingErrorKind::UnexpectedCharacter,
-        at: i..=i,
-    })?;
-    let token_tree = TokenTree::new(&token_stream).map_err(|e| match e {
-        TokenTreeError::CommaOutsideFunction(i) => ParsingError {
-            kind: ParsingErrorKind::CommaOutsideFunction,
-            at: token2range(input, &token_stream, i),
-        },
-        TokenTreeError::MissingOpenParenthesis(i) => ParsingError {
-            kind: ParsingErrorKind::MissingOpenParenthesis,
-            at: token2range(input, &token_stream, i),
-        },
-        TokenTreeError::MissingCloseParenthesis(i) => ParsingError {
-            kind: ParsingErrorKind::MissingCloseParenthesis,
-            at: token2range(input, &token_stream, i),
-        },
-    })?;
+    let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
+    let token_tree = TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
     let mut syntax_tree = SyntaxTree::new(
         &token_tree,
         custom_constant_parser,
         custom_function_parser,
         custom_variable_parser,
     )
-    .map_err(|(err, node)| {
-        let at = tokennode2range(input, &token_tree, node);
-        let kind = match err {
-            SyntaxError::NumberParsingError => ParsingErrorKind::NumberParsingError,
-            SyntaxError::MisplacedOperator => ParsingErrorKind::MisplacedOperator,
-            SyntaxError::UnknownVariableOrConstant => ParsingErrorKind::UnknownVariableOrConstant,
-            SyntaxError::UnknownFunction => ParsingErrorKind::UnknownFunction,
-            SyntaxError::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
-            SyntaxError::TooManyArguments => ParsingErrorKind::TooManyArguments,
-        };
-        ParsingError { at, kind }
-    })?;
+    .map_err(|e| e.to_general(input, &token_tree))?;
     syntax_tree.aot_evaluation(function_to_pointer);
     syntax_tree.displacing_simplification();
     Ok(MathAssembly::new(

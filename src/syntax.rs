@@ -1,9 +1,11 @@
 use std::fmt::{Debug, Display};
+use std::ops::RangeInclusive;
 
 use crate::asm::MathAssembly;
 use crate::number::{MathEvalNumber, NativeFunction};
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
+use crate::{ParsingError, ParsingErrorKind};
 use indextree::{NodeEdge, NodeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -110,7 +112,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum SyntaxError {
+pub enum SyntaxErrorKind {
     NumberParsingError,
     MisplacedOperator,
     UnknownVariableOrConstant,
@@ -119,10 +121,82 @@ pub enum SyntaxError {
     TooManyArguments,
 }
 
+fn tokennode2range(
+    input: &str,
+    token_tree: &TokenTree<'_>,
+    target: NodeId,
+) -> RangeInclusive<usize> {
+    let mut index = 0;
+    macro_rules! count_space {
+        () => {
+            while input.chars().nth(index).unwrap().is_whitespace() {
+                index += 1
+            }
+        };
+    }
+    for node in token_tree.0.root.traverse(&token_tree.0.arena).skip(1) {
+        match node {
+            NodeEdge::Start(node) => {
+                if *token_tree.0.arena[node].get() != TokenNode::Argument {
+                    count_space!();
+                }
+                let old = index;
+                index += match token_tree.0.arena[node].get() {
+                    TokenNode::Number(s) | TokenNode::Variable(s) => s.len(),
+                    TokenNode::Operation(_) => 1,
+                    TokenNode::Parentheses => 1,
+                    TokenNode::Function(f) => f.len() + 1,
+                    TokenNode::Argument => 0,
+                };
+                if node == target {
+                    return old..=index - 1;
+                }
+            }
+            NodeEdge::End(node) => match token_tree.0.arena[node].get() {
+                TokenNode::Argument => {
+                    if node
+                        .following_siblings(&token_tree.0.arena)
+                        .nth(1)
+                        .is_some()
+                    {
+                        count_space!();
+                        index += 1;
+                    }
+                }
+                TokenNode::Parentheses | TokenNode::Function(_) => {
+                    count_space!();
+                    index += 1
+                }
+                _ => (),
+            },
+        }
+    }
+    unreachable!()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SyntaxError(SyntaxErrorKind, NodeId);
+
+impl SyntaxError {
+    pub fn to_general(self, input: &str, token_tree: &TokenTree<'_>) -> ParsingError {
+        ParsingError {
+            at: tokennode2range(input, token_tree, self.1),
+            kind: match self.0 {
+                SyntaxErrorKind::NumberParsingError => ParsingErrorKind::NumberParsingError,
+                SyntaxErrorKind::MisplacedOperator => ParsingErrorKind::MisplacedOperator,
+                SyntaxErrorKind::UnknownVariableOrConstant => {
+                    ParsingErrorKind::UnknownVariableOrConstant
+                }
+                SyntaxErrorKind::UnknownFunction => ParsingErrorKind::UnknownFunction,
+                SyntaxErrorKind::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
+                SyntaxErrorKind::TooManyArguments => ParsingErrorKind::TooManyArguments,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyntaxTree<N: MathEvalNumber, V: Clone, F: Clone>(
-    pub Tree<SyntaxNode<N, V, F>>,
-);
+pub struct SyntaxTree<N: MathEvalNumber, V: Clone, F: Clone>(pub Tree<SyntaxNode<N, V, F>>);
 
 impl<V, N, F> SyntaxTree<N, V, F>
 where
@@ -135,12 +209,12 @@ where
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
-    ) -> Result<SyntaxTree<N, V, F>, (SyntaxError, NodeId)> {
+    ) -> Result<SyntaxTree<N, V, F>, SyntaxError> {
         let (arena, root) = (&token_tree.0.arena, token_tree.0.root);
         construct::<
             (NodeId, Option<usize>, Option<usize>),
             SyntaxNode<N, V, F>,
-            (SyntaxError, NodeId),
+            SyntaxError,
         >(
             (root, None, None),
             |(token_node, start, end), call_stack| {
@@ -161,8 +235,8 @@ where
                         TokenNode::Number(num) => num
                             .parse::<N>()
                             .map(|n| Some(SyntaxNode::Number(n)))
-                            .map_err(|_| SyntaxError::NumberParsingError),
-                        TokenNode::Operation(_) => Err(SyntaxError::MisplacedOperator), // operations shouldn't end up here
+                            .map_err(|_| SyntaxErrorKind::NumberParsingError),
+                        TokenNode::Operation(_) => Err(SyntaxErrorKind::MisplacedOperator), // operations shouldn't end up here
                         TokenNode::Variable(var) => N::parse_constant(var)
                             .map(|c| SyntaxNode::Number(c))
                             .or_else(|| custom_constant_parser(var).map(|c| SyntaxNode::Number(c)))
@@ -170,7 +244,7 @@ where
                                 custom_variable_parser(var).map(|v| SyntaxNode::Variable(v))
                             })
                             .map(Some)
-                            .ok_or(SyntaxError::UnknownVariableOrConstant),
+                            .ok_or(SyntaxErrorKind::UnknownVariableOrConstant),
                         TokenNode::Parentheses => {
                             call_stack.push((current_node, None, None));
                             Ok(None)
@@ -184,11 +258,11 @@ where
                             Some((f, min_args, max_args)) => {
                                 let arg_count = current_node.children(arena).count();
                                 if arg_count < min_args as usize {
-                                    Err(SyntaxError::NotEnoughArguments)
+                                    Err(SyntaxErrorKind::NotEnoughArguments)
                                 } else if arg_count > 255
                                     || max_args.is_some_and(|ma| arg_count as u8 > ma)
                                 {
-                                    Err(SyntaxError::TooManyArguments)
+                                    Err(SyntaxErrorKind::TooManyArguments)
                                 } else {
                                     call_stack.extend(
                                         current_node
@@ -199,11 +273,11 @@ where
                                     Ok(Some(f))
                                 }
                             }
-                            None => Err(SyntaxError::UnknownFunction),
+                            None => Err(SyntaxErrorKind::UnknownFunction),
                         },
                         TokenNode::Argument => unreachable!(),
                     }
-                    .map_err(|e| (e, token_node))
+                    .map_err(|e| SyntaxError(e, token_node))
                 } else {
                     for opr in ALL_BIOPERATION_ORDERED {
                         // for detecting implied multiplications (e.g. 2pi,3x)
@@ -237,10 +311,10 @@ where
                                         call_stack.push((token_node, Some(start + 1), Some(end)));
                                         Ok(Some(SyntaxNode::UnOperation(UnOperation::Neg)))
                                     }
-                                    _ => Err((SyntaxError::MisplacedOperator, token_node)),
+                                    _ => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, token_node)),
                                 }
                             } else if index == end {
-                                Err((SyntaxError::MisplacedOperator, token_node))
+                                Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, token_node))
                             } else {
                                 call_stack.push((token_node, Some(start), Some(index - 1)));
                                 call_stack.push((token_node, Some(index + 1), Some(end)));
@@ -255,7 +329,7 @@ where
                         call_stack.push((token_node, Some(start), Some(end - 1)));
                         Ok(Some(SyntaxNode::UnOperation(UnOperation::Fac)))
                     } else {
-                        Err((SyntaxError::MisplacedOperator, token_node))
+                        Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, token_node))
                     }
                 }
             },
@@ -739,5 +813,44 @@ mod test {
         test!("min(1, x, y^2)");
         test!("min(1, x, y^2, x*y+1)");
         test!("min(1, x, y^2, x*y+1, sin(x*cos(y)+1))");
+    }
+
+    #[test]
+    fn test_tokennode2range() {
+        let input = " max(1, -18) * sin(pi)";
+        let ts = TokenStream::new(input).unwrap();
+        let tt = TokenTree::new(&ts).unwrap();
+        println!(
+            "{:?}",
+            tt.0.arena[tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()].get()
+        );
+        assert_eq!(
+            tokennode2range(
+                input,
+                &tt,
+                tt.0.root.descendants(&tt.0.arena).nth(3).unwrap()
+            ),
+            5..=5
+        );
+        assert_eq!(
+            tokennode2range(
+                input,
+                &tt,
+                tt.0.root.descendants(&tt.0.arena).nth(6).unwrap()
+            ),
+            9..=10
+        );
+        assert_eq!(
+            tokennode2range(input, &tt, tt.0.root.children(&tt.0.arena).nth(1).unwrap()),
+            13..=13
+        );
+        assert_eq!(
+            tokennode2range(
+                input,
+                &tt,
+                tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()
+            ),
+            19..=20
+        );
     }
 }

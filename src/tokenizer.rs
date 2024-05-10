@@ -20,7 +20,7 @@ pub mod token_stream {
     pub struct TokenStream(pub Vec<Token>);
 
     impl TokenStream {
-        pub fn new(mut input: &str) -> Result<TokenStream, usize> {
+        pub fn new(mut input: &str) -> Result<TokenStream, TokenizationError> {
             let mut result = Vec::new();
             let mut index = 0;
             macro_rules! test {
@@ -48,18 +48,67 @@ pub mod token_stream {
               => |_| Token::CloseParen);
                 test!(one_of::<_, _, ()>("([{")
               => |_| Token::OpenParen);
-                return Err(index);
+                return Err(TokenizationError(index));
             }
             Ok(TokenStream(result))
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+    pub struct TokenizationError(pub usize);
+
+    impl TokenizationError {
+        pub fn to_general(self) -> crate::ParsingError {
+            crate::ParsingError {
+                kind: crate::ParsingErrorKind::UnexpectedCharacter,
+                at: self.0..=self.0,
+            }
         }
     }
 }
 
 pub mod token_tree {
+    use std::ops::RangeInclusive;
+
     use indextree::Arena;
 
     use crate::tokenizer::token_stream::{Token, TokenStream};
     use crate::tree_utils::Tree;
+    use crate::{ParsingError, ParsingErrorKind};
+
+    pub(crate) fn token2index(
+        input: &str,
+        token_stream: &TokenStream,
+        token_index: usize,
+    ) -> usize {
+        let mut index = 0;
+        while input.chars().nth(index).unwrap().is_whitespace() {
+            index += 1
+        }
+        for token in &token_stream.0[..token_index] {
+            index += match token {
+                Token::Function(s) => s.len() + 1, // this token counts as both the function name and the opening parentheses
+                Token::Number(s) | Token::Variable(s) => s.len(),
+                Token::Operation(_) | Token::OpenParen | Token::CloseParen | Token::Comma => 1,
+            };
+            while input.chars().nth(index).unwrap().is_whitespace() {
+                index += 1
+            }
+        }
+        index
+    }
+
+    pub(crate) fn token2range(
+        input: &str,
+        token_stream: &TokenStream,
+        token_index: usize,
+    ) -> RangeInclusive<usize> {
+        let mut index = token2index(input, token_stream, token_index + 1) - 1;
+        while input.chars().nth(index).unwrap().is_whitespace() {
+            index -= 1;
+        }
+        token2index(input, token_stream, token_index)..=index
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum TokenNode<'a> {
@@ -69,13 +118,6 @@ pub mod token_tree {
         Parentheses,
         Function(&'a str),
         Argument,
-    }
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub enum TokenTreeError {
-        CommaOutsideFunction(usize),
-        MissingOpenParenthesis(usize),
-        MissingCloseParenthesis(usize),
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,7 +183,7 @@ pub mod token_tree {
                     match *token {
                         Token::CloseParen => {
                             parens += 1;
-                        },
+                        }
                         Token::OpenParen | Token::Function(_) => {
                             if parens == 0 {
                                 unclosed_paren = Some(index)
@@ -152,7 +194,35 @@ pub mod token_tree {
                         _ => (),
                     }
                 }
-                Err(TokenTreeError::MissingCloseParenthesis(unclosed_paren.unwrap()))
+                Err(TokenTreeError::MissingCloseParenthesis(
+                    unclosed_paren.unwrap(),
+                ))
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum TokenTreeError {
+        CommaOutsideFunction(usize),
+        MissingOpenParenthesis(usize),
+        MissingCloseParenthesis(usize),
+    }
+
+    impl TokenTreeError {
+        pub fn to_general(self, input: &str, token_stream: &TokenStream) -> ParsingError {
+            match self {
+                TokenTreeError::CommaOutsideFunction(i) => ParsingError {
+                    kind: ParsingErrorKind::CommaOutsideFunction,
+                    at: token2range(input, token_stream, i),
+                },
+                TokenTreeError::MissingOpenParenthesis(i) => ParsingError {
+                    kind: ParsingErrorKind::MissingOpenParenthesis,
+                    at: token2range(input, token_stream, i),
+                },
+                TokenTreeError::MissingCloseParenthesis(i) => ParsingError {
+                    kind: ParsingErrorKind::MissingCloseParenthesis,
+                    at: token2range(input, token_stream, i),
+                },
             }
         }
     }
@@ -234,8 +304,8 @@ mod test {
                 CloseParen
             ]
         );
-        assert_eq!(TokenStream::new("ت").unwrap_err(), 0);
-        assert_eq!(TokenStream::new("10+ت").unwrap_err(), 3);
+        assert_eq!(TokenStream::new("ت").unwrap_err(), TokenizationError(0));
+        assert_eq!(TokenStream::new("10+ت").unwrap_err(), TokenizationError(3));
     }
 
     macro_rules! branch {
@@ -372,5 +442,25 @@ mod test {
             treefy!(Number("455829".to_string()), CloseParen),
             Err(TokenTreeError::MissingOpenParenthesis(1))
         );
+    }
+
+    #[test]
+    fn test_token2index() {
+        let input = " sin(pi) +1";
+        let ts = TokenStream::new(input).unwrap();
+        assert_eq!(token2index(input, &ts, 3), 9);
+        assert_eq!(token2index(input, &ts, 4), 10);
+        assert_eq!(token2index(input, &ts, 0), 1);
+        assert_eq!(token2index(input, &ts, 1), 5);
+    }
+
+    #[test]
+    fn test_token2range() {
+        let input = " max(pi, 1, -4)*3";
+        let ts = TokenStream::new(input).unwrap();
+        assert_eq!(token2range(input, &ts, 0), 1..=4);
+        assert_eq!(token2range(input, &ts, 1), 5..=6);
+        assert_eq!(token2range(input, &ts, 2), 7..=7);
+        assert_eq!(token2range(input, &ts, 3), 9..=9);
     }
 }
