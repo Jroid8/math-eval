@@ -277,7 +277,7 @@ where
                         },
                         TokenNode::Argument => unreachable!(),
                     }
-                    .map_err(|e| SyntaxError(e, token_node))
+                    .map_err(|e| SyntaxError(e, current_node))
                 } else {
                     for opr in ALL_BIOPERATION_ORDERED {
                         // for detecting implied multiplications (e.g. 2pi,3x)
