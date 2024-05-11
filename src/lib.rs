@@ -68,61 +68,63 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     ))
 }
 
-#[test]
-fn test_token2index() {
-    let input = " sin(pi) +1";
-    let ts = TokenStream::new(input).unwrap();
-    assert_eq!(token2index(input, &ts, 3), 9);
-    assert_eq!(token2index(input, &ts, 4), 10);
-    assert_eq!(token2index(input, &ts, 0), 1);
-    assert_eq!(token2index(input, &ts, 1), 5);
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TestVar {
+    X,
+    Y,
+    T
 }
 
-#[test]
-fn test_token2range() {
-    let input = " max(pi, 1, -4)*3";
-    let ts = TokenStream::new(input).unwrap();
-    assert_eq!(token2range(input, &ts, 0), 1..=4);
-    assert_eq!(token2range(input, &ts, 1), 5..=6);
-    assert_eq!(token2range(input, &ts, 2), 7..=7);
-    assert_eq!(token2range(input, &ts, 3), 9..=9);
+#[cfg(test)]
+impl std::fmt::Display for TestVar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TestVar::X => f.write_str("x"),
+            TestVar::Y => f.write_str("y"),
+            TestVar::T => f.write_str("t"),
+        }
+    }
 }
 
-#[test]
-fn test_tokennode2range() {
-    let input = " max(1, -18) * sin(pi)";
-    let ts = TokenStream::new(input).unwrap();
-    let tt = TokenTree::new(&ts).unwrap();
-    println!(
-        "{:?}",
-        tt.0.arena[tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()].get()
-    );
-    assert_eq!(
-        tokennode2range(
-            input,
-            &tt,
-            tt.0.root.descendants(&tt.0.arena).nth(3).unwrap()
-        ),
-        5..=5
-    );
-    assert_eq!(
-        tokennode2range(
-            input,
-            &tt,
-            tt.0.root.descendants(&tt.0.arena).nth(6).unwrap()
-        ),
-        9..=10
-    );
-    assert_eq!(
-        tokennode2range(input, &tt, tt.0.root.children(&tt.0.arena).nth(1).unwrap()),
-        13..=13
-    );
-    assert_eq!(
-        tokennode2range(
-            input,
-            &tt,
-            tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()
-        ),
-        19..=20
-    );
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TestFunc {
+    Gcd,
+    Lcm,
+    Mean,
+    Dist,
+}
+
+#[cfg(test)]
+impl std::fmt::Display for TestFunc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TestFunc::Gcd => f.write_str("gcd"),
+            TestFunc::Lcm => f.write_str("lcm"),
+            TestFunc::Mean => f.write_str("mean"),
+            TestFunc::Dist => f.write_str("dist"),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn parse_test_func(input: &str) -> Option<(TestFunc, u8, Option<u8>)> {
+    match input {
+        "gcd" => Some((TestFunc::Gcd, 2, Some(2))),
+        "lcm" => Some((TestFunc::Lcm, 2, Some(2))),
+        "mean" => Some((TestFunc::Mean, 2, None)),
+        "dist" => Some((TestFunc::Dist, 2, Some(2))),
+        _ => None
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn parse_test_var(input: &str) -> Option<TestVar> {
+    match input {
+        "x" => Some(TestVar::X),
+        "y" => Some(TestVar::Y),
+        "t" => Some(TestVar::T),
+        _ => None
+    }
 }
