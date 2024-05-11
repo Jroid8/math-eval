@@ -14,6 +14,7 @@ pub mod syntax;
 pub mod tokenizer;
 pub mod tree_utils;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsingError {
     kind: ParsingErrorKind,
     at: RangeInclusive<usize>,
@@ -29,6 +30,7 @@ impl ParsingError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParsingErrorKind {
     UnexpectedCharacter,
     CommaOutsideFunction,
