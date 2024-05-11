@@ -527,36 +527,7 @@ mod test {
     use super::*;
     use crate::tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
     use crate::tree_utils::VecTree::{self, Leaf};
-
-    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-    enum CustomVar {
-        X,
-        Y,
-        T,
-    }
-
-    impl Display for CustomVar {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str(match self {
-                CustomVar::X => "x",
-                CustomVar::Y => "y",
-                CustomVar::T => "t",
-            })
-        }
-    }
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum CustomFunc {
-        Dot,
-    }
-
-    impl Display for CustomFunc {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str(match self {
-                CustomFunc::Dot => "dot",
-            })
-        }
-    }
+    use crate::{TestVar, TestFunc};
 
     macro_rules! branch {
         ($node:expr, $($children:expr),+) => {
@@ -564,32 +535,27 @@ mod test {
         };
     }
 
+    fn parse(input: &str) -> Result<SyntaxTree<f64, TestVar, TestFunc>, ParsingError> {
+        let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
+        let token_tree = TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+        SyntaxTree::new(
+            &token_tree,
+            |_| None,
+            crate::parse_test_func,
+            crate::parse_test_var,
+        ).map_err(|e| e.to_general(input, &token_tree))
+    }
+
     #[test]
     fn test_syntaxify() {
-        macro_rules! syntaxify {
-            ($input:literal) => {
-                SyntaxTree::<f64, CustomVar, CustomFunc>::new(
-                    &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
-                    |_| None,
-                    |input| match input {
-                        "dot" => Some((CustomFunc::Dot, 2, Some(2))),
-                        _ => None,
-                    },
-                    |input| match input {
-                        "x" => Some(CustomVar::X),
-                        "y" => Some(CustomVar::Y),
-                        "t" => Some(CustomVar::T),
-                        _ => None,
-                    },
-                )
-                .map(|syntree| VecTree::new(&syntree.0.arena, syntree.0.root))
-            };
+        fn syntaxify(input: &str) -> Result<VecTree<SyntaxNode<f64, TestVar, TestFunc>>, ParsingError> {
+            parse(input).map(|st| VecTree::new(&st.0.arena, st.0.root))
         }
-        assert_eq!(syntaxify!("0"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(syntaxify!("(0)"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(syntaxify!("((0))"), Ok(Leaf(SyntaxNode::Number(0.0))));
+        assert_eq!(syntaxify("0"), Ok(Leaf(SyntaxNode::Number(0.0))));
+        assert_eq!(syntaxify("(0)"), Ok(Leaf(SyntaxNode::Number(0.0))));
+        assert_eq!(syntaxify("((0))"), Ok(Leaf(SyntaxNode::Number(0.0))));
         assert_eq!(
-            syntaxify!("1+1"),
+            syntaxify("1+1"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Add),
                 Leaf(SyntaxNode::Number(1.0)),
@@ -597,14 +563,14 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify!("-12"),
+            syntaxify("-12"),
             Ok(branch!(
                 SyntaxNode::UnOperation(UnOperation::Neg),
                 Leaf(SyntaxNode::Number(12.0))
             ))
         );
         assert_eq!(
-            syntaxify!("8*3+1"),
+            syntaxify("8*3+1"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Add),
                 branch!(
@@ -616,7 +582,7 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify!("12/3/2"),
+            syntaxify("12/3/2"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Div),
                 branch!(
@@ -628,7 +594,7 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify!("8*(3+1)"),
+            syntaxify("8*(3+1)"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Mul),
                 Leaf(SyntaxNode::Number(8.0)),
@@ -640,7 +606,7 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify!("8*3^2+1"),
+            syntaxify("8*3^2+1"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Add),
                 branch!(
@@ -656,45 +622,45 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify!("2x"),
+            syntaxify("2x"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Mul),
                 Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Variable(CustomVar::X))
+                Leaf(SyntaxNode::Variable(TestVar::X))
             ))
         );
         assert_eq!(
-            syntaxify!("sin(14)"),
+            syntaxify("sin(14)"),
             Ok(branch!(
                 SyntaxNode::NativeFunction(NativeFunction::Sin),
                 Leaf(SyntaxNode::Number(14.0))
             ))
         );
         assert_eq!(
-            syntaxify!("dot(2,4)"),
+            syntaxify("lcm(2,4)"),
             Ok(branch!(
-                SyntaxNode::CustomFunction(CustomFunc::Dot),
+                SyntaxNode::CustomFunction(TestFunc::Lcm),
                 Leaf(SyntaxNode::Number(2.0)),
                 Leaf(SyntaxNode::Number(4.0))
             ))
         );
         assert_eq!(
-            syntaxify!("max(2, x, 8y, x*y+1)"),
+            syntaxify("max(2, x, 8y, x*y+1)"),
             Ok(branch!(
                 SyntaxNode::NativeFunction(NativeFunction::Max),
                 Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Variable(CustomVar::X)),
+                Leaf(SyntaxNode::Variable(TestVar::X)),
                 branch!(
                     SyntaxNode::BiOperation(BiOperation::Mul),
                     Leaf(SyntaxNode::Number(8.0)),
-                    Leaf(SyntaxNode::Variable(CustomVar::Y))
+                    Leaf(SyntaxNode::Variable(TestVar::Y))
                 ),
                 branch!(
                     SyntaxNode::BiOperation(BiOperation::Add),
                     branch!(
                         SyntaxNode::BiOperation(BiOperation::Mul),
-                        Leaf(SyntaxNode::Variable(CustomVar::X)),
-                        Leaf(SyntaxNode::Variable(CustomVar::Y))
+                        Leaf(SyntaxNode::Variable(TestVar::X)),
+                        Leaf(SyntaxNode::Variable(TestVar::Y))
                     ),
                     Leaf(SyntaxNode::Number(1.0))
                 )
@@ -706,31 +672,9 @@ mod test {
     fn test_aot_evaluation() {
         macro_rules! compare {
             ($i1:literal, $i2:literal) => {
-                let mut syn1 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
-                    &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
-                    |_| None,
-                    |_| None,
-                    |input| match input {
-                        "x" => Some(CustomVar::X),
-                        "y" => Some(CustomVar::Y),
-                        "t" => Some(CustomVar::T),
-                        _ => None,
-                    },
-                )
-                .unwrap();
+                let mut syn1 = parse($i1).unwrap();
                 syn1.aot_evaluation(|_| &|_| 0.0);
-                let syn2 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
-                    &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
-                    |_| None,
-                    |_| None,
-                    |input| match input {
-                        "x" => Some(CustomVar::X),
-                        "y" => Some(CustomVar::Y),
-                        "t" => Some(CustomVar::T),
-                        _ => None,
-                    },
-                )
-                .unwrap();
+                let syn2 = parse($i2).unwrap();
                 assert_eq!(format!("{}", syn1), format!("{}", syn2));
             };
         }
@@ -747,27 +691,27 @@ mod test {
     fn test_displacing_simplification() {
         macro_rules! compare {
             ($i1:literal, $i2:literal) => {
-                let mut syn1 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
+                let mut syn1 = SyntaxTree::<f64, TestVar, TestFunc>::new(
                     &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
                     |_| None,
                     |_| None,
                     |input| match input {
-                        "x" => Some(CustomVar::X),
-                        "y" => Some(CustomVar::Y),
-                        "t" => Some(CustomVar::T),
+                        "x" => Some(TestVar::X),
+                        "y" => Some(TestVar::Y),
+                        "t" => Some(TestVar::T),
                         _ => None,
                     },
                 )
                 .unwrap();
                 syn1.displacing_simplification();
-                let syn2 = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
+                let syn2 = SyntaxTree::<f64, TestVar, TestFunc>::new(
                     &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
                     |_| None,
                     |_| None,
                     |input| match input {
-                        "x" => Some(CustomVar::X),
-                        "y" => Some(CustomVar::Y),
-                        "t" => Some(CustomVar::T),
+                        "x" => Some(TestVar::X),
+                        "y" => Some(TestVar::Y),
+                        "t" => Some(TestVar::T),
                         _ => None,
                     },
                 )
@@ -787,28 +731,13 @@ mod test {
     fn test_syntax_display() {
         macro_rules! test {
             ($input:literal) => {
-                let syn = SyntaxTree::<f64, CustomVar, CustomFunc>::new(
-                    &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
-                    |_| None,
-                    |input| match input {
-                        "dot" => Some((CustomFunc::Dot, 2, Some(2))),
-                        _ => None,
-                    },
-                    |input| match input {
-                        "x" => Some(CustomVar::X),
-                        "y" => Some(CustomVar::Y),
-                        "t" => Some(CustomVar::T),
-                        _ => None,
-                    },
-                )
-                .unwrap();
-                assert_eq!($input, syn.to_string());
+                assert_eq!($input, parse($input).unwrap().to_string());
             };
         }
         test!("x");
         test!("1+x");
         test!("sin(x)");
-        test!("dot(x, y)");
+        test!("dist(x, y)");
         test!("min(1, x)");
         test!("min(1, x, y^2)");
         test!("min(1, x, y^2, x*y+1)");
