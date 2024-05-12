@@ -290,9 +290,9 @@ mod test {
             crate::test_func_to_pointer,
         )
         .map(|mut asm| asm.eval(|var| match var {
-            TestVar::X => 2.0,
-            TestVar::Y => -1.0,
-            TestVar::T => 5.0,
+            TestVar::X => 1.0,
+            TestVar::Y => 8.0,
+            TestVar::T => 1.5,
         }))
     }
 
