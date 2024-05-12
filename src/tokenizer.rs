@@ -237,8 +237,12 @@ mod test {
     fn test_tokenizer() {
         use super::token_stream::Token::*;
         assert_eq!(
-            TokenStream::new("11").unwrap().0,
-            vec![Number("11".to_string())]
+            TokenStream::new("1").unwrap().0,
+            vec![Number("1".to_string())]
+        );
+        assert_eq!(
+            TokenStream::new("2291").unwrap().0,
+            vec![Number("2291".to_string())]
         );
         assert_eq!(
             TokenStream::new("(11)").unwrap().0,
@@ -261,19 +265,19 @@ mod test {
             ]
         );
         assert_eq!(
-            TokenStream::new("10   *            5").unwrap().0,
+            TokenStream::new("839   *            4").unwrap().0,
             vec![
-                Number("10".to_string()),
+                Number("839".to_string()),
                 Operation('*'),
-                Number("5".to_string())
+                Number("4".to_string())
             ]
         );
         assert_eq!(
-            TokenStream::new("10.10+5.18").unwrap().0,
+            TokenStream::new("7.620-90.001").unwrap().0,
             vec![
-                Number("10.10".to_string()),
-                Operation('+'),
-                Number("5.18".to_string())
+                Number("7.620".to_string()),
+                Operation('-'),
+                Number("90.001".to_string())
             ]
         );
         assert_eq!(
@@ -300,7 +304,7 @@ mod test {
                 CloseParen
             ]
         );
-        assert_eq!(TokenStream::new("ت").unwrap_err(), TokenizationError(0));
+        assert_eq!(TokenStream::new("=").unwrap_err(), TokenizationError(0));
         assert_eq!(TokenStream::new("10+ت").unwrap_err(), TokenizationError(3));
     }
 
