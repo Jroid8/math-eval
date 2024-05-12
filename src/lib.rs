@@ -3,10 +3,7 @@ use std::ops::RangeInclusive;
 use asm::MathAssembly;
 use number::MathEvalNumber;
 use syntax::SyntaxTree;
-use tokenizer::{
-    token_stream::TokenStream,
-    token_tree::TokenTree,
-};
+use tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
 
 pub mod asm;
 pub mod number;
@@ -44,7 +41,6 @@ pub enum ParsingErrorKind {
     TooManyArguments,
 }
 
-
 pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
@@ -53,7 +49,8 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
 ) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-    let token_tree = TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+    let token_tree =
+        TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
     let mut syntax_tree = SyntaxTree::new(
         &token_tree,
         custom_constant_parser,
@@ -75,7 +72,7 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
 pub(crate) enum TestVar {
     X,
     Y,
-    T
+    T,
 }
 
 #[cfg(test)]
@@ -117,7 +114,7 @@ pub(crate) fn parse_test_func(input: &str) -> Option<(TestFunc, u8, Option<u8>)>
         "lcm" => Some((TestFunc::Lcm, 2, Some(2))),
         "mean" => Some((TestFunc::Mean, 2, None)),
         "dist" => Some((TestFunc::Dist, 2, Some(2))),
-        _ => None
+        _ => None,
     }
 }
 
@@ -127,7 +124,7 @@ pub(crate) fn parse_test_var(input: &str) -> Option<TestVar> {
         "x" => Some(TestVar::X),
         "y" => Some(TestVar::Y),
         "t" => Some(TestVar::T),
-        _ => None
+        _ => None,
     }
 }
 
