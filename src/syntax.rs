@@ -691,38 +691,15 @@ mod test {
     fn test_displacing_simplification() {
         macro_rules! compare {
             ($i1:literal, $i2:literal) => {
-                let mut syn1 = SyntaxTree::<f64, TestVar, TestFunc>::new(
-                    &TokenTree::new(&TokenStream::new($i1).unwrap()).unwrap(),
-                    |_| None,
-                    |_| None,
-                    |input| match input {
-                        "x" => Some(TestVar::X),
-                        "y" => Some(TestVar::Y),
-                        "t" => Some(TestVar::T),
-                        _ => None,
-                    },
-                )
-                .unwrap();
+                let mut syn1 = parse($i1).unwrap();
                 syn1.displacing_simplification();
-                let syn2 = SyntaxTree::<f64, TestVar, TestFunc>::new(
-                    &TokenTree::new(&TokenStream::new($i2).unwrap()).unwrap(),
-                    |_| None,
-                    |_| None,
-                    |input| match input {
-                        "x" => Some(TestVar::X),
-                        "y" => Some(TestVar::Y),
-                        "t" => Some(TestVar::T),
-                        _ => None,
-                    },
-                )
-                .unwrap();
-                assert_eq!(format!("{}", syn1), format!("{}", syn2));
+                assert_eq!(format!("{}", syn1), $i2);
             };
         }
         compare!("x/1/8", "0.125*x");
-        compare!("(x/16)/(y*4)", "0.015625*(x/y)");
-        compare!("(7/x)/(y/2)", "14/(x*y)");
-        compare!("(x/4)/(4/y)", "0.0625*(x*y)");
+        compare!("(x/16)/(y*4)", "0.015625*x/y");
+        compare!("(7/x)/(y/2)", "14/x*y");
+        compare!("(x/4)/(4/y)", "0.0625*x*y");
         compare!("10-x+12", "22-x");
         compare!("x*pi*2", "6.283185307179586*x");
     }
