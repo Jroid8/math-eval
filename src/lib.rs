@@ -130,3 +130,13 @@ pub(crate) fn parse_test_var(input: &str) -> Option<TestVar> {
         _ => None
     }
 }
+
+#[cfg(test)]
+pub(crate) fn test_func_to_pointer(func: &TestFunc) -> &'static dyn Fn(&[f64]) -> f64 {
+    match func {
+        TestFunc::Gcd => todo!(),
+        TestFunc::Lcm => todo!(),
+        TestFunc::Mean => todo!(),
+        TestFunc::Dist => todo!(),
+    }
+}
