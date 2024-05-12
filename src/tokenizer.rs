@@ -328,58 +328,58 @@ mod test {
         }
 
         assert_eq!(
-            treefy!(Number("10".to_string())),
-            Ok(vec![Leaf(TokenNode::Number("10"))])
+            treefy!(Number("192".to_string())),
+            Ok(vec![Leaf(TokenNode::Number("192"))])
         );
         assert_eq!(
-            treefy!(OpenParen, Number("10".to_string()), CloseParen),
+            treefy!(OpenParen, Number("3.14".to_string()), CloseParen),
             Ok(vec![branch!(
                 TokenNode::Parentheses,
-                Leaf(TokenNode::Number("10"))
+                Leaf(TokenNode::Number("3.14"))
             )])
         );
         assert_eq!(
             treefy!(
-                Number("10".to_string()),
+                Number("7".to_string()),
                 Operation('+'),
                 OpenParen,
-                Number("10".to_string()),
+                Number("0.1".to_string()),
                 CloseParen
             ),
             Ok(vec![
-                Leaf(TokenNode::Number("10")),
+                Leaf(TokenNode::Number("7")),
                 Leaf(TokenNode::Operation('+')),
-                branch!(TokenNode::Parentheses, Leaf(TokenNode::Number("10")))
+                branch!(TokenNode::Parentheses, Leaf(TokenNode::Number("0.1")))
             ])
         );
         assert_eq!(
             treefy!(
                 Function("sin".to_string()),
-                Number("10".to_string()),
+                Number("0".to_string()),
                 CloseParen
             ),
             Ok(vec![branch!(
                 TokenNode::Function("sin"),
-                branch!(TokenNode::Argument, Leaf(TokenNode::Number("10")))
+                branch!(TokenNode::Argument, Leaf(TokenNode::Number("0")))
             )])
         );
         assert_eq!(
             treefy!(
-                Function("sin".to_string()),
+                Function("tan".to_string()),
                 OpenParen,
-                Number("10".to_string()),
+                Number("-4.3".to_string()),
                 CloseParen,
                 Operation('/'),
-                Number("10".to_string()),
+                Number("-99.3".to_string()),
                 CloseParen
             ),
             Ok(vec![branch!(
-                TokenNode::Function("sin"),
+                TokenNode::Function("tan"),
                 branch!(
                     TokenNode::Argument,
-                    branch!(TokenNode::Parentheses, Leaf(TokenNode::Number("10"))),
+                    branch!(TokenNode::Parentheses, Leaf(TokenNode::Number("-4.3"))),
                     Leaf(TokenNode::Operation('/')),
-                    Leaf(TokenNode::Number("10"))
+                    Leaf(TokenNode::Number("-99.3"))
                 )
             )])
         );
@@ -389,9 +389,9 @@ mod test {
                 Variable("x".to_string()),
                 CloseParen,
                 Operation('+'),
-                Number("1".to_string()),
+                Number("5".to_string()),
                 OpenParen,
-                Number("103".to_string()),
+                Number("703".to_string()),
                 CloseParen
             ),
             Ok(vec![
@@ -400,8 +400,8 @@ mod test {
                     branch!(TokenNode::Argument, Leaf(TokenNode::Variable("x")))
                 ),
                 Leaf(TokenNode::Operation('+')),
-                Leaf(TokenNode::Number("1")),
-                branch!(TokenNode::Parentheses, Leaf(TokenNode::Number("103")))
+                Leaf(TokenNode::Number("5")),
+                branch!(TokenNode::Parentheses, Leaf(TokenNode::Number("703")))
             ])
         );
 
@@ -410,15 +410,15 @@ mod test {
             Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
-            treefy!(OpenParen, Number("11".to_string())),
+            treefy!(OpenParen, Number("725.4".to_string())),
             Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
-            treefy!(Number("11".to_string()), OpenParen),
+            treefy!(Number("-110".to_string()), OpenParen),
             Err(TokenTreeError::MissingCloseParenthesis(1))
         );
         assert_eq!(
-            treefy!(Function("sin".to_string()), Number("121".to_string())),
+            treefy!(Function("sin".to_string()), Number("1452.333".to_string())),
             Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
