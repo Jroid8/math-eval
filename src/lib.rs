@@ -133,10 +133,33 @@ pub(crate) fn parse_test_var(input: &str) -> Option<TestVar> {
 
 #[cfg(test)]
 pub(crate) fn test_func_to_pointer(func: &TestFunc) -> &'static dyn Fn(&[f64]) -> f64 {
+    fn gcd(inputs: &[f64]) -> f64 {
+        // not fool proof, but good for tests
+        let (mut num, mut den) = (inputs[0], inputs[1]);
+        loop {
+            let rem = num.rem_euclid(inputs[1]);
+            if rem == 0.0 {
+                return den;
+            } else {
+                num = den;
+                den = rem;
+            }
+        }
+    }
+    fn lcm(inputs: &[f64]) -> f64 {
+        inputs[0] * inputs[1] / gcd(inputs)
+    }
+    fn mean(inputs: &[f64]) -> f64 {
+        inputs.iter().sum::<f64>()/inputs.len() as f64
+    }
+    fn dist(inputs: &[f64]) -> f64 {
+        (inputs[0]*inputs[0] + inputs[1]*inputs[1]).sqrt()
+    }
+
     match func {
-        TestFunc::Gcd => todo!(),
-        TestFunc::Lcm => todo!(),
-        TestFunc::Mean => todo!(),
-        TestFunc::Dist => todo!(),
+        TestFunc::Gcd => &gcd,
+        TestFunc::Lcm => &lcm,
+        TestFunc::Mean => &mean,
+        TestFunc::Dist => &dist,
     }
 }
