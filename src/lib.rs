@@ -50,7 +50,7 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
-    function_to_pointer: &impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
+    function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
 ) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let token_tree = TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
@@ -61,7 +61,7 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
         custom_variable_parser,
     )
     .map_err(|e| e.to_general(input, &token_tree))?;
-    syntax_tree.aot_evaluation(function_to_pointer);
+    syntax_tree.aot_evaluation(&function_to_pointer);
     syntax_tree.displacing_simplification();
     Ok(MathAssembly::new(
         &syntax_tree.0.arena,
