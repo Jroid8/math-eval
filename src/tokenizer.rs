@@ -236,28 +236,24 @@ mod test {
     #[test]
     fn test_tokenizer() {
         use super::token_stream::Token::*;
-
-        macro_rules! tokenize {
-            ($input:expr) => {
-                TokenStream::new($input).unwrap().0
-            };
-        }
-
-        assert_eq!(tokenize!("11"), vec![Number("11".to_string())]);
         assert_eq!(
-            tokenize!("(11)"),
+            TokenStream::new("11").unwrap().0,
+            vec![Number("11".to_string())]
+        );
+        assert_eq!(
+            TokenStream::new("(11)").unwrap().0,
             vec![OpenParen, Number("11".to_string()), CloseParen]
         );
         assert_eq!(
-            tokenize!("[11]"),
+            TokenStream::new("[11]").unwrap().0,
             vec![OpenParen, Number("11".to_string()), CloseParen]
         );
         assert_eq!(
-            tokenize!("{11}"),
+            TokenStream::new("{11}").unwrap().0,
             vec![OpenParen, Number("11".to_string()), CloseParen]
         );
         assert_eq!(
-            tokenize!("10*5"),
+            TokenStream::new("10*5").unwrap().0,
             vec![
                 Number("10".to_string()),
                 Operation('*'),
@@ -265,7 +261,7 @@ mod test {
             ]
         );
         assert_eq!(
-            tokenize!("10   *            5"),
+            TokenStream::new("10   *            5").unwrap().0,
             vec![
                 Number("10".to_string()),
                 Operation('*'),
@@ -273,7 +269,7 @@ mod test {
             ]
         );
         assert_eq!(
-            tokenize!("10.10+5.18"),
+            TokenStream::new("10.10+5.18").unwrap().0,
             vec![
                 Number("10.10".to_string()),
                 Operation('+'),
@@ -281,7 +277,7 @@ mod test {
             ]
         );
         assert_eq!(
-            tokenize!("1.10/pi"),
+            TokenStream::new("1.10/pi").unwrap().0,
             vec![
                 Number("1.10".to_string()),
                 Operation('/'),
@@ -289,7 +285,7 @@ mod test {
             ]
         );
         assert_eq!(
-            tokenize!("x+y"),
+            TokenStream::new("x+y").unwrap().0,
             vec![
                 Variable("x".to_string()),
                 Operation('+'),
@@ -297,7 +293,7 @@ mod test {
             ]
         );
         assert_eq!(
-            tokenize!("sin(x)"),
+            TokenStream::new("sin(x)").unwrap().0,
             vec![
                 Function("sin".to_string()),
                 Variable("x".to_string()),
