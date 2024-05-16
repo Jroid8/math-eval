@@ -111,7 +111,7 @@ where
 #[derive(Clone, Default)]
 pub struct MathAssembly<'a, N: MathEvalNumber, V: Clone, F: Clone> {
     instructions: Vec<Instruction<'a, N, V, F>>,
-    stack: Stack<N>,
+    stack_capacity: usize,
 }
 
 impl<'a, N, V, F> Debug for MathAssembly<'a, N, V, F>
@@ -231,47 +231,47 @@ where
         }
         MathAssembly {
             instructions: result,
-            stack: Stack::with_capacity(stack_capacity as usize),
+            stack_capacity: stack_capacity as usize,
         }
     }
 
-    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N) -> N {
-        self.stack.clear();
+    pub fn eval(&self, variable_substituter: impl Fn(&V) -> N) -> N {
+        let mut stack = Stack::with_capacity(self.stack_capacity);
         for instr in &self.instructions {
             let result = match &instr {
-                Instruction::Source(input) => input.get(&variable_substituter, &mut self.stack),
+                Instruction::Source(input) => input.get(&variable_substituter, &mut stack),
                 Instruction::BiOperation(opr, lhs, rhs) => {
-                    let rhs = rhs.get(&variable_substituter, &mut self.stack);
-                    let lhs = lhs.get(&variable_substituter, &mut self.stack);
+                    let rhs = rhs.get(&variable_substituter, &mut stack);
+                    let lhs = lhs.get(&variable_substituter, &mut stack);
                     opr.eval(lhs, rhs)
                 }
                 Instruction::UnOperation(opr, val) => {
-                    opr.eval(val.get(&variable_substituter, &mut self.stack))
+                    opr.eval(val.get(&variable_substituter, &mut stack))
                 }
                 Instruction::NFSingle(func, input, _) => {
-                    let input = input.get(&variable_substituter, &mut self.stack);
+                    let input = input.get(&variable_substituter, &mut stack);
                     func(input)
                 }
                 Instruction::NFDual(func, inp1, inp2, _) => func(
-                    inp1.get(&variable_substituter, &mut self.stack),
-                    inp2.get(&variable_substituter, &mut self.stack),
+                    inp1.get(&variable_substituter, &mut stack),
+                    inp2.get(&variable_substituter, &mut stack),
                 ),
                 Instruction::NFFlexible(func, arg_count, _) => {
                     let arg_count = *arg_count as usize;
-                    let result = func(&self.stack[self.stack.len() - arg_count..]);
-                    self.stack.truncate(self.stack.len() - arg_count);
+                    let result = func(&stack[stack.len() - arg_count..]);
+                    stack.truncate(stack.len() - arg_count);
                     result
                 }
                 Instruction::CustomFunction(func, arg_count, _) => {
                     let arg_count = *arg_count as usize;
-                    let result = func(&self.stack[self.stack.len() - arg_count..]);
-                    self.stack.truncate(self.stack.len() - arg_count);
+                    let result = func(&stack[stack.len() - arg_count..]);
+                    stack.truncate(stack.len() - arg_count);
                     result
                 }
             };
-            self.stack.push(result);
+            stack.push(result);
         }
-        self.stack.pop().unwrap()
+        stack.pop().unwrap()
     }
 }
 
