@@ -153,8 +153,8 @@ where
             variables: OneVariable(name.into()),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl Fn() -> N + 'a, ParsingError> {
-        let expr = parse(
+    pub fn build(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
+        let mut expr = parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
@@ -177,8 +177,8 @@ where
             variables: TwoVariables(self.variables.0, name.into()),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl Fn(N) -> N + 'a, ParsingError> {
-        let expr = parse(
+    pub fn build(self, input: &str) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
+        let mut expr = parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
@@ -207,8 +207,8 @@ where
             variables: ThreeVariables(self.variables.0, self.variables.1, name.into()),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl Fn(N, N) -> N + 'a, ParsingError> {
-        let expr = parse(
+    pub fn build(self, input: &str) -> Result<impl FnMut(N, N) -> N + 'a, ParsingError> {
+        let mut expr = parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
@@ -241,8 +241,8 @@ where
             ),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl Fn(N, N, N) -> N + 'a, ParsingError> {
-        let expr = parse(
+    pub fn build(self, input: &str) -> Result<impl FnMut(N, N, N) -> N + 'a, ParsingError> {
+        let mut expr = parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
@@ -282,8 +282,8 @@ where
             ]),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl Fn(N, N, N, N) -> N + 'a, ParsingError> {
-        let expr = parse(
+    pub fn build(self, input: &str) -> Result<impl FnMut(N, N, N, N) -> N + 'a, ParsingError> {
+        let mut expr = parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
@@ -315,8 +315,8 @@ impl<'a, N> EvalBuilder<'a, N, ManyVariables>
 where
     N: MathEvalNumber,
 {
-    pub fn build(self, input: &str) -> Result<impl Fn(&[N]) -> N + 'a, ParsingError> {
-        let expr = parse(
+    pub fn build(self, input: &str) -> Result<impl FnMut(&[N]) -> N + 'a, ParsingError> {
+        let mut expr = parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
