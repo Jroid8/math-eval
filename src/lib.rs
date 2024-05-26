@@ -420,3 +420,21 @@ pub(crate) fn test_func_to_pointer(func: &TestFunc) -> &'static dyn Fn(&[f64]) -
         TestFunc::Dist => &dist,
     }
 }
+
+#[cfg(test)]
+pub(crate) fn test_parse(input: &str) -> Result<f64, ParsingError> {
+    parse(
+        input,
+        |_| None,
+        parse_test_func,
+        parse_test_var,
+        test_func_to_pointer,
+    )
+    .map(|mut asm| {
+        asm.eval(|var| match var {
+            TestVar::X => 1.0,
+            TestVar::Y => 8.0,
+            TestVar::T => 1.5,
+        })
+    })
+}
