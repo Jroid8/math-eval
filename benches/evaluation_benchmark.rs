@@ -95,7 +95,7 @@ fn matheval_bencher(b: &mut Bencher<'_>, input: &str) {
     })
 }
 
-const MATH_EXPRESSIONS: [(&str, &str); 8] = [
+const MATH_EXPRESSIONS: [(&str, &str); 7] = [
     ("x+y", "one addition"),
     ("sin(x)", "one native function"),
     ("slope(x,y,x+17,t)", "one custom function"),
@@ -103,7 +103,6 @@ const MATH_EXPRESSIONS: [(&str, &str); 8] = [
     ("sin(x*17/5)+cos(y+729166/7933)", "simplification"),
     ("sin(x+cos(y^(1/6)))*log(895731)", "ahead of time evaluation"),
     ("sin(x*pi/10*(1.3+sin(t/10))+t*2+sin(y*pi*sin(t/17)+16*sin(t)))+0.05", "practical"),
-    ("sin(atan(y/(x+1))+sqrt(x^2+y^2)-t*10)*sin(atan(y/(x+1))+sqrt(x^2+y^2)/1.5-t*11+sqrt(x^2+y^2)*sin(t*0.025))*(1+sin(sqrt(x^2+y^2)/5+atan(y/(x+1))*2+t))", "duplicates"),
 ];
 
 fn get_throughput(input: &str) -> u64 {
