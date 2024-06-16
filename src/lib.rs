@@ -438,3 +438,40 @@ pub(crate) fn test_parse(input: &str) -> Result<f64, ParsingError> {
         })
     })
 }
+
+#[test]
+fn test_eval_parser() {
+    assert_eq!(
+        EvalBuilder::new()
+            .add_constant("g", 10.0)
+            .add_function("inv", 1, Some(1), &|inputs: &[f64]| 1.0 / inputs[0],)
+            .build("inv(g)")
+            .unwrap()(),
+        0.1
+    );
+    assert_eq!(
+        EvalBuilder::new()
+            .add_constant("c", 299792.0)
+            .add_function("tometers", 1, Some(1), &|inputs: &[f64]| inputs[0] * 1000.0)
+            .add_function("tomilimeters", 1, Some(1), &|inputs: &[f64]| inputs[0]
+                * 1000.0)
+            .build("tomilimeters(tometers(c))")
+            .unwrap()(),
+        299792000000.0
+    );
+    let mut func1 = EvalBuilder::new()
+        .add_constant("g", 9.8)
+        .add_variable("t")
+        .build("0.5*g*t^2")
+        .unwrap();
+    assert_eq!(func1(12.0), 705.6);
+    assert_eq!(func1(3.0), 44.1);
+    let mut func2 = EvalBuilder::new()
+        .add_variable("t")
+        .add_variable("v")
+        .add_constant("g", 9.8)
+        .build("0.5*g*t^2 + v*t")
+        .unwrap();
+    assert_eq!(func2(12.0, 0.0), 705.6);
+    assert_eq!(func2(3.0, 46.9), 44.1+140.7);
+}
