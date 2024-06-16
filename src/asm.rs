@@ -277,21 +277,22 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::f64::consts::PI;
     use crate::test_parse;
+    use std::f64::consts::PI;
 
     #[test]
     fn test_mathassembly() {
         assert_eq!(test_parse("10").unwrap(), 10.0);
-        assert_eq!(test_parse("-y").unwrap(), - 8.0);
+        assert_eq!(test_parse("-y").unwrap(), -8.0);
         assert_eq!(test_parse("abs(-x)").unwrap(), 1.0);
         assert_eq!(test_parse("4t").unwrap(), 6.0);
         assert_eq!(test_parse("10(7+x)").unwrap(), 80.0);
-        assert_eq!(test_parse("5sin(pi*3/2)").unwrap(), - 5.0);
+        assert_eq!(test_parse("5sin(pi*3/2)").unwrap(), -5.0);
         assert_eq!(test_parse("max(cos(pi/2), 1)").unwrap(), 1.0);
         assert_eq!(test_parse("pi dist(y-5x,4)").unwrap(), PI * 5.0);
         assert_eq!(
-            test_parse("sin(x*pi/10*(1.3+sin(t/10))+t*2+sin(y*pi*sin(t/17)+16*sin(t)))+0.05").unwrap(),
+            test_parse("sin(x*pi/10*(1.3+sin(t/10))+t*2+sin(y*pi*sin(t/17)+16*sin(t)))+0.05")
+                .unwrap(),
             0.356078696074944
         );
     }

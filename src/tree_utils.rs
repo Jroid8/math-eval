@@ -63,9 +63,14 @@ where
     }
 }
 
-impl<T> PartialEq for Tree<T> where T: PartialEq {
+impl<T> PartialEq for Tree<T>
+where
+    T: PartialEq,
+{
     fn eq(&self, other: &Self) -> bool {
-        self.root.traverse(&self.arena).eq(other.root.traverse(&self.arena))
+        self.root
+            .traverse(&self.arena)
+            .eq(other.root.traverse(&self.arena))
     }
 }
 

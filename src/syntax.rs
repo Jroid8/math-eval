@@ -211,11 +211,7 @@ where
         custom_variable_parser: impl Fn(&str) -> Option<V>,
     ) -> Result<SyntaxTree<N, V, F>, SyntaxError> {
         let (arena, root) = (&token_tree.0.arena, token_tree.0.root);
-        construct::<
-            (NodeId, Option<usize>, Option<usize>),
-            SyntaxNode<N, V, F>,
-            SyntaxError,
-        >(
+        construct::<(NodeId, Option<usize>, Option<usize>), SyntaxNode<N, V, F>, SyntaxError>(
             (root, None, None),
             |(token_node, start, end), call_stack| {
                 let children_count = token_node.children(arena).count();
@@ -311,7 +307,10 @@ where
                                         call_stack.push((token_node, Some(start + 1), Some(end)));
                                         Ok(Some(SyntaxNode::UnOperation(UnOperation::Neg)))
                                     }
-                                    _ => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, token_node)),
+                                    _ => Err(SyntaxError(
+                                        SyntaxErrorKind::MisplacedOperator,
+                                        token_node,
+                                    )),
                                 }
                             } else if index == end {
                                 Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, token_node))
@@ -527,7 +526,7 @@ mod test {
     use super::*;
     use crate::tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
     use crate::tree_utils::VecTree::{self, Leaf};
-    use crate::{TestVar, TestFunc};
+    use crate::{TestFunc, TestVar};
 
     macro_rules! branch {
         ($node:expr, $($children:expr),+) => {
@@ -537,18 +536,22 @@ mod test {
 
     fn parse(input: &str) -> Result<SyntaxTree<f64, TestVar, TestFunc>, ParsingError> {
         let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-        let token_tree = TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+        let token_tree =
+            TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
         SyntaxTree::new(
             &token_tree,
             |_| None,
             crate::parse_test_func,
             crate::parse_test_var,
-        ).map_err(|e| e.to_general(input, &token_tree))
+        )
+        .map_err(|e| e.to_general(input, &token_tree))
     }
 
     #[test]
     fn test_syntaxify() {
-        fn syntaxify(input: &str) -> Result<VecTree<SyntaxNode<f64, TestVar, TestFunc>>, ParsingError> {
+        fn syntaxify(
+            input: &str,
+        ) -> Result<VecTree<SyntaxNode<f64, TestVar, TestFunc>>, ParsingError> {
             parse(input).map(|st| VecTree::new(&st.0.arena, st.0.root))
         }
         assert_eq!(syntaxify("0"), Ok(Leaf(SyntaxNode::Number(0.0))));
