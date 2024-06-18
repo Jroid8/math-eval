@@ -285,6 +285,7 @@ mod test {
             .add_variable("x")
             .add_variable("y")
             .add_variable("t")
+            .add_constant("c", 299792458.0)
             .add_function("dist", 2, Some(2), &|input: &[f64]| {
                 (input[0].powi(2) + input[1].powi(2)).sqrt()
             })
@@ -293,10 +294,10 @@ mod test {
         assert_eq!(parse("10", 0.0, 0.0, 0.0), Ok(10.0));
         assert_eq!(parse("-y", 0.0, 13.8, 0.0), Ok(-13.8));
         assert_eq!(parse("abs(-x)", 49.9, 0.0, 0.0), Ok(49.9));
-        assert_eq!(parse("4t", 0.0, 0.0, 2.0), Ok(8.0));
+        assert_eq!(parse("4c", 0.0, 0.0, 2.0), Ok(1199169832.0));
         assert_eq!(parse("10(7+x)", 3.0, 0.0, 0.0), Ok(100.0));
         assert_eq!(parse("5sin(pi*3/2)", 0.0, 0.0, 0.0), Ok(-5.0));
-        assert_eq!(parse("max(cos(pi/2), 1)", 0.0, 0.0, 0.0), Ok(1.0));
+        assert_eq!(parse("max(cos(pi/2), 1, c)", 0.0, 0.0, 0.0), Ok(299792458.0));
         assert_eq!(parse("asin(x-y)", 13.5, 12.5, 0.0), Ok(PI / 2.0));
         assert_eq!(
             parse(

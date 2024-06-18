@@ -571,7 +571,10 @@ mod test {
             TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
         SyntaxTree::new(
             &token_tree,
-            |_| None,
+            |inp| match inp {
+                "c" => Some(299792458.0),
+                _ => None
+            },
             |input| match input {
                 "dist" => Some((TestFunc::Dist, 2, Some(2))),
                 "mean" => Some((TestFunc::Mean, 2, None)),
@@ -597,6 +600,7 @@ mod test {
         assert_eq!(syntaxify("0"), Ok(Leaf(SyntaxNode::Number(0.0))));
         assert_eq!(syntaxify("(0)"), Ok(Leaf(SyntaxNode::Number(0.0))));
         assert_eq!(syntaxify("((0))"), Ok(Leaf(SyntaxNode::Number(0.0))));
+        assert_eq!(syntaxify("pi"), Ok(Leaf(SyntaxNode::Number(std::f64::consts::PI))));
         assert_eq!(
             syntaxify("1+1"),
             Ok(branch!(
@@ -685,6 +689,14 @@ mod test {
                 SyntaxNode::CustomFunction(TestFunc::Mean),
                 Leaf(SyntaxNode::Number(2.0)),
                 Leaf(SyntaxNode::Number(4.0))
+            ))
+        );
+        assert_eq!(
+            syntaxify("dist(c,2344.0)"),
+            Ok(branch!(
+                SyntaxNode::CustomFunction(TestFunc::Dist),
+                Leaf(SyntaxNode::Number(299792458.0)),
+                Leaf(SyntaxNode::Number(2344.0))
             ))
         );
         assert_eq!(

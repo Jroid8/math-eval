@@ -58,6 +58,7 @@ fn generate_infallible_expr(target_size: usize) -> String {
                 5..=8 => wpin((gen_random_f64()).to_string()),
                 9 => "pi".to_string(),
                 10 => "e".to_string(),
+                11 => "c".to_string(),
                 _ => fastrand::choice(&["x", "y", "z", "t"]).unwrap().to_string(),
             }
             .as_str(),
@@ -117,6 +118,7 @@ fn test_all() {
         .add_variable("y")
         .add_variable("z")
         .add_variable("t")
+        .add_constant("c", 299792458.0)
         .build_as_parser();
     for n in 1..=10 {
         for _ in 1..30 {
