@@ -334,7 +334,7 @@ where
             },
             None,
         )
-        .map(|tree| SyntaxTree(tree))
+        .map(|tree| SyntaxTree(tree).substitute_log())
     }
 
     pub fn to_asm<'a>(
@@ -469,6 +469,45 @@ where
             }
         }
     }
+
+    fn substitute_log(mut self) -> Self {
+        let mut matched_logs: Vec<(NodeId, u8)> = Vec::new();
+        for node in self.0.root.traverse(&self.0.arena) {
+            if let NodeEdge::Start(node) = node {
+                if let SyntaxNode::NativeFunction(NativeFunction::Log) = *self.0.arena[node].get() {
+                    matched_logs.push((
+                        node,
+                        match node.children(&self.0.arena).nth(1) {
+                            Some(base) => match self.0.arena[base].get() {
+                                SyntaxNode::Number(num) => {
+                                    if *num == N::from(10.0) {
+                                        10
+                                    } else if *num == N::from(2.0) {
+                                        2
+                                    } else {
+                                        continue;
+                                    }
+                                }
+                                _ => continue,
+                            },
+                            None => 10,
+                        },
+                    ));
+                }
+            }
+        }
+        for (node, base) in matched_logs {
+            *self.0.arena[node].get_mut() = SyntaxNode::NativeFunction(match base {
+                10 => NativeFunction::Log10,
+                2 => NativeFunction::Log2,
+                _ => unreachable!(),
+            });
+            if let Some(base) = node.children(&self.0.arena).nth(1) {
+                base.remove(&mut self.0.arena)
+            }
+        }
+        self
+    }
 }
 
 impl<V, N, F> Display for SyntaxTree<N, V, F>
@@ -537,7 +576,7 @@ mod test {
     enum TestVar {
         X,
         Y,
-        T
+        T,
     }
 
     impl Display for TestVar {
@@ -573,18 +612,18 @@ mod test {
             &token_tree,
             |inp| match inp {
                 "c" => Some(299792458.0),
-                _ => None
+                _ => None,
             },
             |input| match input {
                 "dist" => Some((TestFunc::Dist, 2, Some(2))),
                 "mean" => Some((TestFunc::Mean, 2, None)),
-                _ => None
+                _ => None,
             },
             |input| match input {
                 "x" => Some(TestVar::X),
                 "y" => Some(TestVar::Y),
                 "t" => Some(TestVar::T),
-                _ => None
+                _ => None,
             },
         )
         .map_err(|e| e.to_general(input, &token_tree))
@@ -600,7 +639,10 @@ mod test {
         assert_eq!(syntaxify("0"), Ok(Leaf(SyntaxNode::Number(0.0))));
         assert_eq!(syntaxify("(0)"), Ok(Leaf(SyntaxNode::Number(0.0))));
         assert_eq!(syntaxify("((0))"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(syntaxify("pi"), Ok(Leaf(SyntaxNode::Number(std::f64::consts::PI))));
+        assert_eq!(
+            syntaxify("pi"),
+            Ok(Leaf(SyntaxNode::Number(std::f64::consts::PI)))
+        );
         assert_eq!(
             syntaxify("1+1"),
             Ok(branch!(
@@ -684,19 +726,71 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify("mean(2,4)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Mean),
-                Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Number(4.0))
-            ))
-        );
-        assert_eq!(
             syntaxify("dist(c,2344.0)"),
             Ok(branch!(
                 SyntaxNode::CustomFunction(TestFunc::Dist),
                 Leaf(SyntaxNode::Number(299792458.0)),
                 Leaf(SyntaxNode::Number(2344.0))
+            ))
+        );
+        assert_eq!(
+            syntaxify("log2(8)"),
+            Ok(branch!(
+                SyntaxNode::NativeFunction(NativeFunction::Log2),
+                Leaf(SyntaxNode::Number(8.0))
+            ))
+        );
+        assert_eq!(
+            syntaxify("log(100)"),
+            Ok(branch!(
+                SyntaxNode::NativeFunction(NativeFunction::Log10),
+                Leaf(SyntaxNode::Number(100.0))
+            ))
+        );
+        assert_eq!(
+            syntaxify("sin(cos(0))"),
+            Ok(branch!(
+                SyntaxNode::NativeFunction(NativeFunction::Sin),
+                branch!(
+                    SyntaxNode::NativeFunction(NativeFunction::Cos),
+                    Leaf(SyntaxNode::Number(0.0))
+                )
+            ))
+        );
+        assert_eq!(
+            syntaxify("x^2 + sin(y)"),
+            Ok(branch!(
+                SyntaxNode::BiOperation(BiOperation::Add),
+                branch!(
+                    SyntaxNode::BiOperation(BiOperation::Pow),
+                    Leaf(SyntaxNode::Variable(TestVar::X)),
+                    Leaf(SyntaxNode::Number(2.0))
+                ),
+                branch!(
+                    SyntaxNode::NativeFunction(NativeFunction::Sin),
+                    Leaf(SyntaxNode::Variable(TestVar::Y))
+                )
+            ))
+        );
+        assert_eq!(
+            syntaxify("sqrt(max(4, 9))"),
+            Ok(branch!(
+                SyntaxNode::NativeFunction(NativeFunction::Sqrt),
+                branch!(
+                    SyntaxNode::NativeFunction(NativeFunction::Max),
+                    Leaf(SyntaxNode::Number(4.0)),
+                    Leaf(SyntaxNode::Number(9.0))
+                )
+            ))
+        );
+        assert_eq!(
+            syntaxify("mean(2, 4, 6, 8)"),
+            Ok(branch!(
+                SyntaxNode::CustomFunction(TestFunc::Mean),
+                Leaf(SyntaxNode::Number(2.0)),
+                Leaf(SyntaxNode::Number(4.0)),
+                Leaf(SyntaxNode::Number(6.0)),
+                Leaf(SyntaxNode::Number(8.0))
             ))
         );
         assert_eq!(

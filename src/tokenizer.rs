@@ -1,6 +1,6 @@
 pub mod token_stream {
     use nom::{
-        character::complete::{alpha1, char, digit0, digit1, one_of, space0},
+        character::complete::{alpha1, alphanumeric1, char, digit0, digit1, one_of, space0},
         combinator::{opt, recognize},
         sequence::tuple,
     };
@@ -41,7 +41,7 @@ pub mod token_stream {
               => Token::Operation);
                 test!(char::<_, ()>(',')
               => |_| Token::Comma);
-                test!(tuple((alpha1::<_, ()>, char('(')))
+                test!(tuple((alphanumeric1::<_, ()>, char('(')))
               => |matched: (&str, char)| Token::Function(matched.0.to_string()));
                 test!(alpha1::<_, ()> => |matched: &str| Token::Variable(matched.to_string()));
                 test!(one_of::<_, _, ()>(")]}")

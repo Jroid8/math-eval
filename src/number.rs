@@ -22,6 +22,8 @@ pub enum NativeFunction {
     Atan,
     Acot,
     Log,
+    Log2,
+    Log10,
     Ln,
     Exp,
     Floor,
@@ -49,6 +51,8 @@ impl NativeFunction {
             "atan" => Some(NativeFunction::Atan),
             "acot" => Some(NativeFunction::Acot),
             "log" => Some(NativeFunction::Log),
+            "log2" => Some(NativeFunction::Log2),
+            "log10" => Some(NativeFunction::Log10),
             "ln" => Some(NativeFunction::Ln),
             "exp" => Some(NativeFunction::Exp),
             "floor" => Some(NativeFunction::Floor),
@@ -76,6 +80,8 @@ impl NativeFunction {
             NativeFunction::Atan => NFPointer::Single(N::atan),
             NativeFunction::Acot => NFPointer::Single(N::acot),
             NativeFunction::Log => NFPointer::Dual(N::log),
+            NativeFunction::Log2 => NFPointer::Single(N::log2),
+            NativeFunction::Log10 => NFPointer::Single(N::log10),
             NativeFunction::Ln => NFPointer::Single(N::ln),
             NativeFunction::Exp => NFPointer::Single(N::exp),
             NativeFunction::Floor => NFPointer::Single(N::floor),
@@ -108,6 +114,8 @@ impl Display for NativeFunction {
             NativeFunction::Atan => "atan",
             NativeFunction::Acot => "acot",
             NativeFunction::Log => "log",
+            NativeFunction::Log2 => "log2",
+            NativeFunction::Log10 => "log10",
             NativeFunction::Ln => "ln",
             NativeFunction::Exp => "exp",
             NativeFunction::Floor => "floor",
@@ -151,6 +159,8 @@ pub trait MathEvalNumber:
     fn atan(argument: Self) -> Self;
     fn acot(argument: Self) -> Self;
     fn log(argument: Self, base: Self) -> Self;
+    fn log2(argument: Self) -> Self;
+    fn log10(argument: Self) -> Self;
     fn ln(argument: Self) -> Self;
     fn exp(argument: Self) -> Self;
     fn floor(argument: Self) -> Self;
@@ -218,14 +228,15 @@ impl MathEvalNumber for f64 {
     }
 
     fn log(argument: Self, base: Self) -> Self {
-        // log2 and log10 are more accurate than log(2) and log(10) as mentioned by the docs: https://doc.rust-lang.org/std/primitive.f64.html#method.log
-        if base == 10.0 {
-            argument.log10()
-        } else if base == 2.0 {
-            argument.log2()
-        } else {
-            argument.log(base)
-        }
+        argument.log(base)
+    }
+
+    fn log2(argument: Self) -> Self {
+        argument.log2()
+    }
+
+    fn log10(argument: Self) -> Self {
+        argument.log2()
     }
 
     fn ln(argument: Self) -> Self {

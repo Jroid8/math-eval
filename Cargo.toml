@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bigdecimal = { version = "0.4.5", optional = true }
 indextree = "4.6.0"
 nom = "7.1.3"
 smallvec = "1.13.2"
@@ -24,3 +25,6 @@ unsafe_code = "forbid"
 [[bench]]
 name = "evaluation_benchmark"
 harness = false
+
+[features]
+bigdecimal = ["dep:bigdecimal"]

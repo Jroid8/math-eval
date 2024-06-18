@@ -187,11 +187,7 @@ where
                             children_as_input.next().unwrap(),
                             children_as_input
                                 .next()
-                                .unwrap_or(if *nf == NativeFunction::Log {
-                                    Input::Literal(10.0.into())
-                                } else {
-                                    panic!()
-                                }),
+                                .unwrap(),
                             *nf,
                         ),
                         crate::number::NFPointer::Flexible(p) => {
