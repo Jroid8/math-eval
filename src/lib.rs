@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::RangeInclusive};
+use std::{collections::HashMap, ops::RangeInclusive, usize};
 
 use asm::MathAssembly;
 use number::MathEvalNumber;
@@ -68,22 +68,22 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
 }
 
 #[derive(Clone, Debug)]
-struct NoVariable;
+pub struct NoVariable;
 
 #[derive(Clone, Debug)]
-struct OneVariable(String);
+pub struct OneVariable(String);
 
 #[derive(Clone, Debug)]
-struct TwoVariables(String, String);
+pub struct TwoVariables(String, String);
 
 #[derive(Clone, Debug)]
-struct ThreeVariables(String, String, String);
+pub struct ThreeVariables([String; 3]);
 
 #[derive(Clone, Debug)]
-struct FourVariables(String, String, String, String);
+pub struct FourVariables([String; 4]);
 
 #[derive(Clone, Debug)]
-struct ManyVariables(Vec<String>);
+pub struct ManyVariables(Vec<String>);
 
 #[derive(Clone)]
 pub struct EvalBuilder<'a, N, V>
@@ -153,14 +153,24 @@ where
             variables: OneVariable(name.into()),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
-        let mut expr = parse(
+    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
+        parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
             |_| None,
             |index| self.functions[*index],
-        )?;
+        )
+    }
+    pub fn build_as_parser(self) -> impl Fn(&str) -> Result<N, ParsingError> + 'a {
+        move |input: &str| {
+            self.parse(input)
+                .map(|mut asm| asm.eval(|_: &()| 0.0.into()))
+        }
+    }
+
+    pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
+        let mut expr = self.parse(input)?;
         Ok(move || expr.eval(|_: &()| 0.0.into()))
     }
 }
@@ -177,8 +187,8 @@ where
             variables: TwoVariables(self.variables.0, name.into()),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
-        let mut expr = parse(
+    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
+        parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
@@ -190,7 +200,13 @@ where
                 }
             },
             |index| self.functions[*index],
-        )?;
+        )
+    }
+    pub fn build_as_parser(self) -> impl Fn(&str, N) -> Result<N, ParsingError> + 'a {
+        move |input: &str, var| self.parse(input).map(|mut asm| asm.eval(|_: &()| var))
+    }
+    pub fn build_as_function(self, input: &str) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
+        let mut expr = self.parse(input)?;
         Ok(move |var| expr.eval(|_: &()| var))
     }
 }
@@ -204,11 +220,11 @@ where
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
-            variables: ThreeVariables(self.variables.0, self.variables.1, name.into()),
+            variables: ThreeVariables([self.variables.0, self.variables.1, name.into()]),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl FnMut(N, N) -> N + 'a, ParsingError> {
-        let mut expr = parse(
+    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, bool, usize>, ParsingError> {
+        parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
@@ -219,7 +235,19 @@ where
                     .map(|i| i == 0)
             },
             |index| self.functions[*index],
-        )?;
+        )
+    }
+    pub fn build_as_parser(self) -> impl Fn(&str, N, N) -> Result<N, ParsingError> + 'a {
+        move |input, v1, v2| {
+            self.parse(input)
+                .map(|mut asm| asm.eval(|var: &bool| if *var { v1 } else { v2 }))
+        }
+    }
+    pub fn build_as_function(
+        self,
+        input: &str,
+    ) -> Result<impl FnMut(N, N) -> N + 'a, ParsingError> {
+        let mut expr = self.parse(input)?;
         Ok(move |v1, v2| expr.eval(|var: &bool| if *var { v1 } else { v2 }))
     }
 }
@@ -229,38 +257,54 @@ where
     N: MathEvalNumber,
 {
     pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, FourVariables> {
+        let mut iter = self.variables.0.into_iter();
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
-            variables: FourVariables(
-                self.variables.0,
-                self.variables.1,
-                self.variables.2,
+            variables: FourVariables([
+                iter.next().unwrap(),
+                iter.next().unwrap(),
+                iter.next().unwrap(),
                 name.into(),
-            ),
+            ]),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl FnMut(N, N, N) -> N + 'a, ParsingError> {
-        let mut expr = parse(
+    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
+        parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
             |inp| {
-                [&self.variables.0, &self.variables.1, &self.variables.2]
-                    .into_iter()
+                self.variables
+                    .0
+                    .iter()
                     .position(|var| *var == inp)
+                    .map(|i| i as u8)
             },
             |index| self.functions[*index],
-        )?;
-        Ok(move |v1, v2, v3| {
-            expr.eval(|var: &usize| match var {
-                0 => v1,
-                1 => v2,
-                3 => v3,
-                _ => unreachable!(),
-            })
-        })
+        )
+    }
+    fn select_variable(&self, i: u8, v1: N, v2: N, v3: N) -> N {
+        match i {
+            0 => v1,
+            1 => v2,
+            2 => v3,
+            _ => unreachable!(),
+        }
+    }
+    pub fn build_as_parser(self) -> impl Fn(&str, N, N, N) -> Result<N, ParsingError> + 'a {
+        move |input, v1, v2, v3| {
+            self.parse(input)
+                .map(|mut asm| asm.eval(|var: &u8| self.select_variable(*var, v1, v2, v3)))
+        }
+    }
+    pub fn build_as_function(
+        self,
+        input: &str,
+    ) -> Result<impl FnMut(N, N, N) -> N + 'a, ParsingError> {
+        let mut expr = self.parse(input)?;
+        Ok(move |v1, v2, v3| expr.eval(|var: &u8| self.select_variable(*var, v1, v2, v3)))
     }
 }
 
@@ -273,41 +317,45 @@ where
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
-            variables: ManyVariables(vec![
-                self.variables.0,
-                self.variables.1,
-                self.variables.2,
-                self.variables.3,
-                name.into(),
-            ]),
+            variables: ManyVariables(self.variables.0.into_iter().chain([name.into()]).collect()),
         }
     }
-    pub fn build(self, input: &str) -> Result<impl FnMut(N, N, N, N) -> N + 'a, ParsingError> {
-        let mut expr = parse(
+    fn select_variable(&self, i: u8, v1: N, v2: N, v3: N, v4: N) -> N {
+        match i {
+            0 => v1,
+            1 => v2,
+            2 => v3,
+            3 => v4,
+            _ => unreachable!(),
+        }
+    }
+    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
+        parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
             |inp| {
-                [
-                    &self.variables.0,
-                    &self.variables.1,
-                    &self.variables.2,
-                    &self.variables.3,
-                ]
-                .into_iter()
-                .position(|var| *var == inp)
+                self.variables
+                    .0
+                    .iter()
+                    .position(|var| var == inp)
+                    .map(|i| i as u8)
             },
             |index| self.functions[*index],
-        )?;
-        Ok(move |v1, v2, v3, v4| {
-            expr.eval(|var: &usize| match var {
-                0 => v1,
-                1 => v2,
-                3 => v3,
-                4 => v4,
-                _ => unreachable!(),
-            })
-        })
+        )
+    }
+    pub fn build_as_parser(self) -> impl Fn(&str, N, N, N, N) -> Result<N, ParsingError> + 'a {
+        move |input, v1, v2, v3, v4| {
+            self.parse(input)
+                .map(|mut asm| asm.eval(|var: &u8| self.select_variable(*var, v1, v2, v3, v4)))
+        }
+    }
+    pub fn build_as_function(
+        self,
+        input: &str,
+    ) -> Result<impl FnMut(N, N, N, N) -> N + 'a, ParsingError> {
+        let mut expr = self.parse(input)?;
+        Ok(move |v1, v2, v3, v4| expr.eval(|var: &u8| self.select_variable(*var, v1, v2, v3, v4)))
     }
 }
 
@@ -315,137 +363,38 @@ impl<'a, N> EvalBuilder<'a, N, ManyVariables>
 where
     N: MathEvalNumber,
 {
-    pub fn build(self, input: &str) -> Result<impl FnMut(&[N]) -> N + 'a, ParsingError> {
-        let mut expr = parse(
+    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, usize, usize>, ParsingError> {
+        parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
             |inp| self.variables.0.iter().position(|var| *var == inp),
             |index| self.functions[*index],
-        )?;
+        )
+    }
+    pub fn build_as_parser(self) -> impl Fn(&str, &[N]) -> Result<N, ParsingError> + 'a {
+        move |input, vars: &[N]| {
+            self.parse(input)
+                .map(|mut asm| asm.eval(|v: &usize| vars[*v]))
+        }
+    }
+    pub fn build_as_function(
+        self,
+        input: &str,
+    ) -> Result<impl FnMut(&[N]) -> N + 'a, ParsingError> {
+        let mut expr = self.parse(input)?;
         Ok(move |vars: &[N]| expr.eval(|v: &usize| vars[*v]))
     }
 }
 
 #[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TestVar {
-    X,
-    Y,
-    T,
-}
-
-#[cfg(test)]
-impl std::fmt::Display for TestVar {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TestVar::X => f.write_str("x"),
-            TestVar::Y => f.write_str("y"),
-            TestVar::T => f.write_str("t"),
-        }
-    }
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TestFunc {
-    Gcd,
-    Lcm,
-    Mean,
-    Dist,
-}
-
-#[cfg(test)]
-impl std::fmt::Display for TestFunc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TestFunc::Gcd => f.write_str("gcd"),
-            TestFunc::Lcm => f.write_str("lcm"),
-            TestFunc::Mean => f.write_str("mean"),
-            TestFunc::Dist => f.write_str("dist"),
-        }
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn parse_test_func(input: &str) -> Option<(TestFunc, u8, Option<u8>)> {
-    match input {
-        "gcd" => Some((TestFunc::Gcd, 2, Some(2))),
-        "lcm" => Some((TestFunc::Lcm, 2, Some(2))),
-        "mean" => Some((TestFunc::Mean, 2, None)),
-        "dist" => Some((TestFunc::Dist, 2, Some(2))),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn parse_test_var(input: &str) -> Option<TestVar> {
-    match input {
-        "x" => Some(TestVar::X),
-        "y" => Some(TestVar::Y),
-        "t" => Some(TestVar::T),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn test_func_to_pointer(func: &TestFunc) -> &'static dyn Fn(&[f64]) -> f64 {
-    fn gcd(inputs: &[f64]) -> f64 {
-        // not fool proof, but good for tests
-        let (mut num, mut den) = (inputs[0], inputs[1]);
-        loop {
-            let rem = num.rem_euclid(inputs[1]);
-            if rem == 0.0 {
-                return den;
-            } else {
-                num = den;
-                den = rem;
-            }
-        }
-    }
-    fn lcm(inputs: &[f64]) -> f64 {
-        inputs[0] * inputs[1] / gcd(inputs)
-    }
-    fn mean(inputs: &[f64]) -> f64 {
-        inputs.iter().sum::<f64>() / inputs.len() as f64
-    }
-    fn dist(inputs: &[f64]) -> f64 {
-        (inputs[0] * inputs[0] + inputs[1] * inputs[1]).sqrt()
-    }
-
-    match func {
-        TestFunc::Gcd => &gcd,
-        TestFunc::Lcm => &lcm,
-        TestFunc::Mean => &mean,
-        TestFunc::Dist => &dist,
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn test_parse(input: &str) -> Result<f64, ParsingError> {
-    parse(
-        input,
-        |_| None,
-        parse_test_func,
-        parse_test_var,
-        test_func_to_pointer,
-    )
-    .map(|mut asm| {
-        asm.eval(|var| match var {
-            TestVar::X => 1.0,
-            TestVar::Y => 8.0,
-            TestVar::T => 1.5,
-        })
-    })
-}
-
 #[test]
 fn test_eval_parser() {
     assert_eq!(
         EvalBuilder::new()
             .add_constant("g", 10.0)
             .add_function("inv", 1, Some(1), &|inputs: &[f64]| 1.0 / inputs[0],)
-            .build("inv(g)")
+            .build_as_function("inv(g)")
             .unwrap()(),
         0.1
     );
@@ -455,14 +404,14 @@ fn test_eval_parser() {
             .add_function("tometers", 1, Some(1), &|inputs: &[f64]| inputs[0] * 1000.0)
             .add_function("tomilimeters", 1, Some(1), &|inputs: &[f64]| inputs[0]
                 * 1000.0)
-            .build("tomilimeters(tometers(c))")
-            .unwrap()(),
+            .build_as_parser()("tomilimeters(tometers(c))")
+        .unwrap(),
         299792000000.0
     );
     let mut func1 = EvalBuilder::new()
         .add_constant("g", 9.8)
         .add_variable("t")
-        .build("0.5*g*t^2")
+        .build_as_function("0.5*g*t^2")
         .unwrap();
     assert_eq!(func1(12.0), 705.6);
     assert_eq!(func1(3.0), 44.1);
@@ -470,8 +419,8 @@ fn test_eval_parser() {
         .add_variable("t")
         .add_variable("v")
         .add_constant("g", 9.8)
-        .build("0.5*g*t^2 + v*t")
+        .build_as_function("0.5*g*t^2 + v*t")
         .unwrap();
     assert_eq!(func2(12.0, 0.0), 705.6);
-    assert_eq!(func2(3.0, 46.9), 44.1+140.7);
+    assert_eq!(func2(3.0, 46.9), 44.1 + 140.7);
 }

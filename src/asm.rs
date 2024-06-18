@@ -277,23 +277,35 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::test_parse;
     use std::f64::consts::PI;
 
     #[test]
     fn test_mathassembly() {
-        assert_eq!(test_parse("10").unwrap(), 10.0);
-        assert_eq!(test_parse("-y").unwrap(), -8.0);
-        assert_eq!(test_parse("abs(-x)").unwrap(), 1.0);
-        assert_eq!(test_parse("4t").unwrap(), 6.0);
-        assert_eq!(test_parse("10(7+x)").unwrap(), 80.0);
-        assert_eq!(test_parse("5sin(pi*3/2)").unwrap(), -5.0);
-        assert_eq!(test_parse("max(cos(pi/2), 1)").unwrap(), 1.0);
-        assert_eq!(test_parse("pi dist(y-5x,4)").unwrap(), PI * 5.0);
+        let parse = crate::EvalBuilder::new()
+            .add_variable("x")
+            .add_variable("y")
+            .add_variable("t")
+            .add_function("dist", 2, Some(2), &|input: &[f64]| {
+                (input[0].powi(2) + input[1].powi(2)).sqrt()
+            })
+            .build_as_parser();
+
+        assert_eq!(parse("10", 0.0, 0.0, 0.0), Ok(10.0));
+        assert_eq!(parse("-y", 0.0, 13.8, 0.0), Ok(-13.8));
+        assert_eq!(parse("abs(-x)", 49.9, 0.0, 0.0), Ok(49.9));
+        assert_eq!(parse("4t", 0.0, 0.0, 2.0), Ok(8.0));
+        assert_eq!(parse("10(7+x)", 3.0, 0.0, 0.0), Ok(100.0));
+        assert_eq!(parse("5sin(pi*3/2)", 0.0, 0.0, 0.0), Ok(-5.0));
+        assert_eq!(parse("max(cos(pi/2), 1)", 0.0, 0.0, 0.0), Ok(1.0));
+        assert_eq!(parse("asin(x-y)", 13.5, 12.5, 0.0), Ok(PI / 2.0));
         assert_eq!(
-            test_parse("sin(x*pi/10*(1.3+sin(t/10))+t*2+sin(y*pi*sin(t/17)+16*sin(t)))+0.05")
-                .unwrap(),
-            0.356078696074944
+            parse(
+                "sin(x*pi/10*(1.3+sin(t/10))+t*2+sin(y*pi*sin(t/17)+16*sin(t)))+0.05",
+                5.5,
+                -30.0,
+                18.0
+            ),
+            Ok(0.7967435953555171)
         );
     }
 }

@@ -526,12 +526,43 @@ mod test {
     use super::*;
     use crate::tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
     use crate::tree_utils::VecTree::{self, Leaf};
-    use crate::{TestFunc, TestVar};
 
     macro_rules! branch {
         ($node:expr, $($children:expr),+) => {
             VecTree::Branch($node,vec![$($children),+])
         };
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum TestVar {
+        X,
+        Y,
+        T
+    }
+
+    impl Display for TestVar {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                TestVar::X => f.write_str("x"),
+                TestVar::Y => f.write_str("y"),
+                TestVar::T => f.write_str("t"),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum TestFunc {
+        Dist,
+        Mean,
+    }
+
+    impl Display for TestFunc {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                TestFunc::Dist => f.write_str("dist"),
+                TestFunc::Mean => f.write_str("mean"),
+            }
+        }
     }
 
     fn parse(input: &str) -> Result<SyntaxTree<f64, TestVar, TestFunc>, ParsingError> {
@@ -541,8 +572,17 @@ mod test {
         SyntaxTree::new(
             &token_tree,
             |_| None,
-            crate::parse_test_func,
-            crate::parse_test_var,
+            |input| match input {
+                "dist" => Some((TestFunc::Dist, 2, Some(2))),
+                "mean" => Some((TestFunc::Mean, 2, None)),
+                _ => None
+            },
+            |input| match input {
+                "x" => Some(TestVar::X),
+                "y" => Some(TestVar::Y),
+                "t" => Some(TestVar::T),
+                _ => None
+            },
         )
         .map_err(|e| e.to_general(input, &token_tree))
     }
@@ -640,9 +680,9 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify("lcm(2,4)"),
+            syntaxify("mean(2,4)"),
             Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Lcm),
+                SyntaxNode::CustomFunction(TestFunc::Mean),
                 Leaf(SyntaxNode::Number(2.0)),
                 Leaf(SyntaxNode::Number(4.0))
             ))
