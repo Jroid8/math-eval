@@ -293,7 +293,7 @@ where
                         }
                         // in a syntax tree, the top item is the evaluated first, so it should be the last in the order of operations.
                         // rev() is used to pick last operation so the constructed tree has the correct order
-                        if let Some((index, _)) = children().find(|(_, c)| match arena[*c].get() {
+                        if let Some((index, node)) = children().find(|(_, c)| match arena[*c].get() {
                             TokenNode::Operation(oprchar) => *oprchar == opr.as_char(),
                             _ => false,
                         }) {
@@ -309,11 +309,11 @@ where
                                     }
                                     _ => Err(SyntaxError(
                                         SyntaxErrorKind::MisplacedOperator,
-                                        token_node,
+                                        node,
                                     )),
                                 }
                             } else if index == end {
-                                Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, token_node))
+                                Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, node))
                             } else {
                                 call_stack.push((token_node, Some(start), Some(index - 1)));
                                 call_stack.push((token_node, Some(index + 1), Some(end)));
