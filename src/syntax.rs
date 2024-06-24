@@ -297,7 +297,7 @@ where
                             children().find(|(i, c)| match arena[*c].get() {
                                 TokenNode::Operation(oprchar) => {
                                     *oprchar == opr.as_char()
-                                        && !dbg!(*oprchar == '-'
+                                        && !(*oprchar == '-'
                                             && *i > start
                                             && matches!(
                                                 c.preceding_siblings(arena)
@@ -971,6 +971,16 @@ mod test {
             Ok(branch!(
                 SyntaxNode::UnOperation(UnOperation::Fac),
                 Leaf(SyntaxNode::Number(3.0))
+            ))
+        );
+        assert_eq!(
+            syntaxify("sin(x!-1)"),
+            Ok(branch!(
+                SyntaxNode::UnOperation(UnOperation::Fac),
+                branch!(
+                    SyntaxNode::NativeFunction(NativeFunction::Sin),
+                    Leaf(SyntaxNode::Variable(TestVar::X))
+                )
             ))
         );
     }

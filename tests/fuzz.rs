@@ -37,6 +37,7 @@ fn generate_infallible_expr(target_size: usize) -> String {
         "mean($,$,$,$)",
         "mean($,$,$,$,$)",
         "mean($,$,$,$,$,$)",
+        "min(max($,0), 10)!",
     ];
     let mut result = String::from('$');
     for _ in 0..target_size {
