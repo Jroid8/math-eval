@@ -1,5 +1,7 @@
 fn gen_random_f64() -> f64 {
-    fastrand::f64() * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
+    fastrand::f64()
+        * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
+        * (if fastrand::bool() { 1.0 } else { -1.0 })
 }
 
 fn generate_infallible_expr(target_size: usize) -> String {
@@ -47,19 +49,12 @@ fn generate_infallible_expr(target_size: usize) -> String {
         let selected = fastrand::choice(branch_nodes).unwrap();
         result.replace_range(index..=index, selected);
     }
-    let wpin = |val: String| -> String {
-        if val.starts_with('-') {
-            format!("({})", val)
-        } else {
-            val
-        }
-    };
     while let Some(index) = result.find('$') {
         result.replace_range(
             index..=index,
             match fastrand::u8(0..30) {
-                0..=4 => wpin(fastrand::i32(i32::MIN..i32::MAX).to_string()),
-                5..=8 => wpin((gen_random_f64()).to_string()),
+                0..=4 => fastrand::i32(i32::MIN..i32::MAX).to_string(),
+                5..=8 => (gen_random_f64()).to_string(),
                 9 => "pi".to_string(),
                 10 => "e".to_string(),
                 11 => "c".to_string(),
@@ -110,7 +105,7 @@ fn test_operator() {
 }
 
 #[test]
-fn test_all() {
+fn test_all_valid() {
     let parser = math_eval::EvalBuilder::new()
         .add_function("mean", 2, None, &|inputs: &[f64]| {
             inputs.iter().sum::<f64>() / inputs.len() as f64
@@ -133,9 +128,17 @@ fn test_all() {
                 gen_random_f64(),
                 gen_random_f64(),
                 gen_random_f64(),
-            ).unwrap();
-            if result.is_nan() {
-                panic!("nan result from: {}", expr)
+            );
+            match result {
+                Ok(value) => {
+                    if value.is_nan() {
+                        panic!("NaN result from: {expr}");
+                    }
+                }
+                Err(error) => {
+                    error.print_colored(&expr);
+                    panic!("Error returned when parsing {error}")
+                }
             }
         }
     }
