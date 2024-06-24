@@ -293,11 +293,23 @@ where
                         }
                         // in a syntax tree, the top item is the evaluated first, so it should be the last in the order of operations.
                         // rev() is used to pick last operation so the constructed tree has the correct order
-                        if let Some((index, node)) = children().find(|(_, c)| match arena[*c].get() {
-                            TokenNode::Operation(oprchar) => *oprchar == opr.as_char(),
-                            _ => false,
-                        }) {
-                            return if index == 0 {
+                        if let Some((index, node)) =
+                            children().find(|(i, c)| match arena[*c].get() {
+                                TokenNode::Operation(oprchar) => {
+                                    *oprchar == opr.as_char()
+                                        && !dbg!(*oprchar == '-'
+                                            && *i > start
+                                            && matches!(
+                                                c.preceding_siblings(arena)
+                                                    .nth(1)
+                                                    .map(|n| arena[n].get()),
+                                                Some(TokenNode::Operation(_))
+                                            ))
+                                }
+                                _ => false,
+                            })
+                        {
+                            return if index == start {
                                 match opr {
                                     BiOperation::Add => {
                                         call_stack.push((token_node, Some(start + 1), Some(end)));
@@ -307,10 +319,7 @@ where
                                         call_stack.push((token_node, Some(start + 1), Some(end)));
                                         Ok(Some(SyntaxNode::UnOperation(UnOperation::Neg)))
                                     }
-                                    _ => Err(SyntaxError(
-                                        SyntaxErrorKind::MisplacedOperator,
-                                        node,
-                                    )),
+                                    _ => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, node)),
                                 }
                             } else if index == end {
                                 Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, node))
@@ -1024,10 +1033,6 @@ mod test {
         let input = " max(1, -18) * sin(pi)";
         let ts = TokenStream::new(input).unwrap();
         let tt = TokenTree::new(&ts).unwrap();
-        println!(
-            "{:?}",
-            tt.0.arena[tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()].get()
-        );
         assert_eq!(
             tokennode2range(
                 input,
