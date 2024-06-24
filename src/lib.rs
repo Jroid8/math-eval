@@ -1,4 +1,9 @@
-use std::{collections::HashMap, ops::RangeInclusive, usize};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    ops::{RangeBounds, RangeInclusive},
+    usize,
+};
 
 use asm::MathAssembly;
 use number::MathEvalNumber;
@@ -25,6 +30,29 @@ impl ParsingError {
     pub fn at(&self) -> &RangeInclusive<usize> {
         &self.at
     }
+
+    pub fn print_colored(&self, input: &str) {
+        for (i, c) in input.chars().enumerate() {
+            if i == *self.at.start() {
+                print!("\x1b[0;31m")
+            }
+            print!("{c}");
+            if i == *self.at.end() {
+                print!("\x1b[0m")
+            }
+        }
+    }
+}
+
+impl Display for ParsingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "{} at [{}, {}]",
+            self.kind,
+            self.at.start(),
+            self.at.end()
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +67,23 @@ pub enum ParsingErrorKind {
     UnknownFunction,
     NotEnoughArguments,
     TooManyArguments,
+}
+
+impl Display for ParsingErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ParsingErrorKind::UnexpectedCharacter => "unexpected character",
+            ParsingErrorKind::CommaOutsideFunction => "comma outside function",
+            ParsingErrorKind::MissingOpenParenthesis => "missing opening parenthesis",
+            ParsingErrorKind::MissingCloseParenthesis => "missing closing parenthesis",
+            ParsingErrorKind::NumberParsingError => "could not read number",
+            ParsingErrorKind::MisplacedOperator => "misplaced operator character",
+            ParsingErrorKind::UnknownVariableOrConstant => "variable or character not recognized",
+            ParsingErrorKind::UnknownFunction => "function not recognized",
+            ParsingErrorKind::NotEnoughArguments => "not enough arguments for function",
+            ParsingErrorKind::TooManyArguments => "too many arguments for function",
+        })
+    }
 }
 
 pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
