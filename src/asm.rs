@@ -185,9 +185,7 @@ where
                         crate::number::NFPointer::Dual(p) => Instruction::NFDual(
                             p,
                             children_as_input.next().unwrap(),
-                            children_as_input
-                                .next()
-                                .unwrap(),
+                            children_as_input.next().unwrap(),
                             *nf,
                         ),
                         crate::number::NFPointer::Flexible(p) => {
@@ -293,7 +291,10 @@ mod test {
         assert_eq!(parse("4c", 0.0, 0.0, 2.0), Ok(1199169832.0));
         assert_eq!(parse("10(7+x)", 3.0, 0.0, 0.0), Ok(100.0));
         assert_eq!(parse("5sin(pi*3/2)", 0.0, 0.0, 0.0), Ok(-5.0));
-        assert_eq!(parse("max(cos(pi/2), 1, c)", 0.0, 0.0, 0.0), Ok(299792458.0));
+        assert_eq!(
+            parse("max(cos(pi/2), 1, c)", 0.0, 0.0, 0.0),
+            Ok(299792458.0)
+        );
         assert_eq!(parse("asin(x-y)", 13.5, 12.5, 0.0), Ok(PI / 2.0));
         assert_eq!(
             parse(

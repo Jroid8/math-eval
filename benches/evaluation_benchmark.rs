@@ -101,8 +101,14 @@ const MATH_EXPRESSIONS: [(&str, &str); 7] = [
     ("slope(x,y,x+17,t)", "one custom function"),
     ("10*sin(t)", "3 instructions"),
     ("sin(x*17/5)+cos(y+729166/7933)", "simplification"),
-    ("sin(x+cos(y^(1/6)))*log(895731)", "ahead of time evaluation"),
-    ("sin(x*pi/10*(1.3+sin(t/10))+t*2+sin(y*pi*sin(t/17)+16*sin(t)))+0.05", "practical"),
+    (
+        "sin(x+cos(y^(1/6)))*log(895731)",
+        "ahead of time evaluation",
+    ),
+    (
+        "sin(x*pi/10*(1.3+sin(t/10))+t*2+sin(y*pi*sin(t/17)+16*sin(t)))+0.05",
+        "practical",
+    ),
 ];
 
 fn get_throughput(input: &str) -> u64 {
