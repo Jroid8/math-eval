@@ -1,8 +1,7 @@
 use std::{
     collections::HashMap,
     fmt::Display,
-    ops::{RangeBounds, RangeInclusive},
-    usize,
+    ops::RangeInclusive,
 };
 
 use asm::MathAssembly;
