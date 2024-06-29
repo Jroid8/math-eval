@@ -15,6 +15,14 @@ pub enum UnOperation {
 }
 
 impl UnOperation {
+    pub fn parse(input: char) -> Option<Self> {
+        match input {
+            '!' => Some(UnOperation::Fac),
+            '-' => Some(UnOperation::Neg),
+            _ => None,
+        }
+    }
+
     pub fn eval<N: MathEvalNumber>(self, value: N) -> N {
         match self {
             UnOperation::Fac => value.factorial(),
@@ -303,7 +311,9 @@ where
                                                 c.preceding_siblings(arena)
                                                     .nth(1)
                                                     .map(|n| arena[n].get()),
-                                                Some(TokenNode::Operation(_))
+                                                Some(TokenNode::Operation(o))
+                                                    if UnOperation::parse(*o)
+                                                    .filter(|o| *o != UnOperation::Neg).is_none()
                                             ))
                                 }
                                 _ => false,
@@ -330,8 +340,8 @@ where
                             };
                         }
                     }
-                    if end - start == 1
-                        && *arena[token_node.children(arena).nth(end - 1).unwrap()].get()
+                    if start + 1 == end
+                        && *arena[token_node.children(arena).nth(end).unwrap()].get()
                             == TokenNode::Operation('!')
                     {
                         call_stack.push((token_node, Some(start), Some(end - 1)));
@@ -976,10 +986,14 @@ mod test {
         assert_eq!(
             syntaxify("sin(x!-1)"),
             Ok(branch!(
-                SyntaxNode::UnOperation(UnOperation::Fac),
+                SyntaxNode::NativeFunction(NativeFunction::Sin),
                 branch!(
-                    SyntaxNode::NativeFunction(NativeFunction::Sin),
-                    Leaf(SyntaxNode::Variable(TestVar::X))
+                    SyntaxNode::BiOperation(BiOperation::Sub),
+                    branch!(
+                        SyntaxNode::UnOperation(UnOperation::Fac),
+                        Leaf(SyntaxNode::Variable(TestVar::X))
+                    ),
+                    Leaf(SyntaxNode::Number(1.0))
                 )
             ))
         );
