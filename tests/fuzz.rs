@@ -1,3 +1,5 @@
+use math_eval::EvalBuilder;
+
 fn gen_random_f64() -> f64 {
     fastrand::f64()
         * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
@@ -142,5 +144,38 @@ fn test_all_valid() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn test_fuzz_symbols() {
+    let single_letter = "1234567890+-*/^!qwertyuiopasdfghjklzxcvbnm()[]{},";
+    let mut symbols: Vec<String> = single_letter.chars().map(String::from).collect();
+    symbols.extend(
+        [
+            "sin", "cos", "tan", "cot", "asin", "acos", "atan", "acot", "log", "log2", "log10",
+            "ln", "exp", "floor", "ceil", "round", "trunc", "frac", "abs", "sign", "sqrt", "cbrt",
+            "max", "min", "mean", "dist", "ke",
+        ]
+        .into_iter()
+        .map(String::from),
+    );
+    let parser = EvalBuilder::new()
+        .add_constant("ke", 8.99e9)
+        .add_variable("x")
+        .add_variable("y")
+        .add_variable("a")
+        .add_function("mean", 2, None, &|inp| {
+            inp.iter().sum::<f64>() / inp.len() as f64
+        })
+        .add_function("dist", 2, Some(2), &|inp| {
+            (inp[0] * inp[0] + inp[1] * inp[1]).sqrt()
+        }).build_as_parser();
+    for _ in 1..100 {
+        let expr: String = (1..fastrand::u8(30..80))
+            .map(|_| fastrand::choice(&symbols).unwrap().as_str())
+            .collect();
+        println!("{expr}");
+        let _ = parser(expr.as_str(), 1.0, 2.0, 3.0);
     }
 }
