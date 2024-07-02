@@ -1,4 +1,4 @@
-use math_eval::EvalBuilder;
+use std::panic;
 
 fn gen_random_f64() -> f64 {
     fastrand::f64()
@@ -149,8 +149,10 @@ fn test_all_valid() {
 
 #[test]
 fn test_fuzz_symbols() {
-    let single_letter = "1234567890+-*/^!qwertyuiopasdfghjklzxcvbnm()[]{},";
-    let mut symbols: Vec<String> = single_letter.chars().map(String::from).collect();
+    let mut symbols: Vec<String> = "1234567890+-*/^!qwertyuiopasdfghjklzxcvbnm()[]{},"
+        .chars()
+        .map(String::from)
+        .collect();
     symbols.extend(
         [
             "sin", "cos", "tan", "cot", "asin", "acos", "atan", "acot", "log", "log2", "log10",
@@ -160,22 +162,44 @@ fn test_fuzz_symbols() {
         .into_iter()
         .map(String::from),
     );
-    let parser = EvalBuilder::new()
-        .add_constant("ke", 8.99e9)
-        .add_variable("x")
-        .add_variable("y")
-        .add_variable("a")
-        .add_function("mean", 2, None, &|inp| {
-            inp.iter().sum::<f64>() / inp.len() as f64
-        })
-        .add_function("dist", 2, Some(2), &|inp| {
-            (inp[0] * inp[0] + inp[1] * inp[1]).sqrt()
-        }).build_as_parser();
-    for _ in 1..100 {
+    #[derive(Clone)]
+    enum MyVars {
+        X,
+        Y,
+        A,
+    }
+    #[derive(Clone)]
+    enum MyFuncs {
+        Mean,
+        Dist,
+    }
+    for _ in 1..200 {
         let expr: String = (1..fastrand::u8(30..80))
             .map(|_| fastrand::choice(&symbols).unwrap().as_str())
             .collect();
-        println!("{expr}");
-        let _ = parser(expr.as_str(), 1.0, 2.0, 3.0);
+        if let Err(err) = std::panic::catch_unwind(|| {
+            math_eval::parse(
+                &expr,
+                |inp| if inp == "ke" { Some(8.99e9) } else { None },
+                |inp| match inp {
+                    "mean" => Some((MyFuncs::Mean, 2, None)),
+                    "dist" => Some((MyFuncs::Dist, 2, Some(2))),
+                    _ => None,
+                },
+                |inp| match inp {
+                    "x" => Some(MyVars::X),
+                    "y" => Some(MyVars::Y),
+                    "a" => Some(MyVars::A),
+                    _ => None,
+                },
+                |func| match func {
+                    MyFuncs::Mean => &|inp| inp.iter().sum::<f64>() / inp.len() as f64,
+                    MyFuncs::Dist => &|inp| (inp[0] * inp[0] + inp[1] * inp[1]).sqrt(),
+                },
+            )
+        }) {
+            println!("{expr}");
+            panic::resume_unwind(err);
+        }
     }
 }
