@@ -127,6 +127,7 @@ pub enum SyntaxErrorKind {
     UnknownFunction,
     NotEnoughArguments,
     TooManyArguments,
+    MisplacedToken,
 }
 
 fn tokennode2range(
@@ -134,6 +135,9 @@ fn tokennode2range(
     token_tree: &TokenTree<'_>,
     target: NodeId,
 ) -> RangeInclusive<usize> {
+    if target.ancestors(&token_tree.0.arena).nth(1).is_none() {
+        panic!("Attempted to report the root node as the cause of error, good luck fixing this bug")
+    }
     let mut index = 0;
     macro_rules! count_space {
         () => {
@@ -198,6 +202,7 @@ impl SyntaxError {
                 SyntaxErrorKind::UnknownFunction => ParsingErrorKind::UnknownFunction,
                 SyntaxErrorKind::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
                 SyntaxErrorKind::TooManyArguments => ParsingErrorKind::TooManyArguments,
+                SyntaxErrorKind::MisplacedToken => ParsingErrorKind::MisplacedToken
             },
         }
     }
@@ -347,7 +352,10 @@ where
                         call_stack.push((token_node, Some(start), Some(end - 1)));
                         Ok(Some(SyntaxNode::UnOperation(UnOperation::Fac)))
                     } else {
-                        Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, token_node))
+                        Err(SyntaxError(
+                            SyntaxErrorKind::MisplacedToken,
+                            token_node.children(arena).nth(start).unwrap(),
+                        ))
                     }
                 }
             },
