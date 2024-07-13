@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    fmt::Display,
-    ops::RangeInclusive,
-};
+use std::{collections::HashMap, fmt::Display, ops::RangeInclusive};
 
 use asm::MathAssembly;
 use number::MathEvalNumber;
