@@ -147,6 +147,18 @@ fn test_all_valid() {
     }
 }
 
+#[derive(Clone)]
+enum MyVars {
+    X,
+    Y,
+    A,
+}
+#[derive(Clone)]
+enum MyFuncs {
+    Mean,
+    Dist,
+}
+
 #[test]
 fn test_fuzz_symbols() {
     let mut symbols: Vec<String> = "1234567890+-*/^!qwertyuiopasdfghjklzxcvbnm()[]{},"
@@ -162,17 +174,6 @@ fn test_fuzz_symbols() {
         .into_iter()
         .map(String::from),
     );
-    #[derive(Clone)]
-    enum MyVars {
-        X,
-        Y,
-        A,
-    }
-    #[derive(Clone)]
-    enum MyFuncs {
-        Mean,
-        Dist,
-    }
     for _ in 1..200 {
         let expr: String = (1..fastrand::u8(30..80))
             .map(|_| fastrand::choice(&symbols).unwrap().as_str())
@@ -199,6 +200,37 @@ fn test_fuzz_symbols() {
             )
         }) {
             println!("{expr}");
+            panic::resume_unwind(err);
+        }
+    }
+}
+
+#[test]
+fn test_fuzz_all() {
+    for _ in 1..100 {
+        let noise: String = (0..100).map(|_| fastrand::char('\x00'..char::MAX)).collect();
+        if let Err(err) = std::panic::catch_unwind(|| {
+            math_eval::parse(
+                &noise,
+                |inp| if inp == "ke" { Some(8.99e9) } else { None },
+                |inp| match inp {
+                    "mean" => Some((MyFuncs::Mean, 2, None)),
+                    "dist" => Some((MyFuncs::Dist, 2, Some(2))),
+                    _ => None,
+                },
+                |inp| match inp {
+                    "x" => Some(MyVars::X),
+                    "y" => Some(MyVars::Y),
+                    "a" => Some(MyVars::A),
+                    _ => None,
+                },
+                |func| match func {
+                    MyFuncs::Mean => &|inp| inp.iter().sum::<f64>() / inp.len() as f64,
+                    MyFuncs::Dist => &|inp| (inp[0] * inp[0] + inp[1] * inp[1]).sqrt(),
+                },
+            )
+        }) {
+            println!("{noise:?}");
             panic::resume_unwind(err);
         }
     }
