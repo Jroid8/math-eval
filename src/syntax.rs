@@ -128,6 +128,7 @@ pub enum SyntaxErrorKind {
     NotEnoughArguments,
     TooManyArguments,
     MisplacedToken,
+    EmptyParenthesis,
 }
 
 fn tokennode2range(
@@ -202,7 +203,8 @@ impl SyntaxError {
                 SyntaxErrorKind::UnknownFunction => ParsingErrorKind::UnknownFunction,
                 SyntaxErrorKind::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
                 SyntaxErrorKind::TooManyArguments => ParsingErrorKind::TooManyArguments,
-                SyntaxErrorKind::MisplacedToken => ParsingErrorKind::MisplacedToken
+                SyntaxErrorKind::MisplacedToken => ParsingErrorKind::MisplacedToken,
+                SyntaxErrorKind::EmptyParenthesis => ParsingErrorKind::EmptyParenthesis,
             },
         }
     }
@@ -228,6 +230,9 @@ where
             (root, None, None),
             |(token_node, start, end), call_stack| {
                 let children_count = token_node.children(arena).count();
+                if children_count == 0 {
+                    return Err(SyntaxError(SyntaxErrorKind::EmptyParenthesis, token_node));
+                }
                 let start = start.unwrap_or(0);
                 let end = end.unwrap_or(children_count - 1);
                 let children = || {
@@ -1005,6 +1010,11 @@ mod test {
                 )
             ))
         );
+        // temporary. must make more
+        assert_eq!(
+            syntaxify("x*()").map_err(|e| *e.kind()),
+            Err(ParsingErrorKind::EmptyParenthesis)
+        )
     }
 
     #[test]

@@ -62,7 +62,8 @@ pub enum ParsingErrorKind {
     UnknownFunction,
     NotEnoughArguments,
     TooManyArguments,
-    MisplacedToken
+    MisplacedToken,
+    EmptyParenthesis,
 }
 
 impl Display for ParsingErrorKind {
@@ -78,7 +79,8 @@ impl Display for ParsingErrorKind {
             ParsingErrorKind::UnknownFunction => "function not recognized",
             ParsingErrorKind::NotEnoughArguments => "not enough arguments for function",
             ParsingErrorKind::TooManyArguments => "too many arguments for function",
-            ParsingErrorKind::MisplacedToken => "Unable to interpret the given tokens",
+            ParsingErrorKind::MisplacedToken => "unable to interpret the given tokens",
+            ParsingErrorKind::EmptyParenthesis => "parenthesis should not be empty",
         })
     }
 }
