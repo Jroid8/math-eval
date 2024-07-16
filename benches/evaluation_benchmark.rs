@@ -96,10 +96,12 @@ fn matheval_bencher(b: &mut Bencher<'_>, input: &str) {
     })
 }
 
-const MATH_EXPRESSIONS: [(&str, &str); 7] = [
+const MATH_EXPRESSIONS: [(&str, &str); 9] = [
     ("x+y", "one addition"),
-    ("sin(x)", "one native function"),
-    ("slope(x,y,x+17,t)", "one custom function"),
+    ("sin(x)", "one native function single input"),
+    ("max(x, y)", "one native function two inputs"),
+    ("dist(x, y)", "one custom function two inputs"),
+    ("slope(x,y,x+17,t)", "one custom function four inputs"),
     ("10*sin(t)", "3 instructions"),
     ("sin(x*17/5)+cos(y+729166/7933)", "simplification"),
     (
