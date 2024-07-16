@@ -393,8 +393,8 @@ mod test {
             .add_variable("y")
             .add_variable("t")
             .add_constant("c", 299792458.0)
-            .add_function("dist", 2, Some(2), &|input: &[f64]| {
-                (input[0].powi(2) + input[1].powi(2)).sqrt()
+            .add_fn2("dist", &|x, y| {
+                (x.powi(2) + y.powi(2)).sqrt()
             })
             .build_as_parser();
 

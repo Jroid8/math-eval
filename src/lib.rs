@@ -136,7 +136,7 @@ where
 {
     constants: HashMap<String, N>,
     function_identifier: HashMap<String, (usize, u8, Option<u8>)>,
-    functions: Vec<&'a dyn Fn(&[N]) -> N>,
+    functions: Vec<CFPointer<'a, N>>,
     variables: V,
 }
 
@@ -162,7 +162,31 @@ where
         self.constants.insert(name.into(), value);
         self
     }
-    pub fn add_function(
+    pub fn add_fn1(mut self, name: impl Into<String>, function: &'a dyn Fn(N) -> N) -> Self {
+        self.function_identifier
+            .insert(name.into(), (self.functions.len(), 1, Some(1)));
+        self.functions.push(CFPointer::Single(function));
+        self
+    }
+    pub fn add_fn2(mut self, name: impl Into<String>, function: &'a dyn Fn(N, N) -> N) -> Self {
+        self.function_identifier
+            .insert(name.into(), (self.functions.len(), 2, Some(2)));
+        self.functions.push(CFPointer::Dual(function));
+        self
+    }
+    pub fn add_fn3(mut self, name: impl Into<String>, function: &'a dyn Fn(N, N, N) -> N) -> Self {
+        self.function_identifier
+            .insert(name.into(), (self.functions.len(), 3, Some(3)));
+        self.functions.push(CFPointer::Triple(function));
+        self
+    }
+    pub fn add_fn4(mut self, name: impl Into<String>, function: &'a dyn Fn(N, N, N, N) -> N) -> Self {
+        self.function_identifier
+            .insert(name.into(), (self.functions.len(), 4, Some(4)));
+        self.functions.push(CFPointer::Quad(function));
+        self
+    }
+    pub fn add_fn_flex(
         mut self,
         name: impl Into<String>,
         mininum_argument_count: u8,
@@ -177,7 +201,7 @@ where
                 maximum_argument_count,
             ),
         );
-        self.functions.push(function);
+        self.functions.push(CFPointer::Flexible(function));
         self
     }
 }
@@ -437,7 +461,7 @@ fn test_eval_parser() {
     assert_eq!(
         EvalBuilder::new()
             .add_constant("g", 10.0)
-            .add_function("inv", 1, Some(1), &|inputs: &[f64]| 1.0 / inputs[0],)
+            .add_fn1("inv", &|v| 1.0 / v)
             .build_as_function("inv(g)")
             .unwrap()(),
         0.1
@@ -445,9 +469,8 @@ fn test_eval_parser() {
     assert_eq!(
         EvalBuilder::new()
             .add_constant("c", 299792.0)
-            .add_function("tometers", 1, Some(1), &|inputs: &[f64]| inputs[0] * 1000.0)
-            .add_function("tomilimeters", 1, Some(1), &|inputs: &[f64]| inputs[0]
-                * 1000.0)
+            .add_fn1("tometers", &|v| v * 1000.0)
+            .add_fn1("tomilimeters", &|v| v * 1000.0)
             .build_as_parser()("tomilimeters(tometers(c))")
         .unwrap(),
         299792000000.0

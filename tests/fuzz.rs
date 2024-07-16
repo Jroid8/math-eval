@@ -1,5 +1,7 @@
 use std::panic;
 
+use math_eval::asm::CFPointer;
+
 fn gen_random_f64() -> f64 {
     fastrand::f64()
         * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
@@ -90,7 +92,7 @@ fn test_operator() {
             |_| None,
             |_| None::<((), _, _)>,
             |_| None::<()>,
-            |_| &|_| 0.0,
+            |_| CFPointer::Single(&|_| 0.0),
         )
         .unwrap();
         let result = match opr {
@@ -110,11 +112,11 @@ fn test_operator() {
 #[test]
 fn test_all_valid() {
     let parser = math_eval::EvalBuilder::new()
-        .add_function("mean", 2, None, &|inputs: &[f64]| {
+        .add_fn_flex("mean", 2, None, &|inputs: &[f64]| {
             inputs.iter().sum::<f64>() / inputs.len() as f64
         })
-        .add_function("dist", 2, Some(2), &|inputs: &[f64]| {
-            (inputs[0].powi(2) + inputs[1].powi(2)).sqrt()
+        .add_fn2("dist", &|x, y| {
+            (x.powi(2) + y.powi(2)).sqrt()
         })
         .add_variable("x")
         .add_variable("y")
@@ -194,8 +196,8 @@ fn test_fuzz_symbols() {
                     _ => None,
                 },
                 |func| match func {
-                    MyFuncs::Mean => &|inp| inp.iter().sum::<f64>() / inp.len() as f64,
-                    MyFuncs::Dist => &|inp| (inp[0] * inp[0] + inp[1] * inp[1]).sqrt(),
+                    MyFuncs::Mean => CFPointer::Flexible(&|inp| inp.iter().sum::<f64>() / inp.len() as f64),
+                    MyFuncs::Dist => CFPointer::Dual(&|x, y| (x*x + y*y).sqrt()),
                 },
             )
         }) {
@@ -225,8 +227,8 @@ fn test_fuzz_all() {
                     _ => None,
                 },
                 |func| match func {
-                    MyFuncs::Mean => &|inp| inp.iter().sum::<f64>() / inp.len() as f64,
-                    MyFuncs::Dist => &|inp| (inp[0] * inp[0] + inp[1] * inp[1]).sqrt(),
+                    MyFuncs::Mean => CFPointer::Flexible(&|inp| inp.iter().sum::<f64>() / inp.len() as f64),
+                    MyFuncs::Dist => CFPointer::Dual(&|x, y| (x*x + y*y).sqrt()),
                 },
             )
         }) {
