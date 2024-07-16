@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display, ops::RangeInclusive};
 
-use asm::MathAssembly;
+use asm::{CFPointer, MathAssembly};
 use number::MathEvalNumber;
 use syntax::SyntaxTree;
 use tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
@@ -90,7 +90,7 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
-    function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
+    function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
 ) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let token_tree =

@@ -184,6 +184,19 @@ where
         Ok(())
     }
 }
+
+#[derive(Clone, Copy)]
+pub enum CFPointer<'a, N>
+where
+    N: MathEvalNumber,
+{
+    Single(&'a dyn Fn(N) -> N),
+    Dual(&'a dyn Fn(N, N) -> N),
+    Triple(&'a dyn Fn(N, N, N) -> N),
+    Quad(&'a dyn Fn(N, N, N, N) -> N),
+    Flexible(&'a dyn Fn(&[N]) -> N),
+}
+
 impl<'a, N, V, F> MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
@@ -193,7 +206,7 @@ where
     pub fn new(
         arena: &Arena<SyntaxNode<N, V, F>>,
         root: NodeId,
-        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
+        function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, V, F>> = Vec::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
@@ -247,11 +260,37 @@ where
                             Instruction::NFFlexible(p, cursor.children(arena).count() as u8, *nf)
                         }
                     },
-                    SyntaxNode::CustomFunction(cf) => Instruction::CustomFunction(
-                        function_to_pointer(cf),
-                        cursor.children(arena).count() as u8,
-                        cf.clone(),
-                    ),
+                    SyntaxNode::CustomFunction(cf) => match function_to_pointer(cf) {
+                        CFPointer::Single(func) => {
+                            Instruction::CFSingle(func, children_as_input.next().unwrap(), cf.clone())
+                        }
+                        CFPointer::Dual(func) => Instruction::CFDual(
+                            func,
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            cf.clone(),
+                        ),
+                        CFPointer::Triple(func) => Instruction::CFTriple(
+                            func,
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            cf.clone(),
+                        ),
+                        CFPointer::Quad(func) => Instruction::CFQuad(
+                            func,
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            cf.clone(),
+                        ),
+                        CFPointer::Flexible(func) => Instruction::CFFlexible(
+                            func,
+                            cursor.children(arena).count() as u8,
+                            cf.clone(),
+                        ),
+                    },
                 };
                 result.push(instruction);
             }
@@ -265,14 +304,25 @@ where
         for instr in &result {
             stack_len += match instr {
                 Instruction::Source(_) => 0,
-                Instruction::BiOperation(_, lhs, rhs) | Instruction::NFDual(_, lhs, rhs, _) => {
+                Instruction::BiOperation(_, lhs, rhs)
+                | Instruction::NFDual(_, lhs, rhs, _)
+                | Instruction::CFDual(_, lhs, rhs, _) => {
                     input_stack_effect(lhs) + input_stack_effect(rhs)
                 }
-                Instruction::UnOperation(_, val) | Instruction::NFSingle(_, val, _) => {
-                    input_stack_effect(val)
+                Instruction::UnOperation(_, val)
+                | Instruction::NFSingle(_, val, _)
+                | Instruction::CFSingle(_, val, _) => input_stack_effect(val),
+                Instruction::CFTriple(_, inp1, inp2, inp3, _) => {
+                    input_stack_effect(inp1) + input_stack_effect(inp2) + input_stack_effect(inp3)
+                }
+                Instruction::CFQuad(_, inp1, inp2, inp3, inp4, _) => {
+                    input_stack_effect(inp1)
+                        + input_stack_effect(inp2)
+                        + input_stack_effect(inp3)
+                        + input_stack_effect(inp4)
                 }
                 Instruction::NFFlexible(_, arg_count, _)
-                | Instruction::CustomFunction(_, arg_count, _) => -(*arg_count as i32),
+                | Instruction::CFFlexible(_, arg_count, _) => -(*arg_count as i32),
             } + 1;
             if stack_len > stack_capacity {
                 stack_capacity = stack_len;
