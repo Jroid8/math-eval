@@ -136,20 +136,20 @@ where
             }
             Self::NFFlexible(arg0, arg1, arg2) => Self::NFFlexible(*arg0, *arg1, *arg2),
             Self::CFSingle(arg0, arg1, arg2) => {
-                Self::CFSingle(arg0.clone(), arg1.clone(), arg2.clone())
+                Self::CFSingle(*arg0, arg1.clone(), arg2.clone())
             }
             Self::CFDual(arg0, arg1, arg2, arg3) => {
-                Self::CFDual(arg0.clone(), arg1.clone(), arg2.clone(), arg3.clone())
+                Self::CFDual(*arg0, arg1.clone(), arg2.clone(), arg3.clone())
             }
             Self::CFTriple(arg0, arg1, arg2, arg3, arg4) => Self::CFTriple(
-                arg0.clone(),
+                *arg0,
                 arg1.clone(),
                 arg2.clone(),
                 arg3.clone(),
                 arg4.clone(),
             ),
             Self::CFQuad(arg0, arg1, arg2, arg3, arg4, arg5) => Self::CFQuad(
-                arg0.clone(),
+                *arg0,
                 arg1.clone(),
                 arg2.clone(),
                 arg3.clone(),
@@ -157,7 +157,7 @@ where
                 arg5.clone(),
             ),
             Self::CFFlexible(arg0, arg1, arg2) => {
-                Self::CFFlexible(arg0.clone(), arg1.clone(), arg2.clone())
+                Self::CFFlexible(*arg0, *arg1, arg2.clone())
             }
         }
     }
