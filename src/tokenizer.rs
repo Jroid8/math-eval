@@ -104,15 +104,17 @@ pub mod token_tree {
         token_index: usize,
     ) -> RangeInclusive<usize> {
         let start = token2index(input, token_stream, token_index);
-        let end = start + match &token_stream.0[token_index] {
-            Token::Number(num) => num.len(),
-            Token::Operation(_) => 1,
-            Token::Variable(var) => var.len(),
-            Token::Function(func) => func.len() + 1,
-            Token::OpenParen => 1,
-            Token::CloseParen => 1,
-            Token::Comma => 1,
-        } - 1;
+        let end = start
+            + match &token_stream.0[token_index] {
+                Token::Number(num) => num.len(),
+                Token::Operation(_) => 1,
+                Token::Variable(var) => var.len(),
+                Token::Function(func) => func.len() + 1,
+                Token::OpenParen => 1,
+                Token::CloseParen => 1,
+                Token::Comma => 1,
+            }
+            - 1;
         start..=end
     }
 

@@ -122,7 +122,8 @@ pub fn evaluate<N: MathEvalNumber>(input: &str) -> Result<N, ParsingError> {
         |_| None,
         |_: &()| unreachable!(),
         false,
-    ).map(|mut asm| asm.eval(|_: &()| unreachable!()))
+    )
+    .map(|mut asm| asm.eval(|_: &()| unreachable!()))
 }
 
 #[derive(Clone, Debug)]
@@ -239,7 +240,11 @@ where
             variables: OneVariable(name.into()),
         }
     }
-    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
+    fn parse(
+        &self,
+        input: &str,
+        optimize: bool,
+    ) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -274,7 +279,11 @@ where
             variables: TwoVariables(self.variables.0, name.into()),
         }
     }
-    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
+    fn parse(
+        &self,
+        input: &str,
+        optimize: bool,
+    ) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -291,7 +300,10 @@ where
         )
     }
     pub fn build_as_parser(self) -> impl Fn(&str, N) -> Result<N, ParsingError> + 'a {
-        move |input: &str, var| self.parse(input, false).map(|mut asm| asm.eval(|_: &()| var))
+        move |input: &str, var| {
+            self.parse(input, false)
+                .map(|mut asm| asm.eval(|_: &()| var))
+        }
     }
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
         let mut expr = self.parse(input, true)?;
@@ -311,7 +323,11 @@ where
             variables: ThreeVariables([self.variables.0, self.variables.1, name.into()]),
         }
     }
-    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, bool, usize>, ParsingError> {
+    fn parse(
+        &self,
+        input: &str,
+        optimize: bool,
+    ) -> Result<MathAssembly<'a, N, bool, usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -359,7 +375,11 @@ where
             ]),
         }
     }
-    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
+    fn parse(
+        &self,
+        input: &str,
+        optimize: bool,
+    ) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -419,7 +439,11 @@ where
             _ => unreachable!(),
         }
     }
-    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
+    fn parse(
+        &self,
+        input: &str,
+        optimize: bool,
+    ) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -454,7 +478,11 @@ impl<'a, N> EvalBuilder<'a, N, ManyVariables>
 where
     N: MathEvalNumber,
 {
-    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, usize, usize>, ParsingError> {
+    fn parse(
+        &self,
+        input: &str,
+        optimize: bool,
+    ) -> Result<MathAssembly<'a, N, usize, usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),

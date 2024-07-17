@@ -135,9 +135,7 @@ where
                 Self::NFDual(*arg0, arg1.clone(), arg2.clone(), *arg3)
             }
             Self::NFFlexible(arg0, arg1, arg2) => Self::NFFlexible(*arg0, *arg1, *arg2),
-            Self::CFSingle(arg0, arg1, arg2) => {
-                Self::CFSingle(*arg0, arg1.clone(), arg2.clone())
-            }
+            Self::CFSingle(arg0, arg1, arg2) => Self::CFSingle(*arg0, arg1.clone(), arg2.clone()),
             Self::CFDual(arg0, arg1, arg2, arg3) => {
                 Self::CFDual(*arg0, arg1.clone(), arg2.clone(), arg3.clone())
             }
@@ -156,9 +154,7 @@ where
                 arg4.clone(),
                 arg5.clone(),
             ),
-            Self::CFFlexible(arg0, arg1, arg2) => {
-                Self::CFFlexible(*arg0, *arg1, arg2.clone())
-            }
+            Self::CFFlexible(arg0, arg1, arg2) => Self::CFFlexible(*arg0, *arg1, arg2.clone()),
         }
     }
 }
@@ -261,9 +257,11 @@ where
                         }
                     },
                     SyntaxNode::CustomFunction(cf) => match function_to_pointer(cf) {
-                        CFPointer::Single(func) => {
-                            Instruction::CFSingle(func, children_as_input.next().unwrap(), cf.clone())
-                        }
+                        CFPointer::Single(func) => Instruction::CFSingle(
+                            func,
+                            children_as_input.next().unwrap(),
+                            cf.clone(),
+                        ),
                         CFPointer::Dual(func) => Instruction::CFDual(
                             func,
                             children_as_input.next().unwrap(),
@@ -393,9 +391,7 @@ mod test {
             .add_variable("y")
             .add_variable("t")
             .add_constant("c", 299792458.0)
-            .add_fn2("dist", &|x, y| {
-                (x.powi(2) + y.powi(2)).sqrt()
-            })
+            .add_fn2("dist", &|x, y| (x.powi(2) + y.powi(2)).sqrt())
             .build_as_parser();
 
         assert_eq!(parse("10", 0.0, 0.0, 0.0), Ok(10.0));

@@ -376,10 +376,7 @@ where
         MathAssembly::new(&self.0.arena, self.0.root, function_to_pointer)
     }
 
-    pub fn aot_evaluation<'a>(
-        &mut self,
-        function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
-    ) {
+    pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>) {
         let mut examin: Vec<NodeId> = Vec::new();
         for node in self.0.root.traverse(&self.0.arena) {
             if let NodeEdge::End(node) = node {
