@@ -91,6 +91,7 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
     function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
+    optimize: bool,
 ) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let token_tree =
@@ -102,8 +103,10 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
         custom_variable_parser,
     )
     .map_err(|e| e.to_general(input, &token_tree))?;
-    syntax_tree.aot_evaluation(&function_to_pointer);
-    syntax_tree.displacing_simplification();
+    if optimize {
+        syntax_tree.aot_evaluation(&function_to_pointer);
+        syntax_tree.displacing_simplification();
+    }
     Ok(MathAssembly::new(
         &syntax_tree.0.arena,
         syntax_tree.0.root,
@@ -112,21 +115,14 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
 }
 
 pub fn evaluate<N: MathEvalNumber>(input: &str) -> Result<N, ParsingError> {
-    let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-    let token_tree =
-        TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
-    let syntax_tree = SyntaxTree::new(
-        &token_tree,
+    parse(
+        input,
         |_| None,
         |_| None,
         |_| None,
-    )
-    .map_err(|e| e.to_general(input, &token_tree))?;
-    Ok(MathAssembly::new(
-        &syntax_tree.0.arena,
-        syntax_tree.0.root,
         |_: &()| unreachable!(),
-    ).eval(|_: &()| unreachable!()))
+        false,
+    ).map(|mut asm| asm.eval(|_: &()| unreachable!()))
 }
 
 #[derive(Clone, Debug)]
@@ -198,7 +194,11 @@ where
         self.functions.push(CFPointer::Triple(function));
         self
     }
-    pub fn add_fn4(mut self, name: impl Into<String>, function: &'a dyn Fn(N, N, N, N) -> N) -> Self {
+    pub fn add_fn4(
+        mut self,
+        name: impl Into<String>,
+        function: &'a dyn Fn(N, N, N, N) -> N,
+    ) -> Self {
         self.function_identifier
             .insert(name.into(), (self.functions.len(), 4, Some(4)));
         self.functions.push(CFPointer::Quad(function));
@@ -239,24 +239,25 @@ where
             variables: OneVariable(name.into()),
         }
     }
-    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
+    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
             |_| None,
             |index| self.functions[*index],
+            optimize,
         )
     }
     pub fn build_as_parser(self) -> impl Fn(&str) -> Result<N, ParsingError> + 'a {
         move |input: &str| {
-            self.parse(input)
+            self.parse(input, false)
                 .map(|mut asm| asm.eval(|_: &()| 0.0.into()))
         }
     }
 
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input)?;
+        let mut expr = self.parse(input, true)?;
         Ok(move || expr.eval(|_: &()| 0.0.into()))
     }
 }
@@ -273,7 +274,7 @@ where
             variables: TwoVariables(self.variables.0, name.into()),
         }
     }
-    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
+    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -286,13 +287,14 @@ where
                 }
             },
             |index| self.functions[*index],
+            optimize,
         )
     }
     pub fn build_as_parser(self) -> impl Fn(&str, N) -> Result<N, ParsingError> + 'a {
-        move |input: &str, var| self.parse(input).map(|mut asm| asm.eval(|_: &()| var))
+        move |input: &str, var| self.parse(input, false).map(|mut asm| asm.eval(|_: &()| var))
     }
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input)?;
+        let mut expr = self.parse(input, true)?;
         Ok(move |var| expr.eval(|_: &()| var))
     }
 }
@@ -309,7 +311,7 @@ where
             variables: ThreeVariables([self.variables.0, self.variables.1, name.into()]),
         }
     }
-    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, bool, usize>, ParsingError> {
+    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, bool, usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -321,11 +323,12 @@ where
                     .map(|i| i == 0)
             },
             |index| self.functions[*index],
+            optimize,
         )
     }
     pub fn build_as_parser(self) -> impl Fn(&str, N, N) -> Result<N, ParsingError> + 'a {
         move |input, v1, v2| {
-            self.parse(input)
+            self.parse(input, false)
                 .map(|mut asm| asm.eval(|var: &bool| if *var { v1 } else { v2 }))
         }
     }
@@ -333,7 +336,7 @@ where
         self,
         input: &str,
     ) -> Result<impl FnMut(N, N) -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input)?;
+        let mut expr = self.parse(input, true)?;
         Ok(move |v1, v2| expr.eval(|var: &bool| if *var { v1 } else { v2 }))
     }
 }
@@ -356,7 +359,7 @@ where
             ]),
         }
     }
-    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
+    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -369,6 +372,7 @@ where
                     .map(|i| i as u8)
             },
             |index| self.functions[*index],
+            optimize,
         )
     }
     fn select_variable(&self, i: u8, v1: N, v2: N, v3: N) -> N {
@@ -381,7 +385,7 @@ where
     }
     pub fn build_as_parser(self) -> impl Fn(&str, N, N, N) -> Result<N, ParsingError> + 'a {
         move |input, v1, v2, v3| {
-            self.parse(input)
+            self.parse(input, false)
                 .map(|mut asm| asm.eval(|var: &u8| self.select_variable(*var, v1, v2, v3)))
         }
     }
@@ -389,7 +393,7 @@ where
         self,
         input: &str,
     ) -> Result<impl FnMut(N, N, N) -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input)?;
+        let mut expr = self.parse(input, true)?;
         Ok(move |v1, v2, v3| expr.eval(|var: &u8| self.select_variable(*var, v1, v2, v3)))
     }
 }
@@ -415,7 +419,7 @@ where
             _ => unreachable!(),
         }
     }
-    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
+    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -428,11 +432,12 @@ where
                     .map(|i| i as u8)
             },
             |index| self.functions[*index],
+            optimize,
         )
     }
     pub fn build_as_parser(self) -> impl Fn(&str, N, N, N, N) -> Result<N, ParsingError> + 'a {
         move |input, v1, v2, v3, v4| {
-            self.parse(input)
+            self.parse(input, false)
                 .map(|mut asm| asm.eval(|var: &u8| self.select_variable(*var, v1, v2, v3, v4)))
         }
     }
@@ -440,7 +445,7 @@ where
         self,
         input: &str,
     ) -> Result<impl FnMut(N, N, N, N) -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input)?;
+        let mut expr = self.parse(input, true)?;
         Ok(move |v1, v2, v3, v4| expr.eval(|var: &u8| self.select_variable(*var, v1, v2, v3, v4)))
     }
 }
@@ -449,18 +454,19 @@ impl<'a, N> EvalBuilder<'a, N, ManyVariables>
 where
     N: MathEvalNumber,
 {
-    fn parse(&self, input: &str) -> Result<MathAssembly<'a, N, usize, usize>, ParsingError> {
+    fn parse(&self, input: &str, optimize: bool) -> Result<MathAssembly<'a, N, usize, usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
             |inp| self.variables.0.iter().position(|var| *var == inp),
             |index| self.functions[*index],
+            optimize,
         )
     }
     pub fn build_as_parser(self) -> impl Fn(&str, &[N]) -> Result<N, ParsingError> + 'a {
         move |input, vars: &[N]| {
-            self.parse(input)
+            self.parse(input, false)
                 .map(|mut asm| asm.eval(|v: &usize| vars[*v]))
         }
     }
@@ -468,7 +474,7 @@ where
         self,
         input: &str,
     ) -> Result<impl FnMut(&[N]) -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input)?;
+        let mut expr = self.parse(input, true)?;
         Ok(move |vars: &[N]| expr.eval(|v: &usize| vars[*v]))
     }
 }

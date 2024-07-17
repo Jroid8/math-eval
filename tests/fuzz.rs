@@ -93,6 +93,7 @@ fn test_operator() {
             |_| None::<((), _, _)>,
             |_| None::<()>,
             |_| CFPointer::Single(&|_| 0.0),
+            true,
         )
         .unwrap();
         let result = match opr {
@@ -199,6 +200,7 @@ fn test_fuzz_symbols() {
                     MyFuncs::Mean => CFPointer::Flexible(&|inp| inp.iter().sum::<f64>() / inp.len() as f64),
                     MyFuncs::Dist => CFPointer::Dual(&|x, y| (x*x + y*y).sqrt()),
                 },
+                true
             )
         }) {
             println!("{expr}");
@@ -230,6 +232,7 @@ fn test_fuzz_all() {
                     MyFuncs::Mean => CFPointer::Flexible(&|inp| inp.iter().sum::<f64>() / inp.len() as f64),
                     MyFuncs::Dist => CFPointer::Dual(&|x, y| (x*x + y*y).sqrt()),
                 },
+                true,
             )
         }) {
             println!("{noise:?}");
