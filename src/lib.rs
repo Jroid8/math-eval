@@ -69,18 +69,18 @@ pub enum ParsingErrorKind {
 impl Display for ParsingErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            ParsingErrorKind::UnexpectedCharacter => "unexpected character",
-            ParsingErrorKind::CommaOutsideFunction => "comma outside function",
-            ParsingErrorKind::MissingOpenParenthesis => "missing opening parenthesis",
-            ParsingErrorKind::MissingCloseParenthesis => "missing closing parenthesis",
-            ParsingErrorKind::NumberParsingError => "could not read number",
-            ParsingErrorKind::MisplacedOperator => "misplaced operator character",
-            ParsingErrorKind::UnknownVariableOrConstant => "variable or character not recognized",
-            ParsingErrorKind::UnknownFunction => "function not recognized",
-            ParsingErrorKind::NotEnoughArguments => "not enough arguments for function",
-            ParsingErrorKind::TooManyArguments => "too many arguments for function",
-            ParsingErrorKind::MisplacedToken => "unable to interpret the given tokens",
-            ParsingErrorKind::EmptyParenthesis => "parenthesis should not be empty",
+            ParsingErrorKind::UnexpectedCharacter => "Unexpected character encountered",
+            ParsingErrorKind::CommaOutsideFunction => "Comma found outside of function",
+            ParsingErrorKind::MissingOpenParenthesis => "Opening parenthesis is missing",
+            ParsingErrorKind::MissingCloseParenthesis => "Closing parenthesis is missing",
+            ParsingErrorKind::NumberParsingError => "Unable to parse number",
+            ParsingErrorKind::MisplacedOperator => "Misplaced operator",
+            ParsingErrorKind::UnknownVariableOrConstant => "Unrecognized variable or constant",
+            ParsingErrorKind::UnknownFunction => "Unrecognized function",
+            ParsingErrorKind::NotEnoughArguments => "Insufficient arguments for function",
+            ParsingErrorKind::TooManyArguments => "Too many arguments for function",
+            ParsingErrorKind::MisplacedToken => "Misplaced token",
+            ParsingErrorKind::EmptyParenthesis => "Parentheses should not be empty",
         })
     }
 }
