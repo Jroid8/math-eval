@@ -111,6 +111,24 @@ pub fn parse<'a, N: MathEvalNumber, V: Clone, F: Clone>(
     ))
 }
 
+pub fn evaluate<N: MathEvalNumber>(input: &str) -> Result<N, ParsingError> {
+    let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
+    let token_tree =
+        TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+    let syntax_tree = SyntaxTree::new(
+        &token_tree,
+        |_| None,
+        |_| None,
+        |_| None,
+    )
+    .map_err(|e| e.to_general(input, &token_tree))?;
+    Ok(MathAssembly::new(
+        &syntax_tree.0.arena,
+        syntax_tree.0.root,
+        |_: &()| unreachable!(),
+    ).eval(|_: &()| unreachable!()))
+}
+
 #[derive(Clone, Debug)]
 pub struct NoVariable;
 
