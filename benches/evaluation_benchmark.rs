@@ -2,25 +2,11 @@ use criterion::{
     black_box, criterion_group, criterion_main, Bencher, BenchmarkId, Criterion, Throughput,
 };
 use math_eval::{
-    asm::CFPointer,
-    syntax::SyntaxTree,
-    tokenizer::{token_stream::TokenStream, token_tree::TokenTree},
+    tokenizer::token_stream::TokenStream,
+    EvalBuilder,
 };
 use meval::{Context, Expr};
 use std::{cmp::min, time::Duration};
-
-#[derive(Clone, Debug, Copy)]
-enum MyVar {
-    X,
-    Y,
-    T,
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-enum MyFunc {
-    Dist,
-    Slope,
-}
 
 fn dist(x: f64, y: f64) -> f64 {
     (x * x + y * y).sqrt()
@@ -28,38 +14,6 @@ fn dist(x: f64, y: f64) -> f64 {
 
 fn slope(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
     (y2 - y1) / (x2 - x1)
-}
-
-fn custom_functions<'a>(identifier: &MyFunc) -> CFPointer<'a, f64> {
-    match identifier {
-        MyFunc::Dist => CFPointer::Dual(&dist),
-        MyFunc::Slope => CFPointer::Quad(&slope),
-    }
-}
-
-macro_rules! to_expr {
-    ($input: expr) => {{
-        let mut expr = SyntaxTree::<f64, MyVar, MyFunc>::new(
-            &TokenTree::new(&TokenStream::new($input).unwrap()).unwrap(),
-            |_| None,
-            |input| match input {
-                "dist" => Some((MyFunc::Dist, 2, Some(2))),
-                "slope" => Some((MyFunc::Slope, 4, Some(4))),
-                _ => None,
-            },
-            |input| match input {
-                "x" => Some(MyVar::X),
-                "y" => Some(MyVar::Y),
-                "t" => Some(MyVar::T),
-                _ => None,
-            },
-        )
-        .unwrap();
-        expr.aot_evaluation(custom_functions);
-        expr.displacing_simplification();
-        expr.aot_evaluation(custom_functions);
-        expr.to_asm(custom_functions)
-    }};
 }
 
 fn meval_bencher(b: &mut Bencher<'_>, input: &str) {
@@ -82,14 +36,17 @@ fn meval_bencher(b: &mut Bencher<'_>, input: &str) {
 }
 
 fn matheval_bencher(b: &mut Bencher<'_>, input: &str) {
-    let mut expr = to_expr!(input);
+    let mut expr = EvalBuilder::new()
+        .add_fn2("dist", &dist)
+        .add_fn4("slope", &slope)
+        .add_variable("x")
+        .add_variable("y")
+        .add_variable("t")
+        .build_as_function(input)
+        .unwrap();
     let (mut x, mut y, mut t) = (0.0, 0.0, 0.0);
     b.iter(|| {
-        black_box(expr.eval(|var| match var {
-            MyVar::X => x,
-            MyVar::Y => y,
-            MyVar::T => t,
-        }));
+        black_box(expr(x, y, t));
         x += 1.0;
         y -= 1.0;
         t += 0.0625;
