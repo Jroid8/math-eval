@@ -2,6 +2,7 @@ use criterion::{
     black_box, criterion_group, criterion_main, Bencher, BenchmarkId, Criterion, Throughput,
 };
 use math_eval::{
+    asm::CFPointer,
     syntax::SyntaxTree,
     tokenizer::{token_stream::TokenStream, token_tree::TokenTree},
 };
@@ -21,18 +22,18 @@ enum MyFunc {
     Slope,
 }
 
-fn dist(input: &[f64]) -> f64 {
-    (input[0] * input[0] + input[1] * input[1]).sqrt()
+fn dist(x: f64, y: f64) -> f64 {
+    (x * x + y * y).sqrt()
 }
 
-fn slope(input: &[f64]) -> f64 {
-    (input[3] - input[1]) / (input[2] - input[0])
+fn slope(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
+    (y2 - y1) / (x2 - x1)
 }
 
-fn custom_functions<'a>(identifier: &MyFunc) -> &'a dyn Fn(&[f64]) -> f64 {
+fn custom_functions<'a>(identifier: &MyFunc) -> CFPointer<'a, f64> {
     match identifier {
-        MyFunc::Dist => &|input: &[f64]| dist(input),
-        MyFunc::Slope => &|input: &[f64]| slope(input),
+        MyFunc::Dist => CFPointer::Dual(&dist),
+        MyFunc::Slope => CFPointer::Quad(&slope),
     }
 }
 
@@ -63,8 +64,8 @@ macro_rules! to_expr {
 
 fn meval_bencher(b: &mut Bencher<'_>, input: &str) {
     let mut context = Context::new();
-    context.funcn("dist", dist, 2);
-    context.funcn("slope", slope, 4);
+    context.func2("dist", dist);
+    context.funcn("slope", |inp| slope(inp[0], inp[1], inp[2], inp[3]), 4);
     context.func("log", |v: f64| v.log10());
     let expr = input
         .parse::<Expr>()
@@ -95,10 +96,12 @@ fn matheval_bencher(b: &mut Bencher<'_>, input: &str) {
     })
 }
 
-const MATH_EXPRESSIONS: [(&str, &str); 7] = [
+const MATH_EXPRESSIONS: [(&str, &str); 9] = [
     ("x+y", "one addition"),
-    ("sin(x)", "one native function"),
-    ("slope(x,y,x+17,t)", "one custom function"),
+    ("sin(x)", "one native function single input"),
+    ("max(x, y)", "one native function two inputs"),
+    ("dist(x, y)", "one custom function two inputs"),
+    ("slope(x,y,x+17,t)", "one custom function four inputs"),
     ("10*sin(t)", "3 instructions"),
     ("sin(x*17/5)+cos(y+729166/7933)", "simplification"),
     (

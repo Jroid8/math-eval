@@ -39,7 +39,24 @@ pub enum Instruction<'a, N: MathEvalNumber, V: Clone, F: Clone> {
     NFSingle(fn(N) -> N, Input<N, V>, NativeFunction),
     NFDual(fn(N, N) -> N, Input<N, V>, Input<N, V>, NativeFunction),
     NFFlexible(fn(&[N]) -> N, u8, NativeFunction),
-    CustomFunction(&'a dyn Fn(&[N]) -> N, u8, F),
+    CFSingle(&'a dyn Fn(N) -> N, Input<N, V>, F),
+    CFDual(&'a dyn Fn(N, N) -> N, Input<N, V>, Input<N, V>, F),
+    CFTriple(
+        &'a dyn Fn(N, N, N) -> N,
+        Input<N, V>,
+        Input<N, V>,
+        Input<N, V>,
+        F,
+    ),
+    CFQuad(
+        &'a dyn Fn(N, N, N, N) -> N,
+        Input<N, V>,
+        Input<N, V>,
+        Input<N, V>,
+        Input<N, V>,
+        F,
+    ),
+    CFFlexible(&'a dyn Fn(&[N]) -> N, u8, F),
 }
 
 impl<N, V, F> Debug for Instruction<'_, N, V, F>
@@ -51,34 +68,51 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Source(arg0) => f.debug_tuple("Source").field(arg0).finish(),
-            Self::BiOperation(arg0, arg1, arg2) => f
+            Self::BiOperation(_, arg1, arg2) => f
                 .debug_tuple("BiOperation")
-                .field(arg0)
                 .field(arg1)
                 .field(arg2)
                 .finish(),
-            Self::UnOperation(arg0, arg1) => f
-                .debug_tuple("UnOperation")
-                .field(arg0)
-                .field(arg1)
-                .finish(),
+            Self::UnOperation(_, arg1) => f.debug_tuple("UnOperation").field(arg1).finish(),
             Self::NFSingle(_, arg1, arg2) => {
-                f.debug_tuple("NFSingle").field(arg2).field(arg1).finish()
+                f.debug_tuple("NFSingle").field(arg1).field(arg2).finish()
             }
             Self::NFDual(_, arg1, arg2, arg3) => f
                 .debug_tuple("NFDual")
-                .field(arg3)
                 .field(arg1)
                 .field(arg2)
+                .field(arg3)
                 .finish(),
             Self::NFFlexible(_, arg1, arg2) => {
-                f.debug_tuple("NFFlexible").field(arg2).field(arg1).finish()
+                f.debug_tuple("NFFlexible").field(arg1).field(arg2).finish()
             }
-            Self::CustomFunction(_, arg1, arg2) => f
-                .debug_tuple("CustomFunction")
-                .field(arg2)
+            Self::CFSingle(_, arg1, arg2) => {
+                f.debug_tuple("CFSingle").field(arg1).field(arg2).finish()
+            }
+            Self::CFDual(_, arg1, arg2, arg3) => f
+                .debug_tuple("CFDual")
                 .field(arg1)
+                .field(arg2)
+                .field(arg3)
                 .finish(),
+            Self::CFTriple(_, arg1, arg2, arg3, arg4) => f
+                .debug_tuple("CFTriple")
+                .field(arg1)
+                .field(arg2)
+                .field(arg3)
+                .field(arg4)
+                .finish(),
+            Self::CFQuad(_, arg1, arg2, arg3, arg4, arg5) => f
+                .debug_tuple("CFQuad")
+                .field(arg1)
+                .field(arg2)
+                .field(arg3)
+                .field(arg4)
+                .field(arg5)
+                .finish(),
+            Self::CFFlexible(_, arg1, arg2) => {
+                f.debug_tuple("CFFlexible").field(arg1).field(arg2).finish()
+            }
         }
     }
 }
@@ -101,8 +135,29 @@ where
                 Self::NFDual(*arg0, arg1.clone(), arg2.clone(), *arg3)
             }
             Self::NFFlexible(arg0, arg1, arg2) => Self::NFFlexible(*arg0, *arg1, *arg2),
-            Self::CustomFunction(arg0, arg1, arg2) => {
-                Self::CustomFunction(*arg0, *arg1, arg2.clone())
+            Self::CFSingle(arg0, arg1, arg2) => {
+                Self::CFSingle(*arg0, arg1.clone(), arg2.clone())
+            }
+            Self::CFDual(arg0, arg1, arg2, arg3) => {
+                Self::CFDual(*arg0, arg1.clone(), arg2.clone(), arg3.clone())
+            }
+            Self::CFTriple(arg0, arg1, arg2, arg3, arg4) => Self::CFTriple(
+                *arg0,
+                arg1.clone(),
+                arg2.clone(),
+                arg3.clone(),
+                arg4.clone(),
+            ),
+            Self::CFQuad(arg0, arg1, arg2, arg3, arg4, arg5) => Self::CFQuad(
+                *arg0,
+                arg1.clone(),
+                arg2.clone(),
+                arg3.clone(),
+                arg4.clone(),
+                arg5.clone(),
+            ),
+            Self::CFFlexible(arg0, arg1, arg2) => {
+                Self::CFFlexible(*arg0, *arg1, arg2.clone())
             }
         }
     }
@@ -129,6 +184,19 @@ where
         Ok(())
     }
 }
+
+#[derive(Clone, Copy)]
+pub enum CFPointer<'a, N>
+where
+    N: MathEvalNumber,
+{
+    Single(&'a dyn Fn(N) -> N),
+    Dual(&'a dyn Fn(N, N) -> N),
+    Triple(&'a dyn Fn(N, N, N) -> N),
+    Quad(&'a dyn Fn(N, N, N, N) -> N),
+    Flexible(&'a dyn Fn(&[N]) -> N),
+}
+
 impl<'a, N, V, F> MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
@@ -138,7 +206,7 @@ where
     pub fn new(
         arena: &Arena<SyntaxNode<N, V, F>>,
         root: NodeId,
-        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
+        function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, V, F>> = Vec::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
@@ -192,11 +260,37 @@ where
                             Instruction::NFFlexible(p, cursor.children(arena).count() as u8, *nf)
                         }
                     },
-                    SyntaxNode::CustomFunction(cf) => Instruction::CustomFunction(
-                        function_to_pointer(cf),
-                        cursor.children(arena).count() as u8,
-                        cf.clone(),
-                    ),
+                    SyntaxNode::CustomFunction(cf) => match function_to_pointer(cf) {
+                        CFPointer::Single(func) => {
+                            Instruction::CFSingle(func, children_as_input.next().unwrap(), cf.clone())
+                        }
+                        CFPointer::Dual(func) => Instruction::CFDual(
+                            func,
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            cf.clone(),
+                        ),
+                        CFPointer::Triple(func) => Instruction::CFTriple(
+                            func,
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            cf.clone(),
+                        ),
+                        CFPointer::Quad(func) => Instruction::CFQuad(
+                            func,
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            children_as_input.next().unwrap(),
+                            cf.clone(),
+                        ),
+                        CFPointer::Flexible(func) => Instruction::CFFlexible(
+                            func,
+                            cursor.children(arena).count() as u8,
+                            cf.clone(),
+                        ),
+                    },
                 };
                 result.push(instruction);
             }
@@ -210,14 +304,25 @@ where
         for instr in &result {
             stack_len += match instr {
                 Instruction::Source(_) => 0,
-                Instruction::BiOperation(_, lhs, rhs) | Instruction::NFDual(_, lhs, rhs, _) => {
+                Instruction::BiOperation(_, lhs, rhs)
+                | Instruction::NFDual(_, lhs, rhs, _)
+                | Instruction::CFDual(_, lhs, rhs, _) => {
                     input_stack_effect(lhs) + input_stack_effect(rhs)
                 }
-                Instruction::UnOperation(_, val) | Instruction::NFSingle(_, val, _) => {
-                    input_stack_effect(val)
+                Instruction::UnOperation(_, val)
+                | Instruction::NFSingle(_, val, _)
+                | Instruction::CFSingle(_, val, _) => input_stack_effect(val),
+                Instruction::CFTriple(_, inp1, inp2, inp3, _) => {
+                    input_stack_effect(inp1) + input_stack_effect(inp2) + input_stack_effect(inp3)
+                }
+                Instruction::CFQuad(_, inp1, inp2, inp3, inp4, _) => {
+                    input_stack_effect(inp1)
+                        + input_stack_effect(inp2)
+                        + input_stack_effect(inp3)
+                        + input_stack_effect(inp4)
                 }
                 Instruction::NFFlexible(_, arg_count, _)
-                | Instruction::CustomFunction(_, arg_count, _) => -(*arg_count as i32),
+                | Instruction::CFFlexible(_, arg_count, _) => -(*arg_count as i32),
             } + 1;
             if stack_len > stack_capacity {
                 stack_capacity = stack_len;
@@ -231,32 +336,40 @@ where
 
     pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N) -> N {
         self.stack.clear();
+        macro_rules! get {
+            ($inp: expr) => {
+                $inp.get(&variable_substituter, &mut self.stack)
+            };
+        }
         for instr in &self.instructions {
             let result = match &instr {
-                Instruction::Source(input) => input.get(&variable_substituter, &mut self.stack),
+                Instruction::Source(input) => get!(input),
                 Instruction::BiOperation(opr, lhs, rhs) => {
-                    let rhs = rhs.get(&variable_substituter, &mut self.stack);
-                    let lhs = lhs.get(&variable_substituter, &mut self.stack);
+                    let rhs = get!(rhs);
+                    let lhs = get!(lhs);
                     opr.eval(lhs, rhs)
                 }
-                Instruction::UnOperation(opr, val) => {
-                    opr.eval(val.get(&variable_substituter, &mut self.stack))
-                }
+                Instruction::UnOperation(opr, val) => opr.eval(get!(val)),
                 Instruction::NFSingle(func, input, _) => {
-                    let input = input.get(&variable_substituter, &mut self.stack);
+                    let input = get!(input);
                     func(input)
                 }
-                Instruction::NFDual(func, inp1, inp2, _) => func(
-                    inp1.get(&variable_substituter, &mut self.stack),
-                    inp2.get(&variable_substituter, &mut self.stack),
-                ),
+                Instruction::NFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
                 Instruction::NFFlexible(func, arg_count, _) => {
                     let arg_count = *arg_count as usize;
                     let result = func(&self.stack[self.stack.len() - arg_count..]);
                     self.stack.truncate(self.stack.len() - arg_count);
                     result
                 }
-                Instruction::CustomFunction(func, arg_count, _) => {
+                Instruction::CFSingle(func, inp, _) => func(get!(inp)),
+                Instruction::CFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
+                Instruction::CFTriple(func, inp1, inp2, inp3, _) => {
+                    func(get!(inp1), get!(inp2), get!(inp3))
+                }
+                Instruction::CFQuad(func, inp1, inp2, inp3, inp4, _) => {
+                    func(get!(inp1), get!(inp2), get!(inp3), get!(inp4))
+                }
+                Instruction::CFFlexible(func, arg_count, _) => {
                     let arg_count = *arg_count as usize;
                     let result = func(&self.stack[self.stack.len() - arg_count..]);
                     self.stack.truncate(self.stack.len() - arg_count);
@@ -280,8 +393,8 @@ mod test {
             .add_variable("y")
             .add_variable("t")
             .add_constant("c", 299792458.0)
-            .add_function("dist", 2, Some(2), &|input: &[f64]| {
-                (input[0].powi(2) + input[1].powi(2)).sqrt()
+            .add_fn2("dist", &|x, y| {
+                (x.powi(2) + y.powi(2)).sqrt()
             })
             .build_as_parser();
 

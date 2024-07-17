@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Display};
 use std::ops::RangeInclusive;
 
-use crate::asm::MathAssembly;
+use crate::asm::{CFPointer, MathAssembly};
 use crate::number::{MathEvalNumber, NativeFunction};
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
@@ -371,14 +371,14 @@ where
 
     pub fn to_asm<'a>(
         &self,
-        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
+        function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
     ) -> MathAssembly<'a, N, V, F> {
         MathAssembly::new(&self.0.arena, self.0.root, function_to_pointer)
     }
 
     pub fn aot_evaluation<'a>(
         &mut self,
-        function_to_pointer: impl Fn(&F) -> &'a dyn Fn(&[N]) -> N,
+        function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
     ) {
         let mut examin: Vec<NodeId> = Vec::new();
         for node in self.0.root.traverse(&self.0.arena) {
@@ -1022,7 +1022,7 @@ mod test {
         macro_rules! compare {
             ($i1:literal, $i2:literal) => {
                 let mut syn1 = parse($i1).unwrap();
-                syn1.aot_evaluation(|_| &|_| 0.0);
+                syn1.aot_evaluation(|_| CFPointer::Single(&|_| 0.0));
                 let syn2 = parse($i2).unwrap();
                 assert_eq!(format!("{}", syn1), format!("{}", syn2));
             };
