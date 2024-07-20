@@ -403,8 +403,8 @@ where
     }
 
     pub fn displacing_simplification(&mut self) {
-        self._displacing_simplification(BiOperation::Add, BiOperation::Sub, 0.0.into());
-        self._displacing_simplification(BiOperation::Mul, BiOperation::Div, 1.0.into());
+        self._displacing_simplification(BiOperation::Add, BiOperation::Sub, 0.into());
+        self._displacing_simplification(BiOperation::Mul, BiOperation::Div, 1.into());
     }
 
     fn _displacing_simplification(&mut self, pos: BiOperation, neg: BiOperation, inital_value: N) {
@@ -509,9 +509,9 @@ where
                         match node.children(&self.0.arena).nth(1) {
                             Some(base) => match self.0.arena[base].get() {
                                 SyntaxNode::Number(num) => {
-                                    if *num == N::from(10.0) {
+                                    if *num == N::from(10) {
                                         10
-                                    } else if *num == N::from(2.0) {
+                                    } else if *num == N::from(2) {
                                         2
                                     } else {
                                         continue;

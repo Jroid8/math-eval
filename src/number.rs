@@ -140,7 +140,7 @@ pub trait MathEvalNumber:
     + Mul<Output = Self>
     + Div<Output = Self>
     + PartialEq
-    + From<f64>
+    + From<i16>
     + FromStr
     + Neg<Output = Self>
     + Copy

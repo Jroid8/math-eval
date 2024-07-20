@@ -391,7 +391,7 @@ mod test {
             .add_variable("y")
             .add_variable("t")
             .add_constant("c", 299792458.0)
-            .add_fn2("dist", &|x, y| (x.powi(2) + y.powi(2)).sqrt())
+            .add_fn2("dist", &|x: f64, y: f64| (x.powi(2) + y.powi(2)).sqrt())
             .build_as_parser();
 
         assert_eq!(parse("10", 0.0, 0.0, 0.0), Ok(10.0));
