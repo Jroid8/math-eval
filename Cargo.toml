@@ -26,4 +26,5 @@ name = "bench"
 harness = false
 
 [features]
+default = []
 bigdecimal = ["dep:bigdecimal"]
