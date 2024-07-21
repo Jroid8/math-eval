@@ -177,132 +177,139 @@ pub trait MathEvalNumber:
     fn factorial(self) -> Self;
 }
 
-impl MathEvalNumber for f64 {
-    fn pow(self, rhs: Self) -> Self {
-        self.powf(rhs)
-    }
+macro_rules! impl_float {
+    ($ft:ident) => {
+        impl MathEvalNumber for $ft {
+            fn pow(self, rhs: Self) -> Self {
+                self.powf(rhs)
+            }
 
-    fn parse_constant(input: &str) -> Option<Self> {
-        match input {
-            "pi" => Some(std::f64::consts::PI),
-            "e" => Some(std::f64::consts::E),
-            _ => None,
+            fn parse_constant(input: &str) -> Option<Self> {
+                match input {
+                    "pi" => Some(std::$ft::consts::PI),
+                    "e" => Some(std::$ft::consts::E),
+                    _ => None,
+                }
+            }
+
+            fn modulo(self, rhs: Self) -> Self {
+                self.rem_euclid(rhs)
+            }
+
+            fn sin(argument: Self) -> Self {
+                argument.sin()
+            }
+
+            fn cos(argument: Self) -> Self {
+                argument.cos()
+            }
+
+            fn tan(argument: Self) -> Self {
+                argument.tan()
+            }
+
+            fn cot(argument: Self) -> Self {
+                let (sin, cos) = argument.sin_cos();
+                cos / sin
+            }
+
+            fn asin(argument: Self) -> Self {
+                argument.asin()
+            }
+
+            fn acos(argument: Self) -> Self {
+                argument.acos()
+            }
+
+            fn atan(argument: Self) -> Self {
+                argument.atan()
+            }
+
+            fn acot(argument: Self) -> Self {
+                (-argument).atan() + std::$ft::consts::FRAC_PI_2
+            }
+
+            fn log(argument: Self, base: Self) -> Self {
+                argument.log(base)
+            }
+
+            fn log2(argument: Self) -> Self {
+                argument.log2()
+            }
+
+            fn log10(argument: Self) -> Self {
+                argument.log2()
+            }
+
+            fn ln(argument: Self) -> Self {
+                argument.ln()
+            }
+
+            fn exp(argument: Self) -> Self {
+                argument.exp()
+            }
+
+            fn floor(argument: Self) -> Self {
+                argument.floor()
+            }
+
+            fn ceil(argument: Self) -> Self {
+                argument.ceil()
+            }
+
+            fn round(argument: Self) -> Self {
+                argument.round()
+            }
+
+            fn trunc(argument: Self) -> Self {
+                argument.trunc()
+            }
+
+            fn frac(argument: Self) -> Self {
+                argument.fract()
+            }
+
+            fn abs(argument: Self) -> Self {
+                argument.abs()
+            }
+
+            fn sign(argument: Self) -> Self {
+                match argument.partial_cmp(&0.0) {
+                    Some(cmp) => match cmp {
+                        std::cmp::Ordering::Less => -1.0,
+                        std::cmp::Ordering::Equal => 0.0,
+                        std::cmp::Ordering::Greater => 1.0,
+                    },
+                    None => argument,
+                }
+            }
+
+            fn sqrt(argument: Self) -> Self {
+                argument.sqrt()
+            }
+
+            fn cbrt(argument: Self) -> Self {
+                argument.cbrt()
+            }
+
+            fn max(argument: &[Self]) -> Self {
+                argument.iter().copied().fold(Self::MIN, Self::max)
+            }
+
+            fn min(argument: &[Self]) -> Self {
+                argument.iter().copied().fold(Self::MAX, Self::min)
+            }
+
+            fn factorial(self) -> Self {
+                let mut result = 1.0;
+                for v in 2..=(self as u32) {
+                    result *= v as $ft;
+                }
+                result
+            }
         }
-    }
-
-    fn modulo(self, rhs: Self) -> Self {
-        self.rem_euclid(rhs)
-    }
-
-    fn sin(argument: Self) -> Self {
-        argument.sin()
-    }
-
-    fn cos(argument: Self) -> Self {
-        argument.cos()
-    }
-
-    fn tan(argument: Self) -> Self {
-        argument.tan()
-    }
-
-    fn cot(argument: Self) -> Self {
-        let (sin, cos) = argument.sin_cos();
-        cos / sin
-    }
-
-    fn asin(argument: Self) -> Self {
-        argument.asin()
-    }
-
-    fn acos(argument: Self) -> Self {
-        argument.acos()
-    }
-
-    fn atan(argument: Self) -> Self {
-        argument.atan()
-    }
-
-    fn acot(argument: Self) -> Self {
-        (-argument).atan() + std::f64::consts::FRAC_PI_2
-    }
-
-    fn log(argument: Self, base: Self) -> Self {
-        argument.log(base)
-    }
-
-    fn log2(argument: Self) -> Self {
-        argument.log2()
-    }
-
-    fn log10(argument: Self) -> Self {
-        argument.log2()
-    }
-
-    fn ln(argument: Self) -> Self {
-        argument.ln()
-    }
-
-    fn exp(argument: Self) -> Self {
-        argument.exp()
-    }
-
-    fn floor(argument: Self) -> Self {
-        argument.floor()
-    }
-
-    fn ceil(argument: Self) -> Self {
-        argument.ceil()
-    }
-
-    fn round(argument: Self) -> Self {
-        argument.round()
-    }
-
-    fn trunc(argument: Self) -> Self {
-        argument.trunc()
-    }
-
-    fn frac(argument: Self) -> Self {
-        argument.fract()
-    }
-
-    fn abs(argument: Self) -> Self {
-        argument.abs()
-    }
-
-    fn sign(argument: Self) -> Self {
-        match argument.partial_cmp(&0.0) {
-            Some(cmp) => match cmp {
-                std::cmp::Ordering::Less => -1.0,
-                std::cmp::Ordering::Equal => 0.0,
-                std::cmp::Ordering::Greater => 1.0,
-            },
-            None => argument,
-        }
-    }
-
-    fn sqrt(argument: Self) -> Self {
-        argument.sqrt()
-    }
-
-    fn cbrt(argument: Self) -> Self {
-        argument.cbrt()
-    }
-
-    fn max(argument: &[Self]) -> Self {
-        argument.iter().copied().fold(f64::MIN, f64::max)
-    }
-
-    fn min(argument: &[Self]) -> Self {
-        argument.iter().copied().fold(f64::MAX, f64::min)
-    }
-
-    fn factorial(self) -> Self {
-        let mut result = 1.0;
-        for v in 2..=(self as u32) {
-            result *= v as f64;
-        }
-        result
-    }
+    };
 }
+
+impl_float!(f64);
+impl_float!(f32);
