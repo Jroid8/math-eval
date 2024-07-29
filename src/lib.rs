@@ -257,13 +257,13 @@ where
     pub fn build_as_parser(self) -> impl Fn(&str) -> Result<N, ParsingError> + 'a {
         move |input: &str| {
             self.parse(input, false)
-                .map(|mut asm| asm.eval(|_: &()| 0.into()))
+                .map(|mut asm| asm.eval(|_: &()| N::zero()))
         }
     }
 
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
         let mut expr = self.parse(input, true)?;
-        Ok(move || expr.eval(|_: &()| 0.into()))
+        Ok(move || expr.eval(|_: &()| N::zero()))
     }
 }
 
