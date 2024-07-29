@@ -144,11 +144,11 @@ pub trait MathEvalNumber: Float + FromStr + FloatConst + Debug + 'static {
     }
 
     fn cot(self) -> Self {
-        (Self::PI() - self).tan()
+        (Self::FRAC_PI_2() - self).tan()
     }
 
     fn acot(self) -> Self {
-        (-self).atan()
+        (-self).atan() + Self::FRAC_PI_2()
     }
 
     fn maximum(args: &[Self]) -> Self {
