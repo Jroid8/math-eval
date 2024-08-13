@@ -177,6 +177,7 @@ pub trait MathEvalNumber:
     fn factorial(self) -> Self;
 }
 
+#[cfg(not(feature = "num-traits"))]
 macro_rules! impl_float {
     ($ft:ident) => {
         impl MathEvalNumber for $ft {
@@ -311,5 +312,136 @@ macro_rules! impl_float {
     };
 }
 
+#[cfg(not(feature = "num-traits"))]
 impl_float!(f64);
+#[cfg(not(feature = "num-traits"))]
 impl_float!(f32);
+
+#[cfg(feature = "num-traits")]
+impl<T> MathEvalNumber for T
+where
+    T: num_traits::Float + From<i16> + FromStr + Debug + 'static + num_traits::FloatConst,
+{
+    fn modulo(self, rhs: Self) -> Self {
+        let r = self % rhs;
+        if r.is_sign_negative() {
+            r.abs()
+        } else {
+            r
+        }
+    }
+
+    fn pow(self, rhs: Self) -> Self {
+        self.powf(rhs)
+    }
+
+    fn parse_constant(input: &str) -> Option<Self> {
+        match input {
+            "pi" => Some(Self::PI()),
+            "e" => Some(Self::E()),
+            "tau" => Some(Self::TAU()),
+            _ => None,
+        }
+    }
+
+    fn sin(argument: Self) -> Self {
+        argument.sin()
+    }
+
+    fn cos(argument: Self) -> Self {
+        argument.cos()
+    }
+
+    fn tan(argument: Self) -> Self {
+        argument.tan()
+    }
+
+    fn cot(argument: Self) -> Self {
+        let (sin, cos) = argument.sin_cos();
+        sin / cos
+    }
+
+    fn asin(argument: Self) -> Self {
+        argument.asin()
+    }
+
+    fn acos(argument: Self) -> Self {
+        argument.acos()
+    }
+
+    fn atan(argument: Self) -> Self {
+        argument.atan()
+    }
+
+    fn acot(argument: Self) -> Self {
+        (-argument).atan() + Self::FRAC_PI_2()
+    }
+
+    fn log(argument: Self, base: Self) -> Self {
+        argument.log(base)
+    }
+
+    fn log2(argument: Self) -> Self {
+        argument.log2()
+    }
+
+    fn log10(argument: Self) -> Self {
+        argument.log10()
+    }
+
+    fn ln(argument: Self) -> Self {
+        argument.ln()
+    }
+
+    fn exp(argument: Self) -> Self {
+        argument.exp()
+    }
+
+    fn floor(argument: Self) -> Self {
+        argument.floor()
+    }
+
+    fn ceil(argument: Self) -> Self {
+        argument.ceil()
+    }
+
+    fn round(argument: Self) -> Self {
+        argument.round()
+    }
+
+    fn trunc(argument: Self) -> Self {
+        argument.trunc()
+    }
+
+    fn frac(argument: Self) -> Self {
+        argument.fract()
+    }
+
+    fn abs(argument: Self) -> Self {
+        argument.abs()
+    }
+
+    fn sign(argument: Self) -> Self {
+        argument.signum()
+    }
+
+    fn sqrt(argument: Self) -> Self {
+        argument.sqrt()
+    }
+
+    fn cbrt(argument: Self) -> Self {
+        argument.cbrt()
+    }
+
+    fn max(argument: &[Self]) -> Self {
+        argument.iter().copied().reduce(Self::max).unwrap()
+    }
+
+    fn min(argument: &[Self]) -> Self {
+        argument.iter().copied().reduce(Self::min).unwrap()
+    }
+
+    fn factorial(self) -> Self {
+        todo!()
+    }
+}
