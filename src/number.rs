@@ -150,30 +150,30 @@ pub trait MathEvalNumber:
     fn modulo(self, rhs: Self) -> Self;
     fn pow(self, rhs: Self) -> Self;
     fn parse_constant(input: &str) -> Option<Self>;
-    fn sin(argument: Self) -> Self;
-    fn cos(argument: Self) -> Self;
-    fn tan(argument: Self) -> Self;
-    fn cot(argument: Self) -> Self;
-    fn asin(argument: Self) -> Self;
-    fn acos(argument: Self) -> Self;
-    fn atan(argument: Self) -> Self;
-    fn acot(argument: Self) -> Self;
-    fn log(argument: Self, base: Self) -> Self;
-    fn log2(argument: Self) -> Self;
-    fn log10(argument: Self) -> Self;
-    fn ln(argument: Self) -> Self;
-    fn exp(argument: Self) -> Self;
-    fn floor(argument: Self) -> Self;
-    fn ceil(argument: Self) -> Self;
-    fn round(argument: Self) -> Self;
-    fn trunc(argument: Self) -> Self;
-    fn frac(argument: Self) -> Self;
-    fn abs(argument: Self) -> Self;
-    fn sign(argument: Self) -> Self;
-    fn sqrt(argument: Self) -> Self;
-    fn cbrt(argument: Self) -> Self;
-    fn max(argument: &[Self]) -> Self;
-    fn min(argument: &[Self]) -> Self;
+    fn sin(self) -> Self;
+    fn cos(self) -> Self;
+    fn tan(self) -> Self;
+    fn cot(self) -> Self;
+    fn asin(self) -> Self;
+    fn acos(self) -> Self;
+    fn atan(self) -> Self;
+    fn acot(self) -> Self;
+    fn log(self, base: Self) -> Self;
+    fn log2(self) -> Self;
+    fn log10(self) -> Self;
+    fn ln(self) -> Self;
+    fn exp(self) -> Self;
+    fn floor(self) -> Self;
+    fn ceil(self) -> Self;
+    fn round(self) -> Self;
+    fn trunc(self) -> Self;
+    fn frac(self) -> Self;
+    fn abs(self) -> Self;
+    fn sign(self) -> Self;
+    fn sqrt(self) -> Self;
+    fn cbrt(self) -> Self;
+    fn max(values: &[Self]) -> Self;
+    fn min(values: &[Self]) -> Self;
     fn factorial(self) -> Self;
 }
 
@@ -197,108 +197,108 @@ macro_rules! impl_float {
                 self.rem_euclid(rhs)
             }
 
-            fn sin(argument: Self) -> Self {
-                argument.sin()
+            fn sin(self) -> Self {
+                self.sin()
             }
 
-            fn cos(argument: Self) -> Self {
-                argument.cos()
+            fn cos(self) -> Self {
+                self.cos()
             }
 
-            fn tan(argument: Self) -> Self {
-                argument.tan()
+            fn tan(self) -> Self {
+                self.tan()
             }
 
-            fn cot(argument: Self) -> Self {
-                let (sin, cos) = argument.sin_cos();
+            fn cot(self) -> Self {
+                let (sin, cos) = self.sin_cos();
                 cos / sin
             }
 
-            fn asin(argument: Self) -> Self {
-                argument.asin()
+            fn asin(self) -> Self {
+                self.asin()
             }
 
-            fn acos(argument: Self) -> Self {
-                argument.acos()
+            fn acos(self) -> Self {
+                self.acos()
             }
 
-            fn atan(argument: Self) -> Self {
-                argument.atan()
+            fn atan(self) -> Self {
+                self.atan()
             }
 
-            fn acot(argument: Self) -> Self {
-                (-argument).atan() + std::$ft::consts::FRAC_PI_2
+            fn acot(self) -> Self {
+                (-self).atan() + std::$ft::consts::FRAC_PI_2
             }
 
-            fn log(argument: Self, base: Self) -> Self {
-                argument.log(base)
+            fn log(self, base: Self) -> Self {
+                self.log(base)
             }
 
-            fn log2(argument: Self) -> Self {
-                argument.log2()
+            fn log2(self) -> Self {
+                self.log2()
             }
 
-            fn log10(argument: Self) -> Self {
-                argument.log2()
+            fn log10(self) -> Self {
+                self.log2()
             }
 
-            fn ln(argument: Self) -> Self {
-                argument.ln()
+            fn ln(self) -> Self {
+                self.ln()
             }
 
-            fn exp(argument: Self) -> Self {
-                argument.exp()
+            fn exp(self) -> Self {
+                self.exp()
             }
 
-            fn floor(argument: Self) -> Self {
-                argument.floor()
+            fn floor(self) -> Self {
+                self.floor()
             }
 
-            fn ceil(argument: Self) -> Self {
-                argument.ceil()
+            fn ceil(self) -> Self {
+                self.ceil()
             }
 
-            fn round(argument: Self) -> Self {
-                argument.round()
+            fn round(self) -> Self {
+                self.round()
             }
 
-            fn trunc(argument: Self) -> Self {
-                argument.trunc()
+            fn trunc(self) -> Self {
+                self.trunc()
             }
 
-            fn frac(argument: Self) -> Self {
-                argument.fract()
+            fn frac(self) -> Self {
+                self.fract()
             }
 
-            fn abs(argument: Self) -> Self {
-                argument.abs()
+            fn abs(self) -> Self {
+                self.abs()
             }
 
-            fn sign(argument: Self) -> Self {
-                match argument.partial_cmp(&0.0) {
+            fn sign(self) -> Self {
+                match self.partial_cmp(&0.0) {
                     Some(cmp) => match cmp {
                         std::cmp::Ordering::Less => -1.0,
                         std::cmp::Ordering::Equal => 0.0,
                         std::cmp::Ordering::Greater => 1.0,
                     },
-                    None => argument,
+                    None => self,
                 }
             }
 
-            fn sqrt(argument: Self) -> Self {
-                argument.sqrt()
+            fn sqrt(self) -> Self {
+                self.sqrt()
             }
 
-            fn cbrt(argument: Self) -> Self {
-                argument.cbrt()
+            fn cbrt(self) -> Self {
+                self.cbrt()
             }
 
-            fn max(argument: &[Self]) -> Self {
-                argument.iter().copied().fold(Self::MIN, Self::max)
+            fn max(values: &[Self]) -> Self {
+                values.iter().copied().fold(Self::MIN, Self::max)
             }
 
-            fn min(argument: &[Self]) -> Self {
-                argument.iter().copied().fold(Self::MAX, Self::min)
+            fn min(values: &[Self]) -> Self {
+                values.iter().copied().fold(Self::MAX, Self::min)
             }
 
             fn factorial(self) -> Self {
@@ -344,101 +344,101 @@ where
         }
     }
 
-    fn sin(argument: Self) -> Self {
-        argument.sin()
+    fn sin(self) -> Self {
+        self.sin()
     }
 
-    fn cos(argument: Self) -> Self {
-        argument.cos()
+    fn cos(self) -> Self {
+        self.cos()
     }
 
-    fn tan(argument: Self) -> Self {
-        argument.tan()
+    fn tan(self) -> Self {
+        self.tan()
     }
 
-    fn cot(argument: Self) -> Self {
-        let (sin, cos) = argument.sin_cos();
+    fn cot(self) -> Self {
+        let (sin, cos) = self.sin_cos();
         sin / cos
     }
 
-    fn asin(argument: Self) -> Self {
-        argument.asin()
+    fn asin(self) -> Self {
+        self.asin()
     }
 
-    fn acos(argument: Self) -> Self {
-        argument.acos()
+    fn acos(self) -> Self {
+        self.acos()
     }
 
-    fn atan(argument: Self) -> Self {
-        argument.atan()
+    fn atan(self) -> Self {
+        self.atan()
     }
 
-    fn acot(argument: Self) -> Self {
-        (-argument).atan() + Self::FRAC_PI_2()
+    fn acot(self) -> Self {
+        (-self).atan() + Self::FRAC_PI_2()
     }
 
-    fn log(argument: Self, base: Self) -> Self {
-        argument.log(base)
+    fn log(self, base: Self) -> Self {
+        self.log(base)
     }
 
-    fn log2(argument: Self) -> Self {
-        argument.log2()
+    fn log2(self) -> Self {
+        self.log2()
     }
 
-    fn log10(argument: Self) -> Self {
-        argument.log10()
+    fn log10(self) -> Self {
+        self.log10()
     }
 
-    fn ln(argument: Self) -> Self {
-        argument.ln()
+    fn ln(self) -> Self {
+        self.ln()
     }
 
-    fn exp(argument: Self) -> Self {
-        argument.exp()
+    fn exp(self) -> Self {
+        self.exp()
     }
 
-    fn floor(argument: Self) -> Self {
-        argument.floor()
+    fn floor(self) -> Self {
+        self.floor()
     }
 
-    fn ceil(argument: Self) -> Self {
-        argument.ceil()
+    fn ceil(self) -> Self {
+        self.ceil()
     }
 
-    fn round(argument: Self) -> Self {
-        argument.round()
+    fn round(self) -> Self {
+        self.round()
     }
 
-    fn trunc(argument: Self) -> Self {
-        argument.trunc()
+    fn trunc(self) -> Self {
+        self.trunc()
     }
 
-    fn frac(argument: Self) -> Self {
-        argument.fract()
+    fn frac(self) -> Self {
+        self.fract()
     }
 
-    fn abs(argument: Self) -> Self {
-        argument.abs()
+    fn abs(self) -> Self {
+        self.abs()
     }
 
-    fn sign(argument: Self) -> Self {
-        argument.signum()
+    fn sign(self) -> Self {
+        self.signum()
     }
 
-    fn sqrt(argument: Self) -> Self {
-        argument.sqrt()
+    fn sqrt(self) -> Self {
+        self.sqrt()
     }
 
-    fn cbrt(argument: Self) -> Self {
-        argument.cbrt()
+    fn cbrt(self) -> Self {
+        self.cbrt()
     }
 
-    fn max(argument: &[Self]) -> Self {
-        argument.iter().copied().reduce(Self::max).unwrap()
+    fn max(values: &[Self]) -> Self {
+        values.iter().copied().reduce(Self::max).unwrap()
     }
 
-    fn min(argument: &[Self]) -> Self {
-        argument.iter().copied().reduce(Self::min).unwrap()
+    fn min(values: &[Self]) -> Self {
+        values.iter().copied().reduce(Self::min).unwrap()
     }
 
     fn factorial(self) -> Self {
