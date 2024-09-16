@@ -23,9 +23,9 @@ impl UnOperation {
         }
     }
 
-    pub fn eval<N: MathEvalNumber>(self, value: N) -> N {
+    pub fn eval<N: MathEvalNumber>(self, value: N::AsArg<'_>) -> N {
         match self {
-            UnOperation::Fac => value.factorial(),
+            UnOperation::Fac => N::factorial(value),
             UnOperation::Neg => -value,
         }
     }
@@ -75,14 +75,14 @@ impl BiOperation {
             _ => None,
         }
     }
-    pub fn eval<N: MathEvalNumber>(self, lhs: N, rhs: N) -> N {
+    pub fn eval<N: MathEvalNumber>(self, lhs: N::AsArg<'_>, rhs: N::AsArg<'_>) -> N {
         match self {
             BiOperation::Add => lhs + rhs,
             BiOperation::Sub => lhs - rhs,
             BiOperation::Mul => lhs * rhs,
             BiOperation::Div => lhs / rhs,
-            BiOperation::Pow => lhs.pow(rhs),
-            BiOperation::Mod => lhs.modulo(rhs),
+            BiOperation::Pow => N::pow(lhs, rhs),
+            BiOperation::Mod => N::modulo(lhs, rhs),
         }
     }
     pub fn as_char(self) -> char {
@@ -450,7 +450,7 @@ where
                                 if upper_side == 0 { pos } else { *upper_opr },
                             );
                             match self.0.arena[lowest].get() {
-                                SyntaxNode::Number(value) => lhs = opr.eval(lhs, *value),
+                                SyntaxNode::Number(value) => lhs = opr.eval(lhs.asarg(), value.asarg()),
                                 _ => {
                                     symbols[symbols[0].is_some() as usize] =
                                         Some((lowest, opr == neg))
@@ -459,7 +459,7 @@ where
                         }
                     }
                     SyntaxNode::Number(value) => {
-                        lhs = (mul_opr(*upper_opr, upper_side, pos)).eval(lhs, *value)
+                        lhs = (mul_opr(*upper_opr, upper_side, pos)).eval(lhs.asarg(), value.asarg())
                     }
                     _ => panic!(),
                 }
