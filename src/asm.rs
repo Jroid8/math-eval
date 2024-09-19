@@ -22,10 +22,31 @@ where
     V: Clone,
 {
     #[inline]
-    fn get(&self, variable_evaluator: &impl Fn(&V) -> N, stack: &mut Stack<N>) -> N {
+    fn get_ref<'a, 'b>(
+        &'a self,
+        argnum: &mut usize,
+        variable_evaluator: &impl Fn(&'b V) -> N::AsArg<'a>,
+        stack: &'a Stack<N>,
+    ) -> N::AsArg<'a> {
         match self {
-            Input::Literal(num) => *num,
+            Input::Literal(num) => num.asarg(),
             Input::Variable(var) => variable_evaluator(var),
+            Input::Memory => {
+                *argnum -= 1;
+                stack[*argnum].asarg()
+            }
+        }
+    }
+
+    #[inline]
+    fn get_owned(
+        &self,
+        variable_evaluator: &impl Fn(&V) -> N::AsArg<'_>,
+        stack: &mut Stack<N>,
+    ) -> N {
+        match self {
+            Input::Literal(num) => num.clone(),
+            Input::Variable(var) => variable_evaluator(var).to_owned(),
             Input::Memory => stack.pop().unwrap(),
         }
     }
@@ -36,20 +57,30 @@ pub enum Instruction<'a, N: MathEvalNumber, V: Clone, F: Clone> {
     Source(Input<N, V>),
     BiOperation(BiOperation, Input<N, V>, Input<N, V>),
     UnOperation(UnOperation, Input<N, V>),
-    NFSingle(fn(N) -> N, Input<N, V>, NativeFunction),
-    NFDual(fn(N, N) -> N, Input<N, V>, Input<N, V>, NativeFunction),
+    NFSingle(for<'b> fn(N::AsArg<'b>) -> N, Input<N, V>, NativeFunction),
+    NFDual(
+        for<'b> fn(N::AsArg<'b>, N::AsArg<'b>) -> N,
+        Input<N, V>,
+        Input<N, V>,
+        NativeFunction,
+    ),
     NFFlexible(fn(&[N]) -> N, u8, NativeFunction),
-    CFSingle(&'a dyn Fn(N) -> N, Input<N, V>, F),
-    CFDual(&'a dyn Fn(N, N) -> N, Input<N, V>, Input<N, V>, F),
+    CFSingle(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N, Input<N, V>, F),
+    CFDual(
+        &'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N,
+        Input<N, V>,
+        Input<N, V>,
+        F,
+    ),
     CFTriple(
-        &'a dyn Fn(N, N, N) -> N,
+        &'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N,
         Input<N, V>,
         Input<N, V>,
         Input<N, V>,
         F,
     ),
     CFQuad(
-        &'a dyn Fn(N, N, N, N) -> N,
+        &'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N,
         Input<N, V>,
         Input<N, V>,
         Input<N, V>,
@@ -186,10 +217,10 @@ pub enum CFPointer<'a, N>
 where
     N: MathEvalNumber,
 {
-    Single(&'a dyn Fn(N) -> N),
-    Dual(&'a dyn Fn(N, N) -> N),
-    Triple(&'a dyn Fn(N, N, N) -> N),
-    Quad(&'a dyn Fn(N, N, N, N) -> N),
+    Single(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N),
+    Dual(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N),
+    Triple(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
+    Quad(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
     Flexible(&'a dyn Fn(&[N]) -> N),
 }
 
@@ -332,48 +363,67 @@ where
         }
     }
 
-    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N) -> N {
+    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N::AsArg<'_>) -> N {
         self.stack.clear();
-        macro_rules! get {
-            ($inp: expr) => {
-                $inp.get(&variable_substituter, &mut self.stack)
-            };
-        }
         for instr in &self.instructions {
+            let mut argnum = self.stack.len();
+            macro_rules! handle {
+                ($self: ident $(.$func: ident)?, $inp: expr) => {{
+                    let arg = $inp.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    $self $(.$func)?(arg)
+                }};
+
+                ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr) => {{
+                    let arg1 = $inp1.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg2 = $inp2.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    $self $(.$func)?(arg1, arg2)
+                }};
+
+                ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr, $inp3: expr) => {{
+                    let arg1 = $inp1.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg2 = $inp2.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg3 = $inp3.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    $self $(.$func)?(arg1, arg2, arg3)
+                }};
+
+                ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr, $inp3: expr, $inp4: expr) => {{
+                    let arg1 = $inp1.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg2 = $inp2.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg3 = $inp3.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg4 = $inp4.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    $self $(.$func)?(arg1, arg2, arg3, arg4)
+                }};
+            }
             let result = match &instr {
-                Instruction::Source(input) => get!(input),
+                Instruction::Source(input) => {
+                    input.get_owned(&variable_substituter, &mut self.stack)
+                }
                 Instruction::BiOperation(opr, lhs, rhs) => {
-                    let rhs = get!(rhs);
-                    let lhs = get!(lhs);
-                    opr.eval(lhs, rhs)
+                    handle!(opr.eval, lhs, rhs)
                 }
-                Instruction::UnOperation(opr, val) => opr.eval(get!(val)),
+                Instruction::UnOperation(opr, val) => handle!(opr.eval, val),
                 Instruction::NFSingle(func, input, _) => {
-                    let input = get!(input);
-                    func(input)
+                    handle!(func, input)
                 }
-                Instruction::NFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
+                Instruction::NFDual(func, inp1, inp2, _) => handle!(func, inp1, inp2),
                 Instruction::NFFlexible(func, arg_count, _) => {
-                    let arg_count = *arg_count as usize;
-                    let result = func(&self.stack[self.stack.len() - arg_count..]);
-                    self.stack.truncate(self.stack.len() - arg_count);
-                    result
+                    argnum -= *arg_count as usize;
+                    func(&self.stack[argnum..])
                 }
-                Instruction::CFSingle(func, inp, _) => func(get!(inp)),
-                Instruction::CFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
+                Instruction::CFSingle(func, inp, _) => handle!(func, inp),
+                Instruction::CFDual(func, inp1, inp2, _) => handle!(func, inp1, inp2),
                 Instruction::CFTriple(func, inp1, inp2, inp3, _) => {
-                    func(get!(inp1), get!(inp2), get!(inp3))
+                    handle!(func, inp1, inp2, inp3)
                 }
                 Instruction::CFQuad(func, inp1, inp2, inp3, inp4, _) => {
-                    func(get!(inp1), get!(inp2), get!(inp3), get!(inp4))
+                    handle!(func, inp1, inp2, inp3, inp4)
                 }
                 Instruction::CFFlexible(func, arg_count, _) => {
-                    let arg_count = *arg_count as usize;
-                    let result = func(&self.stack[self.stack.len() - arg_count..]);
-                    self.stack.truncate(self.stack.len() - arg_count);
-                    result
+                    argnum -= *arg_count as usize;
+                    func(&self.stack[argnum..])
                 }
             };
+            self.stack.truncate(argnum);
             self.stack.push(result);
         }
         self.stack.pop().unwrap()
