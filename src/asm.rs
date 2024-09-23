@@ -16,6 +16,42 @@ pub enum Input<N: MathEvalNumber, V: Clone + 'static> {
     Memory,
 }
 
+impl<N, V> Input<N, V>
+where
+    N: MathEvalNumber,
+    V: Clone + 'static,
+{
+    #[inline]
+    fn get_ref<'a>(
+        &'a self,
+        argnum: &mut usize,
+        variable_evaluator: &impl Fn(&V) -> N::AsArg<'_>,
+        stack: &'a Stack<N>,
+    ) -> N::AsArg<'a> {
+        match self {
+            Input::Literal(num) => num.asarg(),
+            Input::Variable(var) => variable_evaluator(var),
+            Input::Memory => {
+                *argnum -= 1;
+                stack[*argnum].asarg()
+            }
+        }
+    }
+
+    #[inline]
+    fn get_owned<'a>(
+        &self,
+        variable_evaluator: &impl Fn(&V) -> N::AsArg<'_>,
+        stack: &mut Stack<N>,
+    ) -> N {
+        match self {
+            Input::Literal(num) => num.clone(),
+            Input::Variable(var) => variable_evaluator(var).to_owned(),
+            Input::Memory => stack.pop().unwrap(),
+        }
+    }
+}
+
 #[derive(Copy)]
 pub enum Instruction<'a, N: MathEvalNumber, V: Clone + 'static, F: Clone + 'static> {
     Source(Input<N, V>),
@@ -327,57 +363,40 @@ where
         }
     }
 
-    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N::AsArg<'_>) -> N
-    {
+    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N::AsArg<'_>) -> N {
         self.stack.clear();
         for instr in &self.instructions {
             let mut argnum = self.stack.len();
-            macro_rules! get {
-                ($inp: expr) => {
-                    match $inp {
-                        Input::Literal(num) => num.asarg(),
-                        Input::Variable(var) => variable_substituter(var),
-                        Input::Memory => {
-                            argnum -= 1;
-                            self.stack[argnum].asarg()
-                        }
-                    }
-                };
-            }
             macro_rules! handle {
                 ($self: ident $(.$func: ident)?, $inp: expr) => {{
-                    let arg = get!($inp);
+                    let arg = $inp.get_ref(&mut argnum, &variable_substituter, &self.stack);
                     $self $(.$func)?(arg)
                 }};
 
                 ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr) => {{
-                    let arg1 = get!($inp1);
-                    let arg2 = get!($inp2);
+                    let arg1 = $inp1.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg2 = $inp2.get_ref(&mut argnum, &variable_substituter, &self.stack);
                     $self $(.$func)?(arg1, arg2)
                 }};
 
                 ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr, $inp3: expr) => {{
-                    let arg1 = get!($inp1);
-                    let arg2 = get!($inp2);
-                    let arg3 = get!($inp3);
+                    let arg1 = $inp1.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg2 = $inp2.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg3 = $inp3.get_ref(&mut argnum, &variable_substituter, &self.stack);
                     $self $(.$func)?(arg1, arg2, arg3)
                 }};
 
                 ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr, $inp3: expr, $inp4: expr) => {{
-                    let arg1 = get!($inp1);
-                    let arg2 = get!($inp2);
-                    let arg3 = get!($inp3);
-                    let arg4 = get!($inp4);
+                    let arg1 = $inp1.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg2 = $inp2.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg3 = $inp3.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg4 = $inp4.get_ref(&mut argnum, &variable_substituter, &self.stack);
                     $self $(.$func)?(arg1, arg2, arg3, arg4)
                 }};
             }
             let result = match &instr {
                 Instruction::Source(input) => {
-                    match input {
-                        Input::Literal(num) => num.clone(),
-                        Input::Variable(var) => variable_substituter(var).to_owned(),
-                        Input::Memory => self.stack.pop().unwrap(),
-                    }
+                    input.get_owned(&variable_substituter, &mut self.stack)
                 }
                 Instruction::BiOperation(opr, lhs, rhs) => {
                     handle!(opr.eval, lhs, rhs)
