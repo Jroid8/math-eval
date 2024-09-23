@@ -27,7 +27,10 @@ where
         argnum: &mut usize,
         variable_evaluator: &impl Fn(&V) -> N::AsArg<'b>,
         stack: &'a Stack<N>,
-    ) -> N::AsArg<'b> where 'b: 'a {
+    ) -> N::AsArg<'b>
+    where
+        'a: 'b,
+    {
         match self {
             Input::Literal(num) => num.asarg(),
             Input::Variable(var) => variable_evaluator(var),
@@ -363,7 +366,10 @@ where
         }
     }
 
-    pub fn eval<'b>(&mut self, variable_substituter: impl Fn(&V) -> N::AsArg<'b>) -> N {
+    pub fn eval<'b, 'c>(&'b mut self, variable_substituter: impl Fn(&V) -> N::AsArg<'b>) -> N
+    where
+        'b: 'c,
+    {
         self.stack.clear();
         for instr in &self.instructions {
             let mut argnum = self.stack.len();
