@@ -10,7 +10,7 @@ use crate::{
 type Stack<N> = SmallVec<[N; 16]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Input<N: MathEvalNumber, V: Clone> {
+pub enum Input<N: MathEvalNumber, V: Clone + 'static> {
     Literal(N),
     Variable(V),
     Memory,
@@ -19,13 +19,13 @@ pub enum Input<N: MathEvalNumber, V: Clone> {
 impl<N, V> Input<N, V>
 where
     N: MathEvalNumber,
-    V: Clone,
+    V: Clone + 'static,
 {
     #[inline]
-    fn get_ref<'a, 'b>(
+    fn get_ref<'a>(
         &'a self,
         argnum: &mut usize,
-        variable_evaluator: &impl Fn(&'b V) -> N::AsArg<'a>,
+        variable_evaluator: &impl Fn(&V) -> N::AsArg<'a>,
         stack: &'a Stack<N>,
     ) -> N::AsArg<'a> {
         match self {
@@ -53,7 +53,7 @@ where
 }
 
 #[derive(Copy)]
-pub enum Instruction<'a, N: MathEvalNumber, V: Clone, F: Clone> {
+pub enum Instruction<'a, N: MathEvalNumber, V: Clone + 'static, F: Clone + 'static> {
     Source(Input<N, V>),
     BiOperation(BiOperation, Input<N, V>, Input<N, V>),
     UnOperation(UnOperation, Input<N, V>),
@@ -93,8 +93,8 @@ pub enum Instruction<'a, N: MathEvalNumber, V: Clone, F: Clone> {
 impl<N, V, F> Debug for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone + Debug,
-    F: Clone + Debug,
+    V: Clone + 'static + Debug,
+    F: Clone + 'static + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -151,8 +151,8 @@ where
 impl<N, V, F> Clone for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone,
-    F: Clone,
+    V: Clone + 'static,
+    F: Clone + 'static,
 {
     fn clone(&self) -> Self {
         match self {
@@ -191,7 +191,7 @@ where
 }
 
 #[derive(Clone, Default)]
-pub struct MathAssembly<'a, N: MathEvalNumber, V: Clone, F: Clone> {
+pub struct MathAssembly<'a, N: MathEvalNumber, V: Clone + 'static, F: Clone + 'static> {
     instructions: Vec<Instruction<'a, N, V, F>>,
     stack: Stack<N>,
 }
@@ -199,8 +199,8 @@ pub struct MathAssembly<'a, N: MathEvalNumber, V: Clone, F: Clone> {
 impl<'a, N, V, F> Debug for MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone + Debug,
-    F: Clone + Debug,
+    V: Clone + 'static + Debug,
+    F: Clone + 'static + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "MathAssembly[")?;
@@ -227,8 +227,8 @@ where
 impl<'a, N, V, F> MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone,
-    F: Clone,
+    V: Clone + 'static,
+    F: Clone + 'static,
 {
     pub fn new(
         arena: &Arena<SyntaxNode<N, V, F>>,
