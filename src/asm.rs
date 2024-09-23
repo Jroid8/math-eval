@@ -22,12 +22,12 @@ where
     V: Clone + 'static,
 {
     #[inline]
-    fn get_ref<'a>(
+    fn get_ref<'a, 'b>(
         &'a self,
         argnum: &mut usize,
-        variable_evaluator: &impl Fn(&V) -> N::AsArg<'a>,
+        variable_evaluator: &impl Fn(&V) -> N::AsArg<'b>,
         stack: &'a Stack<N>,
-    ) -> N::AsArg<'a> {
+    ) -> N::AsArg<'b> where 'b: 'a {
         match self {
             Input::Literal(num) => num.asarg(),
             Input::Variable(var) => variable_evaluator(var),
@@ -39,9 +39,9 @@ where
     }
 
     #[inline]
-    fn get_owned(
+    fn get_owned<'a>(
         &self,
-        variable_evaluator: &impl Fn(&V) -> N::AsArg<'_>,
+        variable_evaluator: &impl Fn(&V) -> N::AsArg<'a>,
         stack: &mut Stack<N>,
     ) -> N {
         match self {
@@ -363,7 +363,7 @@ where
         }
     }
 
-    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N::AsArg<'_>) -> N {
+    pub fn eval<'b>(&mut self, variable_substituter: impl Fn(&V) -> N::AsArg<'b>) -> N {
         self.stack.clear();
         for instr in &self.instructions {
             let mut argnum = self.stack.len();
