@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display, ops::RangeInclusive};
 
 use asm::{CFPointer, MathAssembly};
 use number::MathEvalNumber;
-use syntax::SyntaxTree;
+use syntax::{SyntaxTree, VariableIdentifier};
 use tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
 
 pub mod asm;
@@ -85,7 +85,7 @@ impl Display for ParsingErrorKind {
     }
 }
 
-pub fn parse<'a, N: MathEvalNumber, V: Clone + 'static, F: Clone + 'static>(
+pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: Clone + 'static>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,

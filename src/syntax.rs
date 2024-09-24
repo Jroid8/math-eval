@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, MathAssembly};
@@ -103,12 +104,15 @@ impl Display for BiOperation {
     }
 }
 
-// 72 bytes in size
+pub trait VariableIdentifier: Clone + Hash + Eq + 'static {}
+
+impl<T> VariableIdentifier for T where T: Clone + Hash + Eq + 'static {}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxNode<N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone + 'static,
+    V: VariableIdentifier,
     F: Clone + 'static,
 {
     Number(N),
@@ -211,12 +215,14 @@ impl SyntaxError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyntaxTree<N: MathEvalNumber, V: Clone + 'static, F: Clone + 'static>(pub Tree<SyntaxNode<N, V, F>>);
+pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: Clone + 'static>(
+    pub Tree<SyntaxNode<N, V, F>>,
+);
 
 impl<V, N, F> SyntaxTree<N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone + 'static,
+    V: VariableIdentifier,
     F: Clone + 'static,
 {
     pub fn new(
@@ -450,7 +456,9 @@ where
                                 if upper_side == 0 { pos } else { *upper_opr },
                             );
                             match self.0.arena[lowest].get() {
-                                SyntaxNode::Number(value) => lhs = opr.eval(lhs.asarg(), value.asarg()),
+                                SyntaxNode::Number(value) => {
+                                    lhs = opr.eval(lhs.asarg(), value.asarg())
+                                }
                                 _ => {
                                     symbols[symbols[0].is_some() as usize] =
                                         Some((lowest, opr == neg))
@@ -459,7 +467,8 @@ where
                         }
                     }
                     SyntaxNode::Number(value) => {
-                        lhs = (mul_opr(*upper_opr, upper_side, pos)).eval(lhs.asarg(), value.asarg())
+                        lhs =
+                            (mul_opr(*upper_opr, upper_side, pos)).eval(lhs.asarg(), value.asarg())
                     }
                     _ => panic!(),
                 }
@@ -542,7 +551,7 @@ where
 impl<V, N, F> Display for SyntaxTree<N, V, F>
 where
     N: MathEvalNumber + Display,
-    V: Clone + 'static + Display,
+    V: VariableIdentifier + Display,
     F: Clone + 'static + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -601,7 +610,7 @@ mod test {
         };
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     enum TestVar {
         X,
         Y,

@@ -1,36 +1,36 @@
 use indextree::{Arena, NodeEdge, NodeId};
 use smallvec::SmallVec;
-use std::{fmt::Debug, usize};
+use std::{collections::HashMap, fmt::Debug, hash::Hash, usize};
 
 use crate::{
     number::{MathEvalNumber, NativeFunction},
-    syntax::{BiOperation, SyntaxNode, UnOperation},
+    syntax::{BiOperation, SyntaxNode, UnOperation, VariableIdentifier},
 };
 
 type Stack<N> = SmallVec<[N; 16]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Input<N: MathEvalNumber, V: Clone + 'static> {
+pub enum Input<N: MathEvalNumber, V: VariableIdentifier> {
     Literal(N),
-    Variable(V),
+    Variable(usize, V),
     Memory,
 }
 
 impl<N, V> Input<N, V>
 where
     N: MathEvalNumber,
-    V: Clone + 'static,
+    V: VariableIdentifier,
 {
     #[inline]
     fn get_ref<'a>(
         &'a self,
         argnum: &mut usize,
-        variable_evaluator: &impl Fn(&V) -> N::AsArg<'_>,
+        variables: &[N::AsArg<'a>],
         stack: &'a Stack<N>,
     ) -> N::AsArg<'a> {
         match self {
             Input::Literal(num) => num.asarg(),
-            Input::Variable(var) => variable_evaluator(var),
+            Input::Variable(var, _) => variables[*var],
             Input::Memory => {
                 *argnum -= 1;
                 stack[*argnum].asarg()
@@ -39,21 +39,17 @@ where
     }
 
     #[inline]
-    fn get_owned<'a>(
-        &self,
-        variable_evaluator: &impl Fn(&V) -> N::AsArg<'_>,
-        stack: &mut Stack<N>,
-    ) -> N {
+    fn get_owned(&self, variables: &[N::AsArg<'_>], stack: &mut Stack<N>) -> N {
         match self {
             Input::Literal(num) => num.clone(),
-            Input::Variable(var) => variable_evaluator(var).to_owned(),
+            Input::Variable(var, _) => variables[*var].to_owned(),
             Input::Memory => stack.pop().unwrap(),
         }
     }
 }
 
 #[derive(Copy)]
-pub enum Instruction<'a, N: MathEvalNumber, V: Clone + 'static, F: Clone + 'static> {
+pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: Clone + 'static> {
     Source(Input<N, V>),
     BiOperation(BiOperation, Input<N, V>, Input<N, V>),
     UnOperation(UnOperation, Input<N, V>),
@@ -93,7 +89,7 @@ pub enum Instruction<'a, N: MathEvalNumber, V: Clone + 'static, F: Clone + 'stat
 impl<N, V, F> Debug for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone + 'static + Debug,
+    V: VariableIdentifier + Debug,
     F: Clone + 'static + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -151,7 +147,7 @@ where
 impl<N, V, F> Clone for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone + 'static,
+    V: VariableIdentifier,
     F: Clone + 'static,
 {
     fn clone(&self) -> Self {
@@ -191,7 +187,7 @@ where
 }
 
 #[derive(Clone, Default)]
-pub struct MathAssembly<'a, N: MathEvalNumber, V: Clone + 'static, F: Clone + 'static> {
+pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: Clone + 'static> {
     instructions: Vec<Instruction<'a, N, V, F>>,
     stack: Stack<N>,
 }
@@ -199,7 +195,7 @@ pub struct MathAssembly<'a, N: MathEvalNumber, V: Clone + 'static, F: Clone + 's
 impl<'a, N, V, F> Debug for MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone + 'static + Debug,
+    V: VariableIdentifier + Debug,
     F: Clone + 'static + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -227,13 +223,14 @@ where
 impl<'a, N, V, F> MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone + 'static,
+    V: VariableIdentifier,
     F: Clone + 'static,
 {
     pub fn new(
         arena: &Arena<SyntaxNode<N, V, F>>,
         root: NodeId,
         function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
+        variable_order: &[V],
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, V, F>> = Vec::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
@@ -241,12 +238,17 @@ where
             Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
             _ => false,
         };
+        let variables = variable_order
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| (v.clone(), i))
+            .collect::<HashMap<V, usize>>();
 
         for current in root.traverse(arena) {
             if let NodeEdge::End(cursor) = current {
                 let mut children_as_input = cursor.children(arena).map(|c| match arena[c].get() {
                     SyntaxNode::Number(num) => Input::Literal(*num),
-                    SyntaxNode::Variable(var) => Input::Variable(var.clone()),
+                    SyntaxNode::Variable(var) => Input::Variable(*variables.get(var).unwrap(),var.clone()),
                     _ => Input::Memory,
                 });
                 let parent = cursor.ancestors(arena).nth(1);
@@ -262,7 +264,7 @@ where
                         if is_fixed_input(parent) {
                             continue;
                         } else {
-                            Instruction::Source(Input::Variable(var.clone()))
+                            Instruction::Source(Input::Variable(*variables.get(var).unwrap(), var.clone()))
                         }
                     }
                     SyntaxNode::BiOperation(opr) => Instruction::BiOperation(
@@ -363,40 +365,56 @@ where
         }
     }
 
-    pub fn eval(&mut self, variable_substituter: impl Fn(&V) -> N::AsArg<'_>) -> N {
+    pub fn eval<'a, 'b>(&'a mut self, variables: &[N::AsArg<'b>]) -> N where 'a: 'b {
         self.stack.clear();
         for instr in &self.instructions {
             let mut argnum = self.stack.len();
+            macro_rules! get {
+                ($inp: expr) => {
+                    match $inp {
+                        Input::Literal(num) => num.asarg(),
+                        Input::Variable(var, _) => variables[*var],
+                        Input::Memory => {
+                            argnum -= 1;
+                            self.stack[argnum].asarg()
+                        }
+                    }
+                }
+            }
             macro_rules! handle {
                 ($self: ident $(.$func: ident)?, $inp: expr) => {{
-                    let arg = $inp.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg = get!($inp);
                     $self $(.$func)?(arg)
                 }};
 
                 ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr) => {{
-                    let arg1 = $inp1.get_ref(&mut argnum, &variable_substituter, &self.stack);
-                    let arg2 = $inp2.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg1 = get!($inp1);
+                    let arg2 = get!($inp2);
                     $self $(.$func)?(arg1, arg2)
                 }};
 
                 ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr, $inp3: expr) => {{
-                    let arg1 = $inp1.get_ref(&mut argnum, &variable_substituter, &self.stack);
-                    let arg2 = $inp2.get_ref(&mut argnum, &variable_substituter, &self.stack);
-                    let arg3 = $inp3.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg1 = get!($inp1);
+                    let arg2 = get!($inp2);
+                    let arg3 = get!($inp3);
                     $self $(.$func)?(arg1, arg2, arg3)
                 }};
 
                 ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr, $inp3: expr, $inp4: expr) => {{
-                    let arg1 = $inp1.get_ref(&mut argnum, &variable_substituter, &self.stack);
-                    let arg2 = $inp2.get_ref(&mut argnum, &variable_substituter, &self.stack);
-                    let arg3 = $inp3.get_ref(&mut argnum, &variable_substituter, &self.stack);
-                    let arg4 = $inp4.get_ref(&mut argnum, &variable_substituter, &self.stack);
+                    let arg1 = get!($inp1);
+                    let arg2 = get!($inp2);
+                    let arg3 = get!($inp3);
+                    let arg4 = get!($inp4);
                     $self $(.$func)?(arg1, arg2, arg3, arg4)
                 }};
             }
             let result = match &instr {
                 Instruction::Source(input) => {
-                    input.get_owned(&variable_substituter, &mut self.stack)
+                    match input {
+                        Input::Literal(num) => num.clone(),
+                        Input::Variable(var, _) => variables[*var].to_owned(),
+                        Input::Memory => self.stack.pop().unwrap(),
+                    }
                 }
                 Instruction::BiOperation(opr, lhs, rhs) => {
                     handle!(opr.eval, lhs, rhs)
