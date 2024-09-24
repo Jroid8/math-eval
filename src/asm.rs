@@ -365,7 +365,7 @@ where
         }
     }
 
-    pub fn eval<'a, 'b>(&'a mut self, variables: &[N::AsArg<'b>]) -> N where 'a: 'b {
+    pub fn eval<'b, 'c>(&'b mut self, variables: &[N::AsArg<'c>]) -> N where 'b: 'c {
         self.stack.clear();
         for instr in &self.instructions {
             let mut argnum = self.stack.len();
