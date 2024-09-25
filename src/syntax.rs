@@ -287,8 +287,7 @@ where
                                     call_stack.extend(
                                         current_node
                                             .children(arena)
-                                            .enumerate()
-                                            .map(|(_, id)| (id, None, None)),
+                                            .map(|id| (id, None, None)),
                                     );
                                     Ok(Some(f))
                                 }

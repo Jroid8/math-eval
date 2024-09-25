@@ -131,7 +131,7 @@ impl Display for NativeFunction {
     }
 }
 
-pub(crate) trait Reborrow {
+pub trait Reborrow {
     type This<'a> where Self: 'a;
     fn reborrow(&self) -> Self::This<'_>;
 }
@@ -139,7 +139,7 @@ pub(crate) trait Reborrow {
 impl<T> Reborrow for &'_ T {
     type This<'a> = &'a T where Self: 'a;
     fn reborrow(&self) -> Self::This<'_> {
-        &self
+        self
     }
 }
 
@@ -195,7 +195,7 @@ pub trait MathEvalNumber:
     fn max(value: &[Self]) -> Self;
     fn min(value: &[Self]) -> Self;
     fn factorial(value: Self::AsArg<'_>) -> Self;
-    fn asarg<'a>(&'a self) -> Self::AsArg<'a>;
+    fn asarg(&self) -> Self::AsArg<'_>;
 }
 
 impl MathEvalNumber for f64 {
@@ -329,7 +329,7 @@ impl MathEvalNumber for f64 {
         result
     }
 
-    fn asarg<'a>(&'a self) -> Self::AsArg<'a> {
+    fn asarg(&self) -> Self::AsArg<'_> {
         *self
     }
 }

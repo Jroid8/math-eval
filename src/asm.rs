@@ -1,6 +1,6 @@
 use indextree::{Arena, NodeEdge, NodeId};
 use smallvec::SmallVec;
-use std::{collections::HashMap, fmt::Debug, hash::Hash, usize};
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 use crate::{
     number::{MathEvalNumber, NativeFunction, Reborrow},
@@ -208,7 +208,7 @@ where
             _ => false,
         };
         let variables = variable_order
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(i, v)| (v.clone(), i))
             .collect::<HashMap<V, usize>>();
@@ -380,7 +380,7 @@ where
             let result = match &instr {
                 Instruction::Source(input) => {
                     match input {
-                        Input::Literal(num) => num.clone(),
+                        Input::Literal(num) => *num,
                         Input::Variable(var, _) => variables[*var].to_owned(),
                         Input::Memory => self.stack.pop().unwrap(),
                     }
