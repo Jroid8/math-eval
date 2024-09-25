@@ -16,38 +16,6 @@ pub enum Input<N: MathEvalNumber, V: VariableIdentifier> {
     Memory,
 }
 
-impl<N, V> Input<N, V>
-where
-    N: MathEvalNumber,
-    V: VariableIdentifier,
-{
-    #[inline]
-    fn get_ref<'a>(
-        &'a self,
-        argnum: &mut usize,
-        variables: &[N::AsArg<'a>],
-        stack: &'a Stack<N>,
-    ) -> N::AsArg<'a> {
-        match self {
-            Input::Literal(num) => num.asarg(),
-            Input::Variable(var, _) => variables[*var],
-            Input::Memory => {
-                *argnum -= 1;
-                stack[*argnum].asarg()
-            }
-        }
-    }
-
-    #[inline]
-    fn get_owned(&self, variables: &[N::AsArg<'_>], stack: &mut Stack<N>) -> N {
-        match self {
-            Input::Literal(num) => num.clone(),
-            Input::Variable(var, _) => variables[*var].to_owned(),
-            Input::Memory => stack.pop().unwrap(),
-        }
-    }
-}
-
 #[derive(Copy)]
 pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: Clone + 'static> {
     Source(Input<N, V>),
