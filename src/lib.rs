@@ -341,7 +341,7 @@ where
         &self,
         input: &str,
         optimize: bool,
-    ) -> Result<MathAssembly<'a, N, bool, usize>, ParsingError> {
+    ) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
         parse(
             input,
             |inp| self.constants.get(inp).copied(),
@@ -350,11 +350,11 @@ where
                 [&self.variables.0, &self.variables.1]
                     .into_iter()
                     .position(|var| *var == inp)
-                    .map(|i| i == 0)
+                    .map(|i| i as u8)
             },
             |index| self.functions[*index],
             optimize,
-            &[true, false],
+            &[0, 1],
         )
     }
     pub fn build_as_parser<'b>(
@@ -389,7 +389,7 @@ where
             ]),
         }
     }
-    fn parse<'b>(
+    fn parse(
         &self,
         input: &str,
         optimize: bool,
@@ -440,15 +440,6 @@ where
             variables: ManyVariables(self.variables.0.into_iter().chain([name.into()]).collect()),
         }
     }
-    fn select_variable(&self, i: u8, v1: N, v2: N, v3: N, v4: N) -> N {
-        match i {
-            0 => v1,
-            1 => v2,
-            2 => v3,
-            3 => v4,
-            _ => unreachable!(),
-        }
-    }
     fn parse(
         &self,
         input: &str,
@@ -467,7 +458,7 @@ where
             },
             |index| self.functions[*index],
             optimize,
-            &[1, 2, 3, 4],
+            &[0, 1, 2, 3],
         )
     }
     pub fn build_as_parser<'b>(

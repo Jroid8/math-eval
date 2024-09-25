@@ -226,6 +226,7 @@ where
     V: VariableIdentifier,
     F: Clone + 'static,
 {
+    // FIX: panics when variable_order is not exhaustive
     pub fn new(
         arena: &Arena<SyntaxNode<N, V, F>>,
         root: NodeId,
