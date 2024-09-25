@@ -131,7 +131,18 @@ impl Display for NativeFunction {
     }
 }
 
-// don't forget to #[inline]
+pub(crate) trait Reborrow {
+    type This<'a> where Self: 'a;
+    fn reborrow(&self) -> Self::This<'_>;
+}
+
+impl<T> Reborrow for &'_ T {
+    type This<'a> = &'a T where Self: 'a;
+    fn reborrow(&self) -> Self::This<'_> {
+        &self
+    }
+}
+
 pub trait MathEvalNumber:
     Add<Output = Self>
     + Sub<Output = Self>
@@ -150,6 +161,7 @@ pub trait MathEvalNumber:
         + for<'b> Sub<Self::AsArg<'b>, Output=Self>
         + for<'b> Mul<Self::AsArg<'b>, Output=Self>
         + for<'b> Div<Self::AsArg<'b>, Output=Self>
+        + for<'b> Reborrow<This<'b> = Self::AsArg<'b>>
         + PartialEq
         + Neg<Output=Self>
         + Copy
@@ -318,6 +330,14 @@ impl MathEvalNumber for f64 {
     }
 
     fn asarg<'a>(&'a self) -> Self::AsArg<'a> {
+        *self
+    }
+}
+
+impl Reborrow for f64 {
+    type This<'a> = f64;
+
+    fn reborrow(&self) -> Self::This<'_> {
         *self
     }
 }

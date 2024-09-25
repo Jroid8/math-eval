@@ -3,7 +3,7 @@ use smallvec::SmallVec;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, usize};
 
 use crate::{
-    number::{MathEvalNumber, NativeFunction},
+    number::{MathEvalNumber, NativeFunction, Reborrow},
     syntax::{BiOperation, SyntaxNode, UnOperation, VariableIdentifier},
 };
 
@@ -365,7 +365,7 @@ where
         }
     }
 
-    pub fn eval<'b, 'c>(&'b mut self, variables: &[N::AsArg<'c>]) -> N where 'b: 'c {
+    pub fn eval(&mut self, variables: &[N::AsArg<'_>]) -> N {
         self.stack.clear();
         for instr in &self.instructions {
             let mut argnum = self.stack.len();
@@ -373,7 +373,7 @@ where
                 ($inp: expr) => {
                     match $inp {
                         Input::Literal(num) => num.asarg(),
-                        Input::Variable(var, _) => variables[*var],
+                        Input::Variable(var, _) => variables[*var].reborrow(),
                         Input::Memory => {
                             argnum -= 1;
                             self.stack[argnum].asarg()
