@@ -58,7 +58,7 @@ impl<N, V, F> PartialEq for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
-    F: FunctionIdentifier + Eq,
+    F: FunctionIdentifier + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -76,9 +76,7 @@ where
             (Self::NFFlexible(l0, l1, l2), Self::NFFlexible(r0, r1, r2)) => {
                 l0 == r0 && l1 == r1 && l2 == r2
             }
-            (Self::CFSingle(_, l1, l2), Self::CFSingle(_, r1, r2)) => {
-                l1 == r1 && l2 == r2
-            }
+            (Self::CFSingle(_, l1, l2), Self::CFSingle(_, r1, r2)) => l1 == r1 && l2 == r2,
             (Self::CFDual(_, l1, l2, l3), Self::CFDual(_, r1, r2, r3)) => {
                 l1 == r1 && l2 == r2 && l3 == r3
             }
@@ -88,12 +86,18 @@ where
             (Self::CFQuad(_, l1, l2, l3, l4, l5), Self::CFQuad(_, r1, r2, r3, r4, r5)) => {
                 l1 == r1 && l2 == r2 && l3 == r3 && l4 == r4 && l5 == r5
             }
-            (Self::CFFlexible(_, l1, l2), Self::CFFlexible(_, r1, r2)) => {
-                l1 == r1 && l2 == r2
-            }
+            (Self::CFFlexible(_, l1, l2), Self::CFFlexible(_, r1, r2)) => l1 == r1 && l2 == r2,
             _ => false,
         }
     }
+}
+
+impl<N, V, F> Eq for Instruction<'_, N, V, F>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier + Eq,
+{
 }
 
 impl<N, V, F> Debug for Instruction<'_, N, V, F>
@@ -201,7 +205,7 @@ where
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
     instructions: Vec<Instruction<'a, N, V, F>>,
     stack: Stack<N>,
