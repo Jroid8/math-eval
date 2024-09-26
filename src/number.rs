@@ -1,5 +1,7 @@
 use std::{
-    fmt::{Debug, Display}, ops::{Add, Div, Mul, Neg, Sub}, str::FromStr
+    fmt::{Debug, Display},
+    ops::{Add, Div, Mul, Neg, Sub},
+    str::FromStr,
 };
 
 #[derive(Debug, Clone, Copy, Hash)]
@@ -132,7 +134,9 @@ impl Display for NativeFunction {
 }
 
 pub trait Reborrow {
-    type This<'a> where Self: 'a;
+    type This<'a>
+    where
+        Self: 'a;
     fn reborrow(&self) -> Self::This<'_>;
 }
 
@@ -157,13 +161,13 @@ pub trait MathEvalNumber:
     + 'static
 {
     type AsArg<'a>: ToOwned<Owned = Self>
-        + for<'b> Add<Self::AsArg<'b>, Output=Self>
-        + for<'b> Sub<Self::AsArg<'b>, Output=Self>
-        + for<'b> Mul<Self::AsArg<'b>, Output=Self>
-        + for<'b> Div<Self::AsArg<'b>, Output=Self>
+        + for<'b> Add<Self::AsArg<'b>, Output = Self>
+        + for<'b> Sub<Self::AsArg<'b>, Output = Self>
+        + for<'b> Mul<Self::AsArg<'b>, Output = Self>
+        + for<'b> Div<Self::AsArg<'b>, Output = Self>
         + for<'b> Reborrow<This<'b> = Self::AsArg<'b>>
         + PartialEq
-        + Neg<Output=Self>
+        + Neg<Output = Self>
         + Copy
         + Debug;
 
@@ -200,7 +204,7 @@ pub trait MathEvalNumber:
 
 impl MathEvalNumber for f64 {
     type AsArg<'a> = f64;
-    
+
     fn pow(value: Self, rhs: Self) -> Self {
         value.powf(rhs)
     }
