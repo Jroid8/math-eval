@@ -94,7 +94,7 @@ fn test_operator() {
             |_| None::<()>,
             |_| CFPointer::Single(&|_| 0.0),
             true,
-            &[]
+            &[],
         )
         .unwrap();
         let result = match opr {
@@ -203,7 +203,7 @@ fn test_fuzz_symbols() {
                     MyFuncs::Dist => CFPointer::Dual(&|x, y| (x * x + y * y).sqrt()),
                 },
                 true,
-                &[MyVars::X, MyVars::Y, MyVars::A]
+                &[MyVars::X, MyVars::Y, MyVars::A],
             )
         }) {
             println!("{expr}");
@@ -240,7 +240,7 @@ fn test_fuzz_all() {
                     MyFuncs::Dist => CFPointer::Dual(&|x, y| (x * x + y * y).sqrt()),
                 },
                 true,
-                &[MyVars::X, MyVars::Y, MyVars::A]
+                &[MyVars::X, MyVars::Y, MyVars::A],
             )
         }) {
             println!("{noise:?}");

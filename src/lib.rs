@@ -507,11 +507,10 @@ where
             (0..self.variables.0.len()).collect::<Vec<_>>().as_slice(),
         )
     }
-    pub fn build_as_parser<'b>(self) -> impl Fn(&str, &[N::AsArg<'b>]) -> Result<N, ParsingError> + 'a {
-        move |input, vars: &[N::AsArg<'b>]| {
-            self.parse(input, false)
-                .map(|mut asm| asm.eval(vars))
-        }
+    pub fn build_as_parser<'b>(
+        self,
+    ) -> impl Fn(&str, &[N::AsArg<'b>]) -> Result<N, ParsingError> + 'a {
+        move |input, vars: &[N::AsArg<'b>]| self.parse(input, false).map(|mut asm| asm.eval(vars))
     }
     pub fn build_as_function<'b>(
         self,

@@ -289,9 +289,7 @@ where
                                     Err(SyntaxErrorKind::TooManyArguments)
                                 } else {
                                     call_stack.extend(
-                                        current_node
-                                            .children(arena)
-                                            .map(|id| (id, None, None)),
+                                        current_node.children(arena).map(|id| (id, None, None)),
                                     );
                                     Ok(Some(f))
                                 }
@@ -381,9 +379,14 @@ where
     pub fn to_asm<'a>(
         &self,
         function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
-        variable_order: &[V]
+        variable_order: &[V],
     ) -> MathAssembly<'a, N, V, F> {
-        MathAssembly::new(&self.0.arena, self.0.root, function_to_pointer, variable_order)
+        MathAssembly::new(
+            &self.0.arena,
+            self.0.root,
+            function_to_pointer,
+            variable_order,
+        )
     }
 
     pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>) {
@@ -398,8 +401,8 @@ where
         }
         for node in examin {
             if node.children(&self.0.arena).all(|c| self.is_number(c)) {
-                let answer = MathAssembly::new(&self.0.arena, node, &function_to_pointer, &[])
-                    .eval(&[]);
+                let answer =
+                    MathAssembly::new(&self.0.arena, node, &function_to_pointer, &[]).eval(&[]);
                 *self.0.arena[node].get_mut() = SyntaxNode::Number(answer);
                 while let Some(c) = self.0.arena[node].first_child() {
                     c.remove(&mut self.0.arena);

@@ -69,7 +69,11 @@ where
                 .field(arg1)
                 .field(arg2)
                 .finish(),
-            Self::UnOperation(arg0, arg1) => f.debug_tuple("UnOperation").field(arg0).field(arg1).finish(),
+            Self::UnOperation(arg0, arg1) => f
+                .debug_tuple("UnOperation")
+                .field(arg0)
+                .field(arg1)
+                .finish(),
             Self::NFSingle(_, arg1, arg2) => {
                 f.debug_tuple("NFSingle").field(arg1).field(arg2).finish()
             }
@@ -218,7 +222,9 @@ where
             if let NodeEdge::End(cursor) = current {
                 let mut children_as_input = cursor.children(arena).map(|c| match arena[c].get() {
                     SyntaxNode::Number(num) => Input::Literal(*num),
-                    SyntaxNode::Variable(var) => Input::Variable(*variables.get(var).unwrap(),var.clone()),
+                    SyntaxNode::Variable(var) => {
+                        Input::Variable(*variables.get(var).unwrap(), var.clone())
+                    }
                     _ => Input::Memory,
                 });
                 let parent = cursor.ancestors(arena).nth(1);
@@ -234,7 +240,10 @@ where
                         if is_fixed_input(parent) {
                             continue;
                         } else {
-                            Instruction::Source(Input::Variable(*variables.get(var).unwrap(), var.clone()))
+                            Instruction::Source(Input::Variable(
+                                *variables.get(var).unwrap(),
+                                var.clone(),
+                            ))
                         }
                     }
                     SyntaxNode::BiOperation(opr) => Instruction::BiOperation(
@@ -349,7 +358,7 @@ where
                             self.stack[argnum].asarg()
                         }
                     }
-                }
+                };
             }
             macro_rules! handle {
                 ($self: ident $(.$func: ident)?, $inp: expr) => {{
@@ -379,13 +388,11 @@ where
                 }};
             }
             let result = match &instr {
-                Instruction::Source(input) => {
-                    match input {
-                        Input::Literal(num) => *num,
-                        Input::Variable(var, _) => variables[*var].to_owned(),
-                        Input::Memory => self.stack.pop().unwrap(),
-                    }
-                }
+                Instruction::Source(input) => match input {
+                    Input::Literal(num) => *num,
+                    Input::Variable(var, _) => variables[*var].to_owned(),
+                    Input::Memory => self.stack.pop().unwrap(),
+                },
                 Instruction::BiOperation(opr, lhs, rhs) => {
                     handle!(opr.eval, lhs, rhs)
                 }
