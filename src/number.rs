@@ -211,9 +211,9 @@ impl MathEvalNumber for f64 {
 
     fn parse_constant(input: &str) -> Option<Self> {
         match input {
-            "pi" => Some(Self::PI()),
-            "e" => Some(Self::E()),
-            "tau" => Some(Self::TAU()),
+            "pi" => Some(PI),
+            "e" => Some(E),
+            "tau" => Some(TAU),
             _ => None,
         }
     }
