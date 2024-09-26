@@ -63,12 +63,13 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Source(arg0) => f.debug_tuple("Source").field(arg0).finish(),
-            Self::BiOperation(_, arg1, arg2) => f
+            Self::BiOperation(arg0, arg1, arg2) => f
                 .debug_tuple("BiOperation")
+                .field(arg0)
                 .field(arg1)
                 .field(arg2)
                 .finish(),
-            Self::UnOperation(_, arg1) => f.debug_tuple("UnOperation").field(arg1).finish(),
+            Self::UnOperation(arg0, arg1) => f.debug_tuple("UnOperation").field(arg0).field(arg1).finish(),
             Self::NFSingle(_, arg1, arg2) => {
                 f.debug_tuple("NFSingle").field(arg1).field(arg2).finish()
             }
