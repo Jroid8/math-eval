@@ -16,6 +16,7 @@ meval = "0.2.0"
 
 [lints.clippy]
 redundant_closure_call = "allow"
+type_complexity = "allow"
 
 [lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

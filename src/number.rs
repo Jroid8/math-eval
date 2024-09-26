@@ -6,8 +6,8 @@ use std::{
 
 #[derive(Debug, Clone, Copy, Hash)]
 pub enum NFPointer<N: MathEvalNumber> {
-    Single(fn(N) -> N),
-    Dual(fn(N, N) -> N),
+    Single(for<'a> fn(N::AsArg<'a>) -> N),
+    Dual(for<'a> fn(N::AsArg<'a>, N::AsArg<'a>) -> N),
     Flexible(fn(&[N]) -> N),
 }
 
@@ -133,7 +133,20 @@ impl Display for NativeFunction {
     }
 }
 
-// don't forget to #[inline]
+pub trait Reborrow {
+    type This<'a>
+    where
+        Self: 'a;
+    fn reborrow(&self) -> Self::This<'_>;
+}
+
+impl<T> Reborrow for &'_ T {
+    type This<'a> = &'a T where Self: 'a;
+    fn reborrow(&self) -> Self::This<'_> {
+        self
+    }
+}
+
 pub trait MathEvalNumber:
     Add<Output = Self>
     + Sub<Output = Self>
@@ -147,192 +160,53 @@ pub trait MathEvalNumber:
     + Debug
     + 'static
 {
-    fn modulo(self, rhs: Self) -> Self;
-    fn pow(self, rhs: Self) -> Self;
+    type AsArg<'a>: ToOwned<Owned = Self>
+        + for<'b> Add<Self::AsArg<'b>, Output = Self>
+        + for<'b> Sub<Self::AsArg<'b>, Output = Self>
+        + for<'b> Mul<Self::AsArg<'b>, Output = Self>
+        + for<'b> Div<Self::AsArg<'b>, Output = Self>
+        + for<'b> Reborrow<This<'b> = Self::AsArg<'b>>
+        + PartialEq
+        + Neg<Output = Self>
+        + Copy
+        + Debug;
+
     fn parse_constant(input: &str) -> Option<Self>;
-    fn sin(self) -> Self;
-    fn cos(self) -> Self;
-    fn tan(self) -> Self;
-    fn cot(self) -> Self;
-    fn asin(self) -> Self;
-    fn acos(self) -> Self;
-    fn atan(self) -> Self;
-    fn acot(self) -> Self;
-    fn log(self, base: Self) -> Self;
-    fn log2(self) -> Self;
-    fn log10(self) -> Self;
-    fn ln(self) -> Self;
-    fn exp(self) -> Self;
-    fn floor(self) -> Self;
-    fn ceil(self) -> Self;
-    fn round(self) -> Self;
-    fn trunc(self) -> Self;
-    fn frac(self) -> Self;
-    fn abs(self) -> Self;
-    fn sign(self) -> Self;
-    fn sqrt(self) -> Self;
-    fn cbrt(self) -> Self;
-    fn max(values: &[Self]) -> Self;
-    fn min(values: &[Self]) -> Self;
-    fn factorial(self) -> Self;
+    fn modulo(value: Self::AsArg<'_>, rhs: Self::AsArg<'_>) -> Self;
+    fn pow(value: Self::AsArg<'_>, rhs: Self::AsArg<'_>) -> Self;
+    fn sin(value: Self::AsArg<'_>) -> Self;
+    fn cos(value: Self::AsArg<'_>) -> Self;
+    fn tan(value: Self::AsArg<'_>) -> Self;
+    fn cot(value: Self::AsArg<'_>) -> Self;
+    fn asin(value: Self::AsArg<'_>) -> Self;
+    fn acos(value: Self::AsArg<'_>) -> Self;
+    fn atan(value: Self::AsArg<'_>) -> Self;
+    fn acot(value: Self::AsArg<'_>) -> Self;
+    fn log(value: Self::AsArg<'_>, base: Self::AsArg<'_>) -> Self;
+    fn log2(value: Self::AsArg<'_>) -> Self;
+    fn log10(value: Self::AsArg<'_>) -> Self;
+    fn ln(value: Self::AsArg<'_>) -> Self;
+    fn exp(value: Self::AsArg<'_>) -> Self;
+    fn floor(value: Self::AsArg<'_>) -> Self;
+    fn ceil(value: Self::AsArg<'_>) -> Self;
+    fn round(value: Self::AsArg<'_>) -> Self;
+    fn trunc(value: Self::AsArg<'_>) -> Self;
+    fn frac(value: Self::AsArg<'_>) -> Self;
+    fn abs(value: Self::AsArg<'_>) -> Self;
+    fn sign(value: Self::AsArg<'_>) -> Self;
+    fn sqrt(value: Self::AsArg<'_>) -> Self;
+    fn cbrt(value: Self::AsArg<'_>) -> Self;
+    fn max(value: &[Self]) -> Self;
+    fn min(value: &[Self]) -> Self;
+    fn factorial(value: Self::AsArg<'_>) -> Self;
+    fn asarg(&self) -> Self::AsArg<'_>;
 }
 
-#[cfg(not(feature = "num-traits"))]
-macro_rules! impl_float {
-    ($ft:ident) => {
-        impl MathEvalNumber for $ft {
-            fn pow(self, rhs: Self) -> Self {
-                self.powf(rhs)
-            }
+impl MathEvalNumber for f64 {
+    type AsArg<'a> = f64;
 
-            fn parse_constant(input: &str) -> Option<Self> {
-                match input {
-                    "pi" => Some(std::$ft::consts::PI),
-                    "e" => Some(std::$ft::consts::E),
-                    _ => None,
-                }
-            }
-
-            fn modulo(self, rhs: Self) -> Self {
-                self.rem_euclid(rhs)
-            }
-
-            fn sin(self) -> Self {
-                self.sin()
-            }
-
-            fn cos(self) -> Self {
-                self.cos()
-            }
-
-            fn tan(self) -> Self {
-                self.tan()
-            }
-
-            fn cot(self) -> Self {
-                let (sin, cos) = self.sin_cos();
-                cos / sin
-            }
-
-            fn asin(self) -> Self {
-                self.asin()
-            }
-
-            fn acos(self) -> Self {
-                self.acos()
-            }
-
-            fn atan(self) -> Self {
-                self.atan()
-            }
-
-            fn acot(self) -> Self {
-                (-self).atan() + std::$ft::consts::FRAC_PI_2
-            }
-
-            fn log(self, base: Self) -> Self {
-                self.log(base)
-            }
-
-            fn log2(self) -> Self {
-                self.log2()
-            }
-
-            fn log10(self) -> Self {
-                self.log2()
-            }
-
-            fn ln(self) -> Self {
-                self.ln()
-            }
-
-            fn exp(self) -> Self {
-                self.exp()
-            }
-
-            fn floor(self) -> Self {
-                self.floor()
-            }
-
-            fn ceil(self) -> Self {
-                self.ceil()
-            }
-
-            fn round(self) -> Self {
-                self.round()
-            }
-
-            fn trunc(self) -> Self {
-                self.trunc()
-            }
-
-            fn frac(self) -> Self {
-                self.fract()
-            }
-
-            fn abs(self) -> Self {
-                self.abs()
-            }
-
-            fn sign(self) -> Self {
-                match self.partial_cmp(&0.0) {
-                    Some(cmp) => match cmp {
-                        std::cmp::Ordering::Less => -1.0,
-                        std::cmp::Ordering::Equal => 0.0,
-                        std::cmp::Ordering::Greater => 1.0,
-                    },
-                    None => self,
-                }
-            }
-
-            fn sqrt(self) -> Self {
-                self.sqrt()
-            }
-
-            fn cbrt(self) -> Self {
-                self.cbrt()
-            }
-
-            fn max(values: &[Self]) -> Self {
-                values.iter().copied().fold(Self::MIN, Self::max)
-            }
-
-            fn min(values: &[Self]) -> Self {
-                values.iter().copied().fold(Self::MAX, Self::min)
-            }
-
-            fn factorial(self) -> Self {
-                let mut result = 1.0;
-                for v in 2..=(self as u32) {
-                    result *= v as $ft;
-                }
-                result
-            }
-        }
-    };
-}
-
-#[cfg(not(feature = "num-traits"))]
-impl_float!(f64);
-#[cfg(not(feature = "num-traits"))]
-impl_float!(f32);
-
-#[cfg(feature = "num-traits")]
-impl<T> MathEvalNumber for T
-where
-    T: num_traits::Float + From<i16> + FromStr + Debug + 'static + num_traits::FloatConst,
-{
-    fn modulo(self, rhs: Self) -> Self {
-        let r = self % rhs;
-        if r.is_sign_negative() {
-            r.abs()
-        } else {
-            r
-        }
-    }
-
-    fn pow(self, rhs: Self) -> Self {
-        self.powf(rhs)
+    fn pow(value: Self, rhs: Self) -> Self {
+        value.powf(rhs)
     }
 
     fn parse_constant(input: &str) -> Option<Self> {
@@ -344,104 +218,131 @@ where
         }
     }
 
-    fn sin(self) -> Self {
-        self.sin()
+    fn modulo(value: Self, rhs: Self) -> Self {
+        value.rem_euclid(rhs)
     }
 
-    fn cos(self) -> Self {
-        self.cos()
+    fn sin(value: Self) -> Self {
+        value.sin()
     }
 
-    fn tan(self) -> Self {
-        self.tan()
+    fn cos(value: Self) -> Self {
+        value.cos()
     }
 
-    fn cot(self) -> Self {
-        let (sin, cos) = self.sin_cos();
-        sin / cos
+    fn tan(value: Self) -> Self {
+        value.tan()
     }
 
-    fn asin(self) -> Self {
-        self.asin()
+    fn cot(value: Self) -> Self {
+        let (sin, cos) = value.sin_cos();
+        cos / sin
     }
 
-    fn acos(self) -> Self {
-        self.acos()
+    fn asin(value: Self) -> Self {
+        value.asin()
     }
 
-    fn atan(self) -> Self {
-        self.atan()
+    fn acos(value: Self) -> Self {
+        value.acos()
     }
 
-    fn acot(self) -> Self {
-        (-self).atan() + Self::FRAC_PI_2()
+    fn atan(value: Self) -> Self {
+        value.atan()
     }
 
-    fn log(self, base: Self) -> Self {
-        self.log(base)
+    fn acot(value: Self) -> Self {
+        (-value).atan() + std::f64::consts::FRAC_PI_2
     }
 
-    fn log2(self) -> Self {
-        self.log2()
+    fn log(value: Self, base: Self) -> Self {
+        value.log(base)
     }
 
-    fn log10(self) -> Self {
-        self.log10()
+    fn log2(value: Self) -> Self {
+        value.log2()
     }
 
-    fn ln(self) -> Self {
-        self.ln()
+    fn log10(value: Self) -> Self {
+        value.log2()
     }
 
-    fn exp(self) -> Self {
-        self.exp()
+    fn ln(value: Self) -> Self {
+        value.ln()
     }
 
-    fn floor(self) -> Self {
-        self.floor()
+    fn exp(value: Self) -> Self {
+        value.exp()
     }
 
-    fn ceil(self) -> Self {
-        self.ceil()
+    fn floor(value: Self) -> Self {
+        value.floor()
     }
 
-    fn round(self) -> Self {
-        self.round()
+    fn ceil(value: Self) -> Self {
+        value.ceil()
     }
 
-    fn trunc(self) -> Self {
-        self.trunc()
+    fn round(value: Self) -> Self {
+        value.round()
     }
 
-    fn frac(self) -> Self {
-        self.fract()
+    fn trunc(value: Self) -> Self {
+        value.trunc()
     }
 
-    fn abs(self) -> Self {
-        self.abs()
+    fn frac(value: Self) -> Self {
+        value.fract()
     }
 
-    fn sign(self) -> Self {
-        self.signum()
+    fn abs(value: Self) -> Self {
+        value.abs()
     }
 
-    fn sqrt(self) -> Self {
-        self.sqrt()
+    fn sign(value: Self) -> Self {
+        match value.partial_cmp(&0.0) {
+            Some(cmp) => match cmp {
+                std::cmp::Ordering::Less => -1.0,
+                std::cmp::Ordering::Equal => 0.0,
+                std::cmp::Ordering::Greater => 1.0,
+            },
+            None => value,
+        }
     }
 
-    fn cbrt(self) -> Self {
-        self.cbrt()
+    fn sqrt(value: Self) -> Self {
+        value.sqrt()
     }
 
-    fn max(values: &[Self]) -> Self {
-        values.iter().copied().reduce(Self::max).unwrap()
+    fn cbrt(value: Self) -> Self {
+        value.cbrt()
     }
 
-    fn min(values: &[Self]) -> Self {
-        values.iter().copied().reduce(Self::min).unwrap()
+    fn max(value: &[Self]) -> Self {
+        value.iter().copied().fold(f64::MIN, f64::max)
     }
 
-    fn factorial(self) -> Self {
-        todo!()
+    fn min(value: &[Self]) -> Self {
+        value.iter().copied().fold(f64::MAX, f64::min)
+    }
+
+    fn factorial(value: Self) -> Self {
+        let mut result = 1.0;
+        for v in 2..=(value as u32) {
+            result *= v as f64;
+        }
+        result
+    }
+
+    fn asarg(&self) -> Self::AsArg<'_> {
+        *self
+    }
+}
+
+impl Reborrow for f64 {
+    type This<'a> = f64;
+
+    fn reborrow(&self) -> Self::This<'_> {
+        *self
     }
 }

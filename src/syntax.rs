@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, MathAssembly};
@@ -23,9 +24,9 @@ impl UnOperation {
         }
     }
 
-    pub fn eval<N: MathEvalNumber>(self, value: N) -> N {
+    pub fn eval<N: MathEvalNumber>(self, value: N::AsArg<'_>) -> N {
         match self {
-            UnOperation::Fac => value.factorial(),
+            UnOperation::Fac => N::factorial(value),
             UnOperation::Neg => -value,
         }
     }
@@ -75,14 +76,14 @@ impl BiOperation {
             _ => None,
         }
     }
-    pub fn eval<N: MathEvalNumber>(self, lhs: N, rhs: N) -> N {
+    pub fn eval<N: MathEvalNumber>(self, lhs: N::AsArg<'_>, rhs: N::AsArg<'_>) -> N {
         match self {
             BiOperation::Add => lhs + rhs,
             BiOperation::Sub => lhs - rhs,
             BiOperation::Mul => lhs * rhs,
             BiOperation::Div => lhs / rhs,
-            BiOperation::Pow => lhs.pow(rhs),
-            BiOperation::Mod => lhs.modulo(rhs),
+            BiOperation::Pow => N::pow(lhs, rhs),
+            BiOperation::Mod => N::modulo(lhs, rhs),
         }
     }
     pub fn as_char(self) -> char {
@@ -103,13 +104,20 @@ impl Display for BiOperation {
     }
 }
 
-// 72 bytes in size
+pub trait VariableIdentifier: Clone + Debug + Debug + Hash + Eq + 'static {}
+
+impl<T> VariableIdentifier for T where T: Clone + Debug + Hash + Eq + 'static {}
+
+pub trait FunctionIdentifier: Clone + Debug + 'static {}
+
+impl<T> FunctionIdentifier for T where T: Clone + Debug + 'static {}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxNode<N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone,
-    F: Clone,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
 {
     Number(N),
     Variable(V),
@@ -211,13 +219,15 @@ impl SyntaxError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyntaxTree<N: MathEvalNumber, V: Clone, F: Clone>(pub Tree<SyntaxNode<N, V, F>>);
+pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+    pub Tree<SyntaxNode<N, V, F>>,
+);
 
 impl<V, N, F> SyntaxTree<N, V, F>
 where
     N: MathEvalNumber,
-    V: Clone,
-    F: Clone,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
 {
     pub fn new(
         token_tree: &TokenTree<'_>,
@@ -279,10 +289,7 @@ where
                                     Err(SyntaxErrorKind::TooManyArguments)
                                 } else {
                                     call_stack.extend(
-                                        current_node
-                                            .children(arena)
-                                            .enumerate()
-                                            .map(|(_, id)| (id, None, None)),
+                                        current_node.children(arena).map(|id| (id, None, None)),
                                     );
                                     Ok(Some(f))
                                 }
@@ -372,8 +379,14 @@ where
     pub fn to_asm<'a>(
         &self,
         function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
+        variable_order: &[V],
     ) -> MathAssembly<'a, N, V, F> {
-        MathAssembly::new(&self.0.arena, self.0.root, function_to_pointer)
+        MathAssembly::new(
+            &self.0.arena,
+            self.0.root,
+            function_to_pointer,
+            variable_order,
+        )
     }
 
     pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>) {
@@ -388,8 +401,8 @@ where
         }
         for node in examin {
             if node.children(&self.0.arena).all(|c| self.is_number(c)) {
-                let answer = MathAssembly::new(&self.0.arena, node, &function_to_pointer)
-                    .eval(|_| unreachable!());
+                let answer =
+                    MathAssembly::new(&self.0.arena, node, &function_to_pointer, &[]).eval(&[]);
                 *self.0.arena[node].get_mut() = SyntaxNode::Number(answer);
                 while let Some(c) = self.0.arena[node].first_child() {
                     c.remove(&mut self.0.arena);
@@ -450,7 +463,9 @@ where
                                 if upper_side == 0 { pos } else { *upper_opr },
                             );
                             match self.0.arena[lowest].get() {
-                                SyntaxNode::Number(value) => lhs = opr.eval(lhs, *value),
+                                SyntaxNode::Number(value) => {
+                                    lhs = opr.eval(lhs.asarg(), value.asarg())
+                                }
                                 _ => {
                                     symbols[symbols[0].is_some() as usize] =
                                         Some((lowest, opr == neg))
@@ -459,7 +474,8 @@ where
                         }
                     }
                     SyntaxNode::Number(value) => {
-                        lhs = (mul_opr(*upper_opr, upper_side, pos)).eval(lhs, *value)
+                        lhs =
+                            (mul_opr(*upper_opr, upper_side, pos)).eval(lhs.asarg(), value.asarg())
                     }
                     _ => panic!(),
                 }
@@ -542,15 +558,15 @@ where
 impl<V, N, F> Display for SyntaxTree<N, V, F>
 where
     N: MathEvalNumber + Display,
-    V: Clone + Display,
-    F: Clone + Display,
+    V: VariableIdentifier + Display,
+    F: FunctionIdentifier + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for edge in self.0.root.traverse(&self.0.arena) {
             match edge {
                 NodeEdge::Start(node) => match self.0.arena[node].get() {
                     SyntaxNode::Number(num) => std::fmt::Display::fmt(num, f)?,
-                    SyntaxNode::Variable(var) => var.fmt(f)?,
+                    SyntaxNode::Variable(var) => Display::fmt(&var, f)?,
                     SyntaxNode::BiOperation(_) => (),
                     SyntaxNode::UnOperation(opr) => std::fmt::Display::fmt(opr, f)?,
                     SyntaxNode::NativeFunction(nf) => {
@@ -558,7 +574,7 @@ where
                         f.write_str("(")?
                     }
                     SyntaxNode::CustomFunction(cf) => {
-                        cf.fmt(f)?;
+                        Display::fmt(&cf, f)?;
                         f.write_str("(")?
                     }
                 },
@@ -601,7 +617,7 @@ mod test {
         };
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     enum TestVar {
         X,
         Y,

@@ -94,6 +94,7 @@ fn test_operator() {
             |_| None::<()>,
             |_| CFPointer::Single(&|_| 0.0),
             true,
+            &[],
         )
         .unwrap();
         let result = match opr {
@@ -103,8 +104,8 @@ fn test_operator() {
             '/' => x / y,
             _ => unreachable!(),
         };
-        let eval_result = expr.eval(|_| 0.0);
-        if expr.eval(|_| 0.0) != result {
+        let eval_result = expr.eval(&[]);
+        if eval_result != result {
             panic!("the result of \"{expr_str}\" didn't match the calculated result\n{eval_result} != {result}")
         }
     }
@@ -141,13 +142,14 @@ fn test_all_valid() {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 enum MyVars {
     X,
     Y,
     A,
 }
-#[derive(Clone)]
+
+#[derive(Clone, Debug)]
 enum MyFuncs {
     Mean,
     Dist,
@@ -194,6 +196,7 @@ fn test_fuzz_symbols() {
                     MyFuncs::Dist => CFPointer::Dual(&|x, y| (x * x + y * y).sqrt()),
                 },
                 true,
+                &[MyVars::X, MyVars::Y, MyVars::A],
             )
         }) {
             println!("{expr}");
@@ -230,6 +233,7 @@ fn test_fuzz_all() {
                     MyFuncs::Dist => CFPointer::Dual(&|x, y| (x * x + y * y).sqrt()),
                 },
                 true,
+                &[MyVars::X, MyVars::Y, MyVars::A],
             )
         }) {
             println!("{noise:?}");
