@@ -1,7 +1,5 @@
 use std::{
-    fmt::{Debug, Display},
-    ops::{Add, Div, Mul, Neg, Sub},
-    str::FromStr,
+    f64::consts::{E, PI, TAU}, fmt::{Debug, Display}, ops::{Add, Div, Mul, Neg, Sub}, str::FromStr
 };
 
 #[derive(Debug, Clone, Copy, Hash)]
