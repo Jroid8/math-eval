@@ -54,6 +54,48 @@ pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionId
     CFFlexible(&'a dyn Fn(&[N]) -> N, u8, F),
 }
 
+impl<N, V, F> PartialEq for Instruction<'_, N, V, F>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier + Eq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Source(l0), Self::Source(r0)) => l0 == r0,
+            (Self::BiOperation(l0, l1, l2), Self::BiOperation(r0, r1, r2)) => {
+                l0 == r0 && l1 == r1 && l2 == r2
+            }
+            (Self::UnOperation(l0, l1), Self::UnOperation(r0, r1)) => l0 == r0 && l1 == r1,
+            (Self::NFSingle(l0, l1, l2), Self::NFSingle(r0, r1, r2)) => {
+                l0 == r0 && l1 == r1 && l2 == r2
+            }
+            (Self::NFDual(l0, l1, l2, l3), Self::NFDual(r0, r1, r2, r3)) => {
+                l0 == r0 && l1 == r1 && l2 == r2 && l3 == r3
+            }
+            (Self::NFFlexible(l0, l1, l2), Self::NFFlexible(r0, r1, r2)) => {
+                l0 == r0 && l1 == r1 && l2 == r2
+            }
+            (Self::CFSingle(_, l1, l2), Self::CFSingle(_, r1, r2)) => {
+                l1 == r1 && l2 == r2
+            }
+            (Self::CFDual(_, l1, l2, l3), Self::CFDual(_, r1, r2, r3)) => {
+                l1 == r1 && l2 == r2 && l3 == r3
+            }
+            (Self::CFTriple(_, l1, l2, l3, l4), Self::CFTriple(_, r1, r2, r3, r4)) => {
+                l1 == r1 && l2 == r2 && l3 == r3 && l4 == r4
+            }
+            (Self::CFQuad(_, l1, l2, l3, l4, l5), Self::CFQuad(_, r1, r2, r3, r4, r5)) => {
+                l1 == r1 && l2 == r2 && l3 == r3 && l4 == r4 && l5 == r5
+            }
+            (Self::CFFlexible(_, l1, l2), Self::CFFlexible(_, r1, r2)) => {
+                l1 == r1 && l2 == r2
+            }
+            _ => false,
+        }
+    }
+}
+
 impl<N, V, F> Debug for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
