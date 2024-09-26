@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display, ops::RangeInclusive};
 
 use asm::{CFPointer, MathAssembly};
 use number::MathEvalNumber;
-use syntax::{SyntaxTree, VariableIdentifier};
+use syntax::{FunctionIdentifier, SyntaxTree, VariableIdentifier};
 use tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
 
 pub mod asm;

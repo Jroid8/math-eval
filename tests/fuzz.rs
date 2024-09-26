@@ -149,14 +149,14 @@ fn test_all_valid() {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 enum MyVars {
     X,
     Y,
     A,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum MyFuncs {
     Mean,
     Dist,

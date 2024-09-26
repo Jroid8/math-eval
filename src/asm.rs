@@ -57,8 +57,8 @@ pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionId
 impl<N, V, F> Debug for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier + Debug,
-    F: FunctionIdentifier + Debug,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -163,8 +163,8 @@ pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: Functio
 impl<'a, N, V, F> Debug for MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier + Debug,
-    F: FunctionIdentifier + Debug,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "MathAssembly[")?;

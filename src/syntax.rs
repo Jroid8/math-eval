@@ -104,13 +104,13 @@ impl Display for BiOperation {
     }
 }
 
-pub trait VariableIdentifier: Clone + Hash + Eq + 'static {}
+pub trait VariableIdentifier: Clone + Debug + Debug + Hash + Eq + 'static {}
 
-impl<T> VariableIdentifier for T where T: Clone + Hash + Eq + 'static {}
+impl<T> VariableIdentifier for T where T: Clone + Debug + Hash + Eq + 'static {}
 
-pub trait FunctionIdentifier: Clone + 'static {}
+pub trait FunctionIdentifier: Clone + Debug + 'static {}
 
-impl<T> FunctionIdentifier for T where T: Clone + 'static {}
+impl<T> FunctionIdentifier for T where T: Clone + Debug + 'static {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxNode<N, V, F>
@@ -563,7 +563,7 @@ where
             match edge {
                 NodeEdge::Start(node) => match self.0.arena[node].get() {
                     SyntaxNode::Number(num) => std::fmt::Display::fmt(num, f)?,
-                    SyntaxNode::Variable(var) => var.fmt(f)?,
+                    SyntaxNode::Variable(var) => Display::fmt(&var, f)?,
                     SyntaxNode::BiOperation(_) => (),
                     SyntaxNode::UnOperation(opr) => std::fmt::Display::fmt(opr, f)?,
                     SyntaxNode::NativeFunction(nf) => {
@@ -571,7 +571,7 @@ where
                         f.write_str("(")?
                     }
                     SyntaxNode::CustomFunction(cf) => {
-                        cf.fmt(f)?;
+                        Display::fmt(&cf, f)?;
                         f.write_str("(")?
                     }
                 },
