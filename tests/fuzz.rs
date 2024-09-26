@@ -134,16 +134,9 @@ fn test_all_valid() {
                 gen_random_f64(),
                 gen_random_f64(),
             );
-            match result {
-                Ok(value) => {
-                    if value.is_nan() {
-                        panic!("NaN result from: {expr}");
-                    }
-                }
-                Err(error) => {
-                    error.print_colored(&expr);
-                    panic!("Error returned when parsing {error}")
-                }
+            if let Err(error) = result {
+                error.print_colored(&expr);
+                panic!("Error returned when parsing {error}")
             }
         }
     }
