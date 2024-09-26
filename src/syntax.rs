@@ -108,12 +108,16 @@ pub trait VariableIdentifier: Clone + Hash + Eq + 'static {}
 
 impl<T> VariableIdentifier for T where T: Clone + Hash + Eq + 'static {}
 
+pub trait FunctionIdentifier: Clone + 'static {}
+
+impl<T> FunctionIdentifier for T where T: Clone + 'static {}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxNode<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
-    F: Clone + 'static,
+    F: FunctionIdentifier,
 {
     Number(N),
     Variable(V),
@@ -215,7 +219,7 @@ impl SyntaxError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: Clone + 'static>(
+pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
     pub Tree<SyntaxNode<N, V, F>>,
 );
 
@@ -223,7 +227,7 @@ impl<V, N, F> SyntaxTree<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
-    F: Clone + 'static,
+    F: FunctionIdentifier,
 {
     pub fn new(
         token_tree: &TokenTree<'_>,
@@ -552,7 +556,7 @@ impl<V, N, F> Display for SyntaxTree<N, V, F>
 where
     N: MathEvalNumber + Display,
     V: VariableIdentifier + Display,
-    F: Clone + 'static + Display,
+    F: FunctionIdentifier + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for edge in self.0.root.traverse(&self.0.arena) {

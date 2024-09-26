@@ -4,7 +4,7 @@ use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 use crate::{
     number::{MathEvalNumber, NativeFunction, Reborrow},
-    syntax::{BiOperation, SyntaxNode, UnOperation, VariableIdentifier},
+    syntax::{BiOperation, FunctionIdentifier, SyntaxNode, UnOperation, VariableIdentifier},
 };
 
 type Stack<N> = SmallVec<[N; 16]>;
@@ -17,7 +17,7 @@ pub enum Input<N: MathEvalNumber, V: VariableIdentifier> {
 }
 
 #[derive(Copy)]
-pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: Clone + 'static> {
+pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
     Source(Input<N, V>),
     BiOperation(BiOperation, Input<N, V>, Input<N, V>),
     UnOperation(UnOperation, Input<N, V>),
@@ -58,7 +58,7 @@ impl<N, V, F> Debug for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier + Debug,
-    F: Clone + 'static + Debug,
+    F: FunctionIdentifier + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -116,7 +116,7 @@ impl<N, V, F> Clone for Instruction<'_, N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
-    F: Clone + 'static,
+    F: FunctionIdentifier,
 {
     fn clone(&self) -> Self {
         match self {
@@ -155,7 +155,7 @@ where
 }
 
 #[derive(Clone, Default)]
-pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: Clone + 'static> {
+pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
     instructions: Vec<Instruction<'a, N, V, F>>,
     stack: Stack<N>,
 }
@@ -164,7 +164,7 @@ impl<'a, N, V, F> Debug for MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier + Debug,
-    F: Clone + 'static + Debug,
+    F: FunctionIdentifier + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "MathAssembly[")?;
@@ -192,7 +192,7 @@ impl<'a, N, V, F> MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
-    F: Clone + 'static,
+    F: FunctionIdentifier,
 {
     // FIX: panics when variable_order is not exhaustive
     pub fn new(

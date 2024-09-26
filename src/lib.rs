@@ -85,7 +85,7 @@ impl Display for ParsingErrorKind {
     }
 }
 
-pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: Clone + 'static>(
+pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
