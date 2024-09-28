@@ -421,7 +421,7 @@ where
             variables: ManyVariables(self.variables.0.into_iter().chain([name.into()]).collect()),
         }
     }
-    fn_parse!(3);
+    fn_parse!(4);
     fn_build_as_parser!(4);
     fn_build_as_function!(4);
 }
