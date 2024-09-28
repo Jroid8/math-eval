@@ -471,6 +471,57 @@ where
     }
 }
 
+impl<'a, N, V, F> MathAssembly<'a, N, V, F>
+where
+    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    pub fn eval_copy(&mut self, variables: &[N]) -> N {
+        self.stack.clear();
+        for instr in &self.instructions {
+            macro_rules! get {
+                ($inp: expr) => {
+                    match $inp {
+                        Input::Literal(num) => *num,
+                        Input::Variable(var, _) => variables[*var],
+                        Input::Memory => self.stack.pop().unwrap(),
+                    }
+                };
+            }
+            let result = match &instr {
+                Instruction::Source(input) => get!(input),
+                Instruction::BiOperation(opr, lhs, rhs) => opr.eval(get!(lhs), get!(rhs)),
+                Instruction::UnOperation(opr, val) => opr.eval(get!(val)),
+                Instruction::NFSingle(func, input, _) => func(get!(input)),
+                Instruction::NFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
+                Instruction::NFFlexible(func, arg_count, _) => {
+                    let argnum = self.stack.len() - *arg_count as usize;
+                    let res = func(&self.stack[argnum..]);
+                    self.stack.truncate(argnum);
+                    res
+                }
+                Instruction::CFSingle(func, inp, _) => func(get!(inp)),
+                Instruction::CFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
+                Instruction::CFTriple(func, inp1, inp2, inp3, _) => {
+                    func(get!(inp1), get!(inp2), get!(inp3))
+                }
+                Instruction::CFQuad(func, inp1, inp2, inp3, inp4, _) => {
+                    func(get!(inp1), get!(inp2), get!(inp3), get!(inp4))
+                }
+                Instruction::CFFlexible(func, arg_count, _) => {
+                    let argnum = self.stack.len() - *arg_count as usize;
+                    let res = func(&self.stack[argnum..]);
+                    self.stack.truncate(argnum);
+                    res
+                }
+            };
+            self.stack.push(result);
+        }
+        self.stack.pop().unwrap()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::f64::consts::PI;
