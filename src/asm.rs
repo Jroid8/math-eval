@@ -406,58 +406,27 @@ where
                     }
                 };
             }
-            macro_rules! handle {
-                ($self: ident $(.$func: ident)?, $inp: expr) => {{
-                    let arg = get!($inp);
-                    $self $(.$func)?(arg)
-                }};
-
-                ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr) => {{
-                    let arg1 = get!($inp1);
-                    let arg2 = get!($inp2);
-                    $self $(.$func)?(arg1, arg2)
-                }};
-
-                ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr, $inp3: expr) => {{
-                    let arg1 = get!($inp1);
-                    let arg2 = get!($inp2);
-                    let arg3 = get!($inp3);
-                    $self $(.$func)?(arg1, arg2, arg3)
-                }};
-
-                ($self: ident $(.$func: ident)?, $inp1: expr, $inp2: expr, $inp3: expr, $inp4: expr) => {{
-                    let arg1 = get!($inp1);
-                    let arg2 = get!($inp2);
-                    let arg3 = get!($inp3);
-                    let arg4 = get!($inp4);
-                    $self $(.$func)?(arg1, arg2, arg3, arg4)
-                }};
-            }
             let result = match &instr {
                 Instruction::Source(input) => match input {
                     Input::Literal(num) => *num,
                     Input::Variable(var, _) => variables[*var].to_owned(),
                     Input::Memory => self.stack.pop().unwrap(),
                 },
-                Instruction::BiOperation(opr, lhs, rhs) => {
-                    handle!(opr.eval, lhs, rhs)
-                }
-                Instruction::UnOperation(opr, val) => handle!(opr.eval, val),
-                Instruction::NFSingle(func, input, _) => {
-                    handle!(func, input)
-                }
-                Instruction::NFDual(func, inp1, inp2, _) => handle!(func, inp1, inp2),
+                Instruction::BiOperation(opr, lhs, rhs) => opr.eval(get!(lhs), get!(rhs)),
+                Instruction::UnOperation(opr, val) => opr.eval(get!(val)),
+                Instruction::NFSingle(func, input, _) => func(get!(input)),
+                Instruction::NFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
                 Instruction::NFFlexible(func, arg_count, _) => {
                     argnum -= *arg_count as usize;
                     func(&self.stack[argnum..])
                 }
-                Instruction::CFSingle(func, inp, _) => handle!(func, inp),
-                Instruction::CFDual(func, inp1, inp2, _) => handle!(func, inp1, inp2),
+                Instruction::CFSingle(func, inp, _) => func(get!(inp)),
+                Instruction::CFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
                 Instruction::CFTriple(func, inp1, inp2, inp3, _) => {
-                    handle!(func, inp1, inp2, inp3)
+                    func(get!(inp1), get!(inp2), get!(inp3))
                 }
                 Instruction::CFQuad(func, inp1, inp2, inp3, inp4, _) => {
-                    handle!(func, inp1, inp2, inp3, inp4)
+                    func(get!(inp1), get!(inp2), get!(inp3), get!(inp4))
                 }
                 Instruction::CFFlexible(func, arg_count, _) => {
                     argnum -= *arg_count as usize;
