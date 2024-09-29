@@ -148,8 +148,14 @@ pub struct FourVariables([String; 4]);
 #[derive(Clone, Debug)]
 pub struct ManyVariables(Vec<String>);
 
+#[derive(Clone, Debug)]
+pub struct EvalRef;
+
+#[derive(Clone, Debug)]
+pub struct EvalCopy;
+
 #[derive(Clone)]
-pub struct EvalBuilder<'a, N, V>
+pub struct EvalBuilder<'a, N, V, E>
 where
     N: MathEvalNumber,
 {
@@ -157,9 +163,10 @@ where
     function_identifier: HashMap<String, (usize, u8, Option<u8>)>,
     functions: Vec<CFPointer<'a, N>>,
     variables: V,
+    evalmethod: E,
 }
 
-impl<'a, N> Default for EvalBuilder<'a, N, NoVariable>
+impl<'a, N> Default for EvalBuilder<'a, N, NoVariable, EvalCopy>
 where
     N: MathEvalNumber,
 {
@@ -169,11 +176,12 @@ where
             function_identifier: HashMap::default(),
             functions: Vec::default(),
             variables: NoVariable,
+            evalmethod: EvalCopy,
         }
     }
 }
 
-impl<'a, N, V> EvalBuilder<'a, N, V>
+impl<'a, N, V, E> EvalBuilder<'a, N, V, E>
 where
     N: MathEvalNumber,
 {
@@ -241,19 +249,33 @@ where
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, NoVariable>
+impl<'a, N> EvalBuilder<'a, N, NoVariable, EvalCopy>
 where
     N: MathEvalNumber,
 {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, OneVariable> {
+    pub fn use_ref(self) -> EvalBuilder<'a, N, NoVariable, EvalRef> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
+            variables: self.variables,
+            evalmethod: EvalRef,
+        }
+    }
+}
+
+impl<'a, N, E> EvalBuilder<'a, N, NoVariable, E>
+where
+    N: MathEvalNumber,
+    E: 'static,
+{
+    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, OneVariable, E> {
+        EvalBuilder {
             variables: OneVariable(name.into()),
+            constants: self.constants,
+            function_identifier: self.function_identifier,
+            functions: self.functions,
+            evalmethod: self.evalmethod,
         }
     }
     fn parse(
@@ -274,10 +296,28 @@ where
     pub fn build_as_parser(self) -> impl Fn(&str) -> Result<N, ParsingError> + 'a {
         move |input: &str| self.parse(input, false).map(|mut asm| asm.eval(&[]))
     }
+}
 
+impl<'a, N> EvalBuilder<'a, N, NoVariable, EvalRef>
+where
+    N: MathEvalNumber,
+{
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
         let mut expr = self.parse(input, true)?;
         Ok(move || expr.eval(&[]))
+    }
+}
+
+impl<'a, N> EvalBuilder<'a, N, NoVariable, EvalCopy>
+where
+    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
+{
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
+        let mut expr = self.parse(input, true)?;
+        Ok(move || expr.eval_copy(&[]))
     }
 }
 
@@ -295,14 +335,14 @@ macro_rules! fn_build_as_parser {
 }
 
 macro_rules! fn_build_as_function {
-    ($n: expr) => {
+    ($n: expr, $f: ident) => {
         seq!(I in 0..$n {
             pub fn build_as_function<'b>(
                 self,
                 input: &str,
             ) -> Result<impl FnMut(#(N::AsArg<'b>,)*) -> N + 'a, ParsingError> {
                 let mut expr = self.parse(input, true)?;
-                Ok(move |#(v~I,)*| expr.eval(&[#(v~I,)*]))
+                Ok(move |#(v~I,)*| expr.$f(&[#(v~I,)*]))
             }
         });
     };
@@ -311,13 +351,14 @@ macro_rules! fn_build_as_function {
 macro_rules! fn_add_variable {
     ($n: expr, $next: ident) => {
         seq!(I in 0..$n {
-            pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, $next> {
+            pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, $next, E> {
                 let mut iter = self.variables.0.into_iter();
                 EvalBuilder {
                     constants: self.constants,
                     function_identifier: self.function_identifier,
                     functions: self.functions,
                     variables: $next([#(iter.next().unwrap(),)* name.into()]),
+                    evalmethod: self.evalmethod
                 }
             }
         });
@@ -352,16 +393,18 @@ macro_rules! fn_parse {
     };
 }
 
-impl<'a, N> EvalBuilder<'a, N, OneVariable>
+impl<'a, N, E> EvalBuilder<'a, N, OneVariable, E>
 where
     N: MathEvalNumber,
+    E: 'static,
 {
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, TwoVariables> {
+    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, TwoVariables, E> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
             variables: TwoVariables([self.variables.0, name.into()]),
+            evalmethod: self.evalmethod,
         }
     }
     fn parse(
@@ -386,49 +429,106 @@ where
         )
     }
     fn_build_as_parser!(1);
-    fn_build_as_function!(1);
 }
 
-impl<'a, N> EvalBuilder<'a, N, TwoVariables>
+impl<'a, N> EvalBuilder<'a, N, OneVariable, EvalRef>
 where
     N: MathEvalNumber,
+{
+    fn_build_as_function!(1, eval);
+}
+
+impl<'a, N> EvalBuilder<'a, N, OneVariable, EvalCopy>
+where
+    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
+{
+    fn_build_as_function!(1, eval_copy);
+}
+
+impl<'a, N, E> EvalBuilder<'a, N, TwoVariables, E>
+where
+    N: MathEvalNumber,
+    E: 'static,
 {
     fn_add_variable!(2, ThreeVariables);
     fn_parse!(2);
     fn_build_as_parser!(2);
-    fn_build_as_function!(2);
 }
 
-impl<'a, N> EvalBuilder<'a, N, ThreeVariables>
+impl<'a, N> EvalBuilder<'a, N, TwoVariables, EvalCopy>
+where
+    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
+{
+    fn_build_as_function!(2, eval_copy);
+}
+
+impl<'a, N> EvalBuilder<'a, N, TwoVariables, EvalRef>
 where
     N: MathEvalNumber,
+{
+    fn_build_as_function!(2, eval);
+}
+
+impl<'a, N, E> EvalBuilder<'a, N, ThreeVariables, E>
+where
+    N: MathEvalNumber,
+    E: 'static,
 {
     fn_add_variable!(3, FourVariables);
     fn_parse!(3);
     fn_build_as_parser!(3);
-    fn_build_as_function!(3);
 }
 
-impl<'a, N> EvalBuilder<'a, N, FourVariables>
+impl<'a, N> EvalBuilder<'a, N, ThreeVariables, EvalRef>
 where
     N: MathEvalNumber,
 {
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, ManyVariables> {
+    fn_build_as_function!(3, eval);
+}
+
+impl<'a, N> EvalBuilder<'a, N, ThreeVariables, EvalCopy>
+where
+    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
+{
+    fn_build_as_function!(3, eval_copy);
+}
+
+impl<'a, N, E> EvalBuilder<'a, N, FourVariables, E>
+where
+    N: MathEvalNumber,
+    E: 'static,
+{
+    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, ManyVariables, E> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
             variables: ManyVariables(self.variables.0.into_iter().chain([name.into()]).collect()),
+            evalmethod: self.evalmethod,
         }
     }
     fn_parse!(4);
     fn_build_as_parser!(4);
-    fn_build_as_function!(4);
 }
 
-impl<'a, N> EvalBuilder<'a, N, ManyVariables>
+impl<'a, N> EvalBuilder<'a, N, FourVariables, EvalRef>
 where
     N: MathEvalNumber,
+{
+    fn_build_as_function!(4, eval);
+}
+
+impl<'a, N> EvalBuilder<'a, N, FourVariables, EvalCopy>
+where
+    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
+{
+    fn_build_as_function!(4, eval_copy);
+}
+
+impl<'a, N, E> EvalBuilder<'a, N, ManyVariables, E>
+where
+    N: MathEvalNumber,
+    E: 'static,
 {
     fn parse(
         &self,
@@ -450,12 +550,31 @@ where
     ) -> impl Fn(&str, &[N::AsArg<'b>]) -> Result<N, ParsingError> + 'a {
         move |input, vars: &[N::AsArg<'b>]| self.parse(input, false).map(|mut asm| asm.eval(vars))
     }
+}
+
+impl<'a, N> EvalBuilder<'a, N, ManyVariables, EvalRef>
+where
+    N: MathEvalNumber,
+{
     pub fn build_as_function<'b>(
         self,
         input: &str,
     ) -> Result<impl FnMut(&[N::AsArg<'b>]) -> N + 'a, ParsingError> {
         let mut expr = self.parse(input, true)?;
         Ok(move |vars: &[N::AsArg<'b>]| expr.eval(vars))
+    }
+}
+
+impl<'a, N> EvalBuilder<'a, N, ManyVariables, EvalCopy>
+where
+    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
+{
+    pub fn build_as_function<'b>(
+        self,
+        input: &str,
+    ) -> Result<impl FnMut(&[N::AsArg<'b>]) -> N + 'a, ParsingError> {
+        let mut expr = self.parse(input, true)?;
+        Ok(move |vars: &[N::AsArg<'b>]| expr.eval_copy(vars))
     }
 }
 
