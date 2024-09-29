@@ -247,7 +247,8 @@ where
                 let end = end.unwrap_or(children_count - 1);
                 let children = || {
                     token_node
-                        .reverse_children(arena)
+                        .children(arena)
+                        .rev()
                         .enumerate()
                         .map(|(i, n)| (children_count - 1 - i, n))
                         .skip(children_count - 1 - end)
