@@ -249,11 +249,11 @@ where
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, NoVariable, EvalCopy>
+impl<'a, N, V> EvalBuilder<'a, N, V, EvalCopy>
 where
     N: MathEvalNumber,
 {
-    pub fn use_ref(self) -> EvalBuilder<'a, N, NoVariable, EvalRef> {
+    pub fn use_ref(self) -> EvalBuilder<'a, N, V, EvalRef> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
