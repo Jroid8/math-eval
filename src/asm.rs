@@ -211,7 +211,7 @@ pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: Functio
     stack: Stack<N>,
 }
 
-impl<'a, N, V, F> Debug for MathAssembly<'a, N, V, F>
+impl<N, V, F> Debug for MathAssembly<'_, N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -440,7 +440,7 @@ where
     }
 }
 
-impl<'a, N, V, F> MathAssembly<'a, N, V, F>
+impl<N, V, F> MathAssembly<'_, N, V, F>
 where
     N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
     V: VariableIdentifier,

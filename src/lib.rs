@@ -166,7 +166,7 @@ where
     evalmethod: E,
 }
 
-impl<'a, N> Default for EvalBuilder<'a, N, NoVariable, EvalCopy>
+impl<N> Default for EvalBuilder<'_, N, NoVariable, EvalCopy>
 where
     N: MathEvalNumber,
 {
