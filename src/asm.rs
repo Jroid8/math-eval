@@ -492,7 +492,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        asm::{CFPointer, Input, Instruction},
+        asm::{CFPointer, Input, Instruction, MathAssembly},
         number::{MathEvalNumber, NativeFunction},
         syntax::{BiOperation, UnOperation},
         ParsingError,
@@ -664,6 +664,175 @@ mod test {
                 Instruction::Source(Input::Literal(2.0)),
                 Instruction::CFFlexible(&mean, 2, TestFunc::Mean)
             ])
+        );
+        assert_eq!(
+            parse("sin(isqrt(x,y)/32 + atan(x/y)/4)"),
+            Ok(vec![
+                Instruction::CFDual(
+                    &isqrt,
+                    Input::Variable(0, TestVar::X),
+                    Input::Variable(1, TestVar::Y),
+                    TestFunc::ISqrt
+                ),
+                Instruction::BiOperation(BiOperation::Div, Input::Memory, Input::Literal(32.0)),
+                Instruction::BiOperation(
+                    BiOperation::Div,
+                    Input::Variable(0, TestVar::X),
+                    Input::Variable(1, TestVar::Y)
+                ),
+                Instruction::NFSingle(
+                    <f64 as MathEvalNumber>::atan,
+                    Input::Memory,
+                    NativeFunction::Atan
+                ),
+                Instruction::BiOperation(BiOperation::Div, Input::Memory, Input::Literal(4.0)),
+                Instruction::BiOperation(BiOperation::Add, Input::Memory, Input::Memory),
+                Instruction::NFSingle(
+                    <f64 as MathEvalNumber>::sin,
+                    Input::Memory,
+                    NativeFunction::Sin
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_mathasm_eval() {
+        macro_rules! assert_eval {
+            ([$($x:expr),+], $res: expr) => {
+                assert_eq!(
+                    MathAssembly::<'_, f64, TestVar, TestFunc>(vec![$($x),+])
+                        .eval(&[1.0, 8.0, 23.0], &mut super::Stack::new()),
+                    $res
+                );
+            };
+        }
+        assert_eval!([Instruction::Source(Input::Variable(0, TestVar::X))], 1.0);
+        assert_eval!(
+            [Instruction::BiOperation(
+                BiOperation::Add,
+                Input::Literal(1.0),
+                Input::Literal(1.0)
+            )],
+            2.0
+        );
+        assert_eval!(
+            [Instruction::BiOperation(
+                BiOperation::Mul,
+                Input::Variable(0, TestVar::X),
+                Input::Variable(1, TestVar::Y),
+            )],
+            8.0
+        );
+        assert_eval!(
+            [Instruction::UnOperation(
+                UnOperation::Neg,
+                Input::Variable(2, TestVar::T),
+            )],
+            -23.0
+        );
+        assert_eval!(
+            [Instruction::NFSingle(
+                <f64 as MathEvalNumber>::sqrt,
+                Input::Literal(169.0),
+                NativeFunction::Sqrt
+            )],
+            13.0
+        );
+        assert_eval!(
+            [Instruction::NFDual(
+                <f64 as MathEvalNumber>::log,
+                Input::Literal(256.0),
+                Input::Literal(2.0),
+                NativeFunction::Log
+            )],
+            8.0
+        );
+        assert_eval!(
+            [
+                Instruction::Source(Input::Literal(8.0)),
+                Instruction::Source(Input::Literal(-2.0)),
+                Instruction::Source(Input::Variable(2, TestVar::T)),
+                Instruction::NFFlexible(<f64 as MathEvalNumber>::max, 3, NativeFunction::Max)
+            ],
+            23.0
+        );
+        assert_eval!(
+            [Instruction::CFSingle(
+                &sigmoid,
+                Input::Literal(0.0),
+                TestFunc::Sigmoid
+            )],
+            0.5
+        );
+        assert_eval!(
+            [Instruction::CFDual(
+                &isqrt,
+                Input::Literal(3.0),
+                Input::Literal(4.0),
+                TestFunc::ISqrt
+            )],
+            5.0
+        );
+        assert_eval!(
+            [Instruction::CFTriple(
+                &dist3,
+                Input::Literal(6.0),
+                Input::Literal(0.0),
+                Input::Literal(8.0),
+                TestFunc::ISqrt
+            )],
+            10.0
+        );
+        assert_eval!(
+            [Instruction::CFQuad(
+                &dist2,
+                Input::Literal(2.0),
+                Input::Literal(13.0),
+                Input::Literal(10.0),
+                Input::Literal(19.0),
+                TestFunc::ISqrt
+            )],
+            10.0
+        );
+        assert_eval!(
+            [
+                Instruction::Source(Input::Variable(1, TestVar::Y)),
+                Instruction::Source(Input::Literal(8.0)),
+                Instruction::Source(Input::Literal(4.0)),
+                Instruction::Source(Input::Literal(2.0)),
+                Instruction::CFFlexible(&mean, 4, TestFunc::Mean)
+            ],
+            5.5
+        );
+        // 88/4+3=25
+        assert_eval!(
+            [
+                Instruction::BiOperation(
+                    BiOperation::Div,
+                    Input::Literal(88.0),
+                    Input::Literal(4.0)
+                ),
+                Instruction::BiOperation(BiOperation::Add, Input::Memory, Input::Literal(3.0))
+            ],
+            25.0
+        );
+        // sin(pi*x)+1
+        assert_eval!(
+            [
+                Instruction::BiOperation(
+                    BiOperation::Mul,
+                    Input::Literal(std::f64::consts::PI),
+                    Input::Variable(0, TestVar::X)
+                ),
+                Instruction::NFSingle(
+                    <f64 as MathEvalNumber>::sin,
+                    Input::Memory,
+                    NativeFunction::Sin
+                ),
+                Instruction::BiOperation(BiOperation::Add, Input::Memory, Input::Literal(1.0))
+            ],
+            1.0000000000000002
         );
     }
 }
