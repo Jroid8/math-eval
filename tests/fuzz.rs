@@ -87,7 +87,7 @@ fn test_operator() {
             x => x,
         };
         let expr_str = format!("{x}{opr}{y}");
-        let mut expr = math_eval::parse(
+        let expr = math_eval::parse(
             &expr_str,
             |_| None,
             |_| None::<((), _, _)>,
@@ -104,7 +104,7 @@ fn test_operator() {
             '/' => x / y,
             _ => unreachable!(),
         };
-        let eval_result = expr.eval(&[]);
+        let eval_result = expr.eval(&[], &mut math_eval::asm::Stack::new());
         if eval_result != result {
             panic!("the result of \"{expr_str}\" didn't match the calculated result\n{eval_result} != {result}")
         }

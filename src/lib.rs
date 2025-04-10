@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display, ops::RangeInclusive};
 
-use asm::{CFPointer, MathAssembly};
+use asm::{CFPointer, MathAssembly, Stack};
 use number::MathEvalNumber;
 use seq_macro::seq;
 use syntax::{FunctionIdentifier, SyntaxTree, VariableIdentifier};
@@ -127,7 +127,9 @@ pub fn evaluate<N: MathEvalNumber>(input: &str) -> Result<N, ParsingError> {
         false,
         &[],
     )
-    .map(|mut asm: MathAssembly<'_, N, (), ()>| asm.eval(&[]))
+    .map(|asm: MathAssembly<'_, N, (), ()>| {
+        asm.eval(&[], &mut Stack::with_capacity(asm.stack_alloc_size()))
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -294,7 +296,10 @@ where
         )
     }
     pub fn build_as_parser(self) -> impl Fn(&str) -> Result<N, ParsingError> + 'a {
-        move |input: &str| self.parse(input, false).map(|mut asm| asm.eval(&[]))
+        move |input: &str| {
+            self.parse(input, false)
+                .map(|asm| asm.eval(&[], &mut Stack::with_capacity(asm.stack_alloc_size())))
+        }
     }
 }
 
@@ -303,8 +308,9 @@ where
     N: MathEvalNumber,
 {
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input, true)?;
-        Ok(move || expr.eval(&[]))
+        let expr = self.parse(input, true)?;
+        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
+        Ok(move || expr.eval(&[], &mut stack))
     }
 }
 
@@ -316,8 +322,9 @@ where
         Self::default()
     }
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input, true)?;
-        Ok(move || expr.eval_copy(&[]))
+        let expr = self.parse(input, true)?;
+        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
+        Ok(move || expr.eval_copy(&[], &mut stack))
     }
 }
 
@@ -327,8 +334,11 @@ macro_rules! fn_build_as_parser {
             pub fn build_as_parser<'b>(
                 self,
             ) -> impl Fn(&str, #(N::AsArg<'b>,)*) -> Result<N, ParsingError> + 'a {
-                move |input, #(v~I,)*|
-                    self.parse(input, false).map(|mut asm| asm.eval(&[#(v~I,)*]))
+                move |input, #(v~I,)*| {
+                    self.parse(input, false)
+                        .map(|asm| asm.eval(&[#(v~I,)*],
+                            &mut Stack::with_capacity(asm.stack_alloc_size())))
+                }
             }
         });
     };
@@ -341,8 +351,9 @@ macro_rules! fn_build_as_function {
                 self,
                 input: &str,
             ) -> Result<impl FnMut(#(N::AsArg<'b>,)*) -> N + 'a, ParsingError> {
-                let mut expr = self.parse(input, true)?;
-                Ok(move |#(v~I,)*| expr.$f(&[#(v~I,)*]))
+                let expr = self.parse(input, true)?;
+                let mut stack = Stack::with_capacity(expr.stack_alloc_size());
+                Ok(move |#(v~I,)*| expr.$f(&[#(v~I,)*], &mut stack))
             }
         });
     };
@@ -548,7 +559,10 @@ where
     pub fn build_as_parser<'b>(
         self,
     ) -> impl Fn(&str, &[N::AsArg<'b>]) -> Result<N, ParsingError> + 'a {
-        move |input, vars: &[N::AsArg<'b>]| self.parse(input, false).map(|mut asm| asm.eval(vars))
+        move |input, vars: &[N::AsArg<'b>]| {
+            self.parse(input, false)
+                .map(|asm| asm.eval(vars, &mut Stack::with_capacity(asm.stack_alloc_size())))
+        }
     }
 }
 
@@ -560,8 +574,9 @@ where
         self,
         input: &str,
     ) -> Result<impl FnMut(&[N::AsArg<'b>]) -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input, true)?;
-        Ok(move |vars: &[N::AsArg<'b>]| expr.eval(vars))
+        let expr = self.parse(input, true)?;
+        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
+        Ok(move |vars: &[N::AsArg<'b>]| expr.eval(vars, &mut stack))
     }
 }
 
@@ -573,8 +588,9 @@ where
         self,
         input: &str,
     ) -> Result<impl FnMut(&[N::AsArg<'b>]) -> N + 'a, ParsingError> {
-        let mut expr = self.parse(input, true)?;
-        Ok(move |vars: &[N::AsArg<'b>]| expr.eval_copy(vars))
+        let expr = self.parse(input, true)?;
+        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
+        Ok(move |vars: &[N::AsArg<'b>]| expr.eval_copy(vars, &mut stack))
     }
 }
 

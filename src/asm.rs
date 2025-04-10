@@ -7,7 +7,7 @@ use crate::{
     syntax::{BiOperation, FunctionIdentifier, SyntaxNode, UnOperation, VariableIdentifier},
 };
 
-type Stack<N> = SmallVec<[N; 16]>;
+pub type Stack<N> = SmallVec<[N; 16]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Input<N: MathEvalNumber, V: VariableIdentifier> {
@@ -202,10 +202,9 @@ where
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
-    instructions: Vec<Instruction<'a, N, V, F>>,
-    stack: Stack<N>,
-}
+pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+    Vec<Instruction<'a, N, V, F>>,
+);
 
 impl<N, V, F> Debug for MathAssembly<'_, N, V, F>
 where
@@ -215,7 +214,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "MathAssembly[")?;
-        for line in &self.instructions {
+        for line in &self.0 {
             writeln!(f, "\t{line:?}")?
         }
         writeln!(f, "]")?;
@@ -350,13 +349,17 @@ where
                 result.push(instruction);
             }
         }
-        let mut stack_capacity = 0;
+        MathAssembly(result)
+    }
+
+    pub fn stack_alloc_size(&self) -> usize {
+        let mut stack_capacity = 0usize;
         let mut stack_len = 0;
         let input_stack_effect = |inp: &Input<N, V>| match inp {
             Input::Memory => -1,
             _ => 0,
         };
-        for instr in &result {
+        for instr in &self.0 {
             stack_len += match instr {
                 Instruction::Source(_) => 0,
                 Instruction::BiOperation(_, lhs, rhs)
@@ -379,20 +382,16 @@ where
                 Instruction::NFFlexible(_, arg_count, _)
                 | Instruction::CFFlexible(_, arg_count, _) => -(*arg_count as i32),
             } + 1;
-            if stack_len > stack_capacity {
-                stack_capacity = stack_len;
+            if stack_len > 0 && stack_len as usize > stack_capacity {
+                stack_capacity = stack_len as usize;
             }
         }
-        MathAssembly {
-            instructions: result,
-            stack: Stack::with_capacity(stack_capacity as usize),
-        }
+        stack_capacity
     }
 
-    pub fn eval(&mut self, variables: &[N::AsArg<'_>]) -> N {
-        self.stack.clear();
-        for instr in &self.instructions {
-            let mut argnum = self.stack.len();
+    pub fn eval(&self, variables: &[N::AsArg<'_>], stack: &mut Stack<N>) -> N {
+        for instr in &self.0 {
+            let mut argnum = stack.len();
             macro_rules! get {
                 ($inp: expr) => {
                     match $inp {
@@ -400,7 +399,7 @@ where
                         Input::Variable(var, _) => variables[*var].reborrow(),
                         Input::Memory => {
                             argnum -= 1;
-                            self.stack[argnum].asarg()
+                            stack[argnum].asarg()
                         }
                     }
                 };
@@ -409,7 +408,7 @@ where
                 Instruction::Source(input) => match input {
                     Input::Literal(num) => *num,
                     Input::Variable(var, _) => variables[*var].to_owned(),
-                    Input::Memory => self.stack.pop().unwrap(),
+                    Input::Memory => stack.pop().unwrap(),
                 },
                 Instruction::BiOperation(opr, lhs, rhs) => opr.eval(get!(lhs), get!(rhs)),
                 Instruction::UnOperation(opr, val) => opr.eval(get!(val)),
@@ -417,7 +416,7 @@ where
                 Instruction::NFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
                 Instruction::NFFlexible(func, arg_count, _) => {
                     argnum -= *arg_count as usize;
-                    func(&self.stack[argnum..])
+                    func(&stack[argnum..])
                 }
                 Instruction::CFSingle(func, inp, _) => func(get!(inp)),
                 Instruction::CFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
@@ -429,13 +428,13 @@ where
                 }
                 Instruction::CFFlexible(func, arg_count, _) => {
                     argnum -= *arg_count as usize;
-                    func(&self.stack[argnum..])
+                    func(&stack[argnum..])
                 }
             };
-            self.stack.truncate(argnum);
-            self.stack.push(result);
+            stack.truncate(argnum);
+            stack.push(result);
         }
-        self.stack.pop().unwrap()
+        stack.pop().unwrap()
     }
 }
 
@@ -445,15 +444,15 @@ where
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    pub fn eval_copy(&mut self, variables: &[N]) -> N {
-        self.stack.clear();
-        for instr in &self.instructions {
+    pub fn eval_copy(&self, variables: &[N], stack: &mut Stack<N>) -> N {
+        stack.clear();
+        for instr in &self.0 {
             macro_rules! get {
                 ($inp: expr) => {
                     match $inp {
                         Input::Literal(num) => *num,
                         Input::Variable(var, _) => variables[*var],
-                        Input::Memory => self.stack.pop().unwrap(),
+                        Input::Memory => stack.pop().unwrap(),
                     }
                 };
             }
@@ -464,9 +463,9 @@ where
                 Instruction::NFSingle(func, input, _) => func(get!(input)),
                 Instruction::NFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
                 Instruction::NFFlexible(func, arg_count, _) => {
-                    let argnum = self.stack.len() - *arg_count as usize;
-                    let res = func(&self.stack[argnum..]);
-                    self.stack.truncate(argnum);
+                    let argnum = stack.len() - *arg_count as usize;
+                    let res = func(&stack[argnum..]);
+                    stack.truncate(argnum);
                     res
                 }
                 Instruction::CFSingle(func, inp, _) => func(get!(inp)),
@@ -478,15 +477,15 @@ where
                     func(get!(inp1), get!(inp2), get!(inp3), get!(inp4))
                 }
                 Instruction::CFFlexible(func, arg_count, _) => {
-                    let argnum = self.stack.len() - *arg_count as usize;
-                    let res = func(&self.stack[argnum..]);
-                    self.stack.truncate(argnum);
+                    let argnum = stack.len() - *arg_count as usize;
+                    let res = func(&stack[argnum..]);
+                    stack.truncate(argnum);
                     res
                 }
             };
-            self.stack.push(result);
+            stack.push(result);
         }
-        self.stack.pop().unwrap()
+        stack.pop().unwrap()
     }
 }
 
@@ -561,7 +560,7 @@ mod test {
             false,
             &[TestVar::X, TestVar::Y, TestVar::T],
         )
-        .map(|ma| ma.instructions)
+        .map(|ma| ma.0)
     }
 
     #[test]

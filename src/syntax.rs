@@ -401,8 +401,8 @@ where
         }
         for node in examin {
             if node.children(&self.0.arena).all(|c| self.is_number(c)) {
-                let answer =
-                    MathAssembly::new(&self.0.arena, node, &function_to_pointer, &[]).eval(&[]);
+                let answer = MathAssembly::new(&self.0.arena, node, &function_to_pointer, &[])
+                    .eval(&[], &mut crate::asm::Stack::new());
                 *self.0.arena[node].get_mut() = SyntaxNode::Number(answer);
                 while let Some(c) = self.0.arena[node].first_child() {
                     c.remove(&mut self.0.arena);
