@@ -252,6 +252,9 @@ where
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
             Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
             Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
+            Some(SyntaxNode::CustomFunction(cf)) => {
+                !matches!(function_to_pointer(cf), CFPointer::Flexible(_))
+            }
             _ => false,
         };
         let variables = variable_order
