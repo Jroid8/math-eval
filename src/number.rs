@@ -142,7 +142,10 @@ pub trait Reborrow {
 }
 
 impl<T> Reborrow for &'_ T {
-    type This<'a> = &'a T where Self: 'a;
+    type This<'a>
+        = &'a T
+    where
+        Self: 'a;
     fn reborrow(&self) -> Self::This<'_> {
         self
     }
