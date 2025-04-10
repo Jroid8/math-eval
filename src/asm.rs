@@ -67,15 +67,11 @@ where
                 l0 == r0 && l1 == r1 && l2 == r2
             }
             (Self::UnOperation(l0, l1), Self::UnOperation(r0, r1)) => l0 == r0 && l1 == r1,
-            (Self::NFSingle(l0, l1, l2), Self::NFSingle(r0, r1, r2)) => {
-                l0 == r0 && l1 == r1 && l2 == r2
+            (Self::NFSingle(_, l1, l2), Self::NFSingle(_, r1, r2)) => l1 == r1 && l2 == r2,
+            (Self::NFDual(_, l1, l2, l3), Self::NFDual(_, r1, r2, r3)) => {
+                l1 == r1 && l2 == r2 && l3 == r3
             }
-            (Self::NFDual(l0, l1, l2, l3), Self::NFDual(r0, r1, r2, r3)) => {
-                l0 == r0 && l1 == r1 && l2 == r2 && l3 == r3
-            }
-            (Self::NFFlexible(l0, l1, l2), Self::NFFlexible(r0, r1, r2)) => {
-                l0 == r0 && l1 == r1 && l2 == r2
-            }
+            (Self::NFFlexible(_, l1, l2), Self::NFFlexible(_, r1, r2)) => l1 == r1 && l2 == r2,
             (Self::CFSingle(_, l1, l2), Self::CFSingle(_, r1, r2)) => l1 == r1 && l2 == r2,
             (Self::CFDual(_, l1, l2, l3), Self::CFDual(_, r1, r2, r3)) => {
                 l1 == r1 && l2 == r2 && l3 == r3
