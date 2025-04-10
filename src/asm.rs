@@ -489,37 +489,179 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::f64::consts::PI;
+    use crate::{
+        asm::{CFPointer, Input, Instruction},
+        number::{MathEvalNumber, NativeFunction},
+        syntax::{BiOperation, UnOperation},
+        ParsingError,
+    };
+
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    enum TestVar {
+        X,
+        Y,
+        T,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum TestFunc {
+        Sigmoid,
+        ISqrt,
+        Dist3,
+        Dist2,
+        Mean,
+    }
+
+    fn sigmoid(x: f64) -> f64 {
+        1.0 / (1.0 + (-x).exp())
+    }
+    fn isqrt(x: f64, y: f64) -> f64 {
+        (x * x + y * y).sqrt()
+    }
+    fn dist3(x: f64, y: f64, z: f64) -> f64 {
+        (x * x + y * y + z * z).sqrt()
+    }
+    fn dist2(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
+        ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt()
+    }
+    fn mean(nums: &[f64]) -> f64 {
+        nums.iter().sum::<f64>() / nums.len() as f64
+    }
+
+    fn parse(
+        input: &str,
+    ) -> Result<Vec<Instruction<'static, f64, TestVar, TestFunc>>, ParsingError> {
+        crate::parse(
+            input,
+            |inp| if inp == "c" { Some(299792458.0) } else { None },
+            |inp| match inp {
+                "sigmoid" => Some((TestFunc::Sigmoid, 1, Some(1))),
+                "isqrt" => Some((TestFunc::ISqrt, 2, Some(2))),
+                "dist3" => Some((TestFunc::Dist3, 3, Some(3))),
+                "dist2" => Some((TestFunc::Dist2, 4, Some(4))),
+                "mean" => Some((TestFunc::Mean, 2, Some(2))),
+                _ => None,
+            },
+            |inp| match inp {
+                "x" => Some(TestVar::X),
+                "y" => Some(TestVar::Y),
+                "t" => Some(TestVar::T),
+                _ => None,
+            },
+            |func| match func {
+                TestFunc::Sigmoid => CFPointer::Single(&sigmoid),
+                TestFunc::ISqrt => CFPointer::Dual(&isqrt),
+                TestFunc::Dist3 => CFPointer::Triple(&dist3),
+                TestFunc::Dist2 => CFPointer::Quad(&dist2),
+                TestFunc::Mean => CFPointer::Flexible(&mean),
+            },
+            false,
+            &[TestVar::X, TestVar::Y, TestVar::T],
+        )
+        .map(|ma| ma.instructions)
+    }
 
     #[test]
-    fn test_mathassembly() {
-        let parse = crate::EvalBuilder::new()
-            .add_variable("x")
-            .add_variable("y")
-            .add_variable("t")
-            .add_constant("c", 299792458.0)
-            .add_fn2("dist", &|x: f64, y: f64| (x.powi(2) + y.powi(2)).sqrt())
-            .build_as_parser();
-
-        assert_eq!(parse("10", 0.0, 0.0, 0.0), Ok(10.0));
-        assert_eq!(parse("-y", 0.0, 13.8, 0.0), Ok(-13.8));
-        assert_eq!(parse("abs(-x)", 49.9, 0.0, 0.0), Ok(49.9));
-        assert_eq!(parse("4c", 0.0, 0.0, 2.0), Ok(1199169832.0));
-        assert_eq!(parse("10(7+x)", 3.0, 0.0, 0.0), Ok(100.0));
-        assert_eq!(parse("5sin(pi*3/2)", 0.0, 0.0, 0.0), Ok(-5.0));
+    fn test_new_mathasm() {
         assert_eq!(
-            parse("max(cos(pi/2), 1, c)", 0.0, 0.0, 0.0),
-            Ok(299792458.0)
+            parse("1"),
+            Ok(vec![Instruction::Source(Input::Literal(1.0))])
         );
-        assert_eq!(parse("asin(x-y)", 13.5, 12.5, 0.0), Ok(PI / 2.0));
         assert_eq!(
-            parse(
-                "sin(x*pi/10*(1.3+sin(t/10))+t*2+sin(y*pi*sin(t/17)+16*sin(t)))+0.05",
-                5.5,
-                -30.0,
-                18.0
-            ),
-            Ok(0.7967435953555171)
+            parse("x"),
+            Ok(vec![Instruction::Source(Input::Variable(0, TestVar::X))])
+        );
+        assert_eq!(
+            parse("y+7"),
+            Ok(vec![Instruction::BiOperation(
+                BiOperation::Add,
+                Input::Variable(1, TestVar::Y),
+                Input::Literal(7.0)
+            )])
+        );
+        assert_eq!(
+            parse("t!"),
+            Ok(vec![Instruction::UnOperation(
+                UnOperation::Fac,
+                Input::Variable(2, TestVar::T),
+            )])
+        );
+        assert_eq!(
+            parse("sin(1)"),
+            Ok(vec![Instruction::<'_, f64, TestVar, TestFunc>::NFSingle(
+                f64::sin,
+                Input::Literal(1.0),
+                NativeFunction::Sin,
+            )])
+        );
+        assert_eq!(
+            parse("log(x, 5)"),
+            Ok(vec![Instruction::<'_, f64, TestVar, TestFunc>::NFDual(
+                f64::log,
+                Input::Variable(0, TestVar::X),
+                Input::Literal(5.0),
+                NativeFunction::Log
+            )])
+        );
+        assert_eq!(
+            parse("max(x, y, t, 0)"),
+            Ok(vec![
+                Instruction::Source(Input::Variable(0, TestVar::X)),
+                Instruction::Source(Input::Variable(1, TestVar::Y)),
+                Instruction::Source(Input::Variable(2, TestVar::T)),
+                Instruction::Source(Input::Literal(0.0)),
+                Instruction::<'_, f64, TestVar, TestFunc>::NFFlexible(
+                    <f64 as MathEvalNumber>::max,
+                    4,
+                    NativeFunction::Max
+                )
+            ])
+        );
+        assert_eq!(
+            parse("sigmoid(x)"),
+            Ok(vec![Instruction::CFSingle(
+                &sigmoid,
+                Input::Variable(0, TestVar::X),
+                TestFunc::Sigmoid
+            )])
+        );
+        assert_eq!(
+            parse("isqrt(x, y)"),
+            Ok(vec![Instruction::CFDual(
+                &isqrt,
+                Input::Variable(0, TestVar::X),
+                Input::Variable(1, TestVar::Y),
+                TestFunc::ISqrt
+            )])
+        );
+        assert_eq!(
+            parse("dist3(x, y, 3)"),
+            Ok(vec![Instruction::CFTriple(
+                &dist3,
+                Input::Variable(0, TestVar::X),
+                Input::Variable(1, TestVar::Y),
+                Input::Literal(3.0),
+                TestFunc::Dist3
+            )])
+        );
+        assert_eq!(
+            parse("dist2(x, y, 3, 4)"),
+            Ok(vec![Instruction::CFQuad(
+                &dist2,
+                Input::Variable(0, TestVar::X),
+                Input::Variable(1, TestVar::Y),
+                Input::Literal(3.0),
+                Input::Literal(4.0),
+                TestFunc::Dist2
+            )])
+        );
+        assert_eq!(
+            parse("mean(x, 2)"),
+            Ok(vec![
+                Instruction::Source(Input::Variable(0, TestVar::X)),
+                Instruction::Source(Input::Literal(2.0)),
+                Instruction::CFFlexible(&mean, 2, TestFunc::Mean)
+            ])
         );
     }
 }
