@@ -2,8 +2,8 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ops::RangeInclusive;
 
-use crate::asm::{CFPointer, MathAssembly};
-use crate::number::{MathEvalNumber, NativeFunction};
+use crate::asm::{CFPointer, MathAssembly, Stack};
+use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
 use crate::{ParsingError, ParsingErrorKind};
@@ -374,6 +374,95 @@ where
             None,
         )
         .map(|tree| SyntaxTree(tree).substitute_log())
+    }
+
+    pub fn eval(
+        &self,
+        function_to_pointer: impl Fn(&F) -> CFPointer<'_, N>,
+        variables: impl Fn(&V) -> N::AsArg<'_>,
+    ) -> N {
+        let mut stack: Stack<N> = Stack::new();
+        let is_fixed_input = |node: Option<NodeId>| match node.map(|id| self.0.arena[id].get()) {
+            Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
+            Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
+            Some(SyntaxNode::CustomFunction(cf)) => {
+                !matches!(function_to_pointer(cf), CFPointer::Flexible(_))
+            }
+            _ => false,
+        };
+
+        for current in self.0.root.traverse(&self.0.arena).filter_map(|n| match n {
+            NodeEdge::Start(_) => None,
+            NodeEdge::End(id) => Some(id),
+        }) {
+            let mut argnum = stack.len();
+            macro_rules! get {
+                ($node: expr) => {
+                    match self.0.arena[$node.unwrap()].get() {
+                        SyntaxNode::Number(num) => num.asarg(),
+                        SyntaxNode::Variable(var) => variables(var),
+                        _ => {
+                            argnum -= 1;
+                            stack[argnum].asarg()
+                        }
+                    }
+                };
+            }
+
+            let mut children = current.children(&self.0.arena);
+            let parent = current.ancestors(&self.0.arena).nth(1);
+
+            let result = match self.0.arena[current].get() {
+                SyntaxNode::Number(num) => {
+                    if is_fixed_input(parent) {
+                        continue;
+                    } else {
+                        *num
+                    }
+                }
+                SyntaxNode::Variable(var) => {
+                    if is_fixed_input(parent) {
+                        continue;
+                    } else {
+                        variables(var).to_owned()
+                    }
+                }
+                SyntaxNode::UnOperation(opr) => opr.eval(get!(children.next())),
+                SyntaxNode::BiOperation(opr) => {
+                    opr.eval(get!(children.next()), get!(children.next()))
+                }
+                SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
+                    NFPointer::Single(func) => func(get!(children.next())),
+                    NFPointer::Dual(func) => func(get!(children.next()), get!(children.next())),
+                    NFPointer::Flexible(func) => {
+                        argnum -= children.count();
+                        func(&stack[argnum..])
+                    }
+                },
+                SyntaxNode::CustomFunction(cf) => match function_to_pointer(cf) {
+                    CFPointer::Single(func) => func(get!(children.next())),
+                    CFPointer::Dual(func) => func(get!(children.next()), get!(children.next())),
+                    CFPointer::Triple(func) => func(
+                        get!(children.next()),
+                        get!(children.next()),
+                        get!(children.next()),
+                    ),
+                    CFPointer::Quad(func) => func(
+                        get!(children.next()),
+                        get!(children.next()),
+                        get!(children.next()),
+                        get!(children.next()),
+                    ),
+                    CFPointer::Flexible(func) => {
+                        argnum -= children.count();
+                        func(&stack[argnum..])
+                    }
+                },
+            };
+            stack.truncate(argnum);
+            stack.push(result);
+        }
+        stack.pop().unwrap()
     }
 
     pub fn to_asm<'a>(
