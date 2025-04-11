@@ -376,9 +376,9 @@ where
         .map(|tree| SyntaxTree(tree).substitute_log())
     }
 
-    pub fn eval(
+    pub fn eval<'a>(
         &self,
-        function_to_pointer: impl Fn(&F) -> CFPointer<'_, N>,
+        function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
         variables: impl Fn(&V) -> N::AsArg<'_>,
     ) -> N {
         let mut stack: Stack<N> = Stack::new();
@@ -1205,5 +1205,40 @@ mod test {
             ),
             19..=20
         );
+    }
+
+    #[test]
+    fn test_ast_eval() {
+        let var_sub = |var: &TestVar| -> f64 {
+            match *var {
+                TestVar::X => 1.0,
+                TestVar::Y => 5.0,
+                TestVar::T => 0.1,
+            }
+        };
+        let cf2p = |cf: &TestFunc| -> CFPointer<'_, f64> {
+            match *cf {
+                TestFunc::Dist => CFPointer::Dual(&|x: f64, y: f64| (x * x + y * y).sqrt()),
+                TestFunc::Mean => CFPointer::Flexible(&|values: &[f64]| {
+                    values.iter().sum::<f64>() / values.len() as f64
+                }),
+            }
+        };
+        macro_rules! assert_eval {
+            ($expr: literal, $res: literal) => {
+                assert_eq!(parse($expr).unwrap().eval(cf2p, var_sub), $res);
+            };
+        }
+
+        assert_eval!("1", 1.);
+        assert_eval!("x*3", 3.);
+        assert_eval!("3!", 6.);
+        assert_eval!("-t", -0.1);
+        assert_eval!("y+100*t", 15.);
+        assert_eval!("sin(pi*t)", 0.3090169943749474);
+        assert_eval!("log(6561, 3)", 8.);
+        assert_eval!("max(x, y, -18)*t", 0.5);
+        assert_eval!("dist(3,4)/y", 1.0);
+        assert_eval!("mean(y, 1)", 3.0);
     }
 }
