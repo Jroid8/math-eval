@@ -156,7 +156,7 @@ pub struct EvalRef;
 #[derive(Clone, Debug)]
 pub struct EvalCopy;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EvalBuilder<'a, N, V, E>
 where
     N: MathEvalNumber,
