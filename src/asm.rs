@@ -234,6 +234,18 @@ where
     Flexible(&'a dyn Fn(&[N]) -> N),
 }
 
+impl<N> Debug for CFPointer<'_, N> where N: MathEvalNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Single(_) => f.write_str("Single"),
+            Self::Dual(_) => f.write_str("Dual"),
+            Self::Triple(_) => f.write_str("Triple"),
+            Self::Quad(_) => f.write_str("Quad"),
+            Self::Flexible(_) => f.write_str("Flexible"),
+        }
+    }
+}
+
 impl<'a, N, V, F> MathAssembly<'a, N, V, F>
 where
     N: MathEvalNumber,
