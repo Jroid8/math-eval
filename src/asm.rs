@@ -10,54 +10,53 @@ use crate::{
 pub type Stack<N> = SmallVec<[N; 16]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Input<N: MathEvalNumber, V: VariableIdentifier> {
+pub enum Input<N: MathEvalNumber> {
     Literal(N),
-    Variable(usize, V),
+    Variable(usize),
     Memory,
 }
 
 #[derive(Copy)]
-pub enum Instruction<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
-    Source(Input<N, V>),
-    BiOperation(BiOperation, Input<N, V>, Input<N, V>),
-    UnOperation(UnOperation, Input<N, V>),
-    NFSingle(for<'b> fn(N::AsArg<'b>) -> N, Input<N, V>, NativeFunction),
+pub enum Instruction<'a, N: MathEvalNumber, F: FunctionIdentifier> {
+    Source(Input<N>),
+    BiOperation(BiOperation, Input<N>, Input<N>),
+    UnOperation(UnOperation, Input<N>),
+    NFSingle(for<'b> fn(N::AsArg<'b>) -> N, Input<N>, NativeFunction),
     NFDual(
         for<'b> fn(N::AsArg<'b>, N::AsArg<'b>) -> N,
-        Input<N, V>,
-        Input<N, V>,
+        Input<N>,
+        Input<N>,
         NativeFunction,
     ),
     NFFlexible(fn(&[N]) -> N, u8, NativeFunction),
-    CFSingle(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N, Input<N, V>, F),
+    CFSingle(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N, Input<N>, F),
     CFDual(
         &'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N,
-        Input<N, V>,
-        Input<N, V>,
+        Input<N>,
+        Input<N>,
         F,
     ),
     CFTriple(
         &'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N,
-        Input<N, V>,
-        Input<N, V>,
-        Input<N, V>,
+        Input<N>,
+        Input<N>,
+        Input<N>,
         F,
     ),
     CFQuad(
         &'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N,
-        Input<N, V>,
-        Input<N, V>,
-        Input<N, V>,
-        Input<N, V>,
+        Input<N>,
+        Input<N>,
+        Input<N>,
+        Input<N>,
         F,
     ),
     CFFlexible(&'a dyn Fn(&[N]) -> N, u8, F),
 }
 
-impl<N, V, F> PartialEq for Instruction<'_, N, V, F>
+impl<N, F> PartialEq for Instruction<'_, N, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
     F: FunctionIdentifier + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
@@ -88,18 +87,16 @@ where
     }
 }
 
-impl<N, V, F> Eq for Instruction<'_, N, V, F>
+impl<N, F> Eq for Instruction<'_, N, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
     F: FunctionIdentifier + Eq,
 {
 }
 
-impl<N, V, F> Debug for Instruction<'_, N, V, F>
+impl<N, F> Debug for Instruction<'_, N, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
     F: FunctionIdentifier,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -159,10 +156,9 @@ where
     }
 }
 
-impl<N, V, F> Clone for Instruction<'_, N, V, F>
+impl<N, F> Clone for Instruction<'_, N, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
     F: FunctionIdentifier,
 {
     fn clone(&self) -> Self {
@@ -202,14 +198,13 @@ where
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct MathAssembly<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
-    Vec<Instruction<'a, N, V, F>>,
+pub struct MathAssembly<'a, N: MathEvalNumber, F: FunctionIdentifier>(
+    Vec<Instruction<'a, N, F>>,
 );
 
-impl<N, V, F> Debug for MathAssembly<'_, N, V, F>
+impl<N, F> Debug for MathAssembly<'_, N, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
     F: FunctionIdentifier,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -246,20 +241,19 @@ impl<N> Debug for CFPointer<'_, N> where N: MathEvalNumber {
     }
 }
 
-impl<'a, N, V, F> MathAssembly<'a, N, V, F>
+impl<'a, N, F> MathAssembly<'a, N, F>
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
     F: FunctionIdentifier,
 {
     // FIX: panics when variable_order is not exhaustive
-    pub fn new(
+    pub fn new<V: VariableIdentifier>(
         arena: &Arena<SyntaxNode<N, V, F>>,
         root: NodeId,
         function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
         variable_order: &[V],
     ) -> Self {
-        let mut result: Vec<Instruction<'a, N, V, F>> = Vec::new();
+        let mut result: Vec<Instruction<'a, N, F>> = Vec::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
             Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
             Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
@@ -279,7 +273,7 @@ where
                 let mut children_as_input = cursor.children(arena).map(|c| match arena[c].get() {
                     SyntaxNode::Number(num) => Input::Literal(*num),
                     SyntaxNode::Variable(var) => {
-                        Input::Variable(*variables.get(var).unwrap(), var.clone())
+                        Input::Variable(*variables.get(var).unwrap())
                     }
                     _ => Input::Memory,
                 });
@@ -296,10 +290,7 @@ where
                         if is_fixed_input(parent) {
                             continue;
                         } else {
-                            Instruction::Source(Input::Variable(
-                                *variables.get(var).unwrap(),
-                                var.clone(),
-                            ))
+                            Instruction::Source(Input::Variable(*variables.get(var).unwrap()))
                         }
                     }
                     SyntaxNode::BiOperation(opr) => Instruction::BiOperation(
@@ -367,7 +358,7 @@ where
     pub fn stack_alloc_size(&self) -> usize {
         let mut stack_capacity = 0usize;
         let mut stack_len = 0;
-        let input_stack_effect = |inp: &Input<N, V>| match inp {
+        let input_stack_effect = |inp: &Input<N>| match inp {
             Input::Memory => -1,
             _ => 0,
         };
@@ -408,7 +399,7 @@ where
                 ($inp: expr) => {
                     match $inp {
                         Input::Literal(num) => num.asarg(),
-                        Input::Variable(var, _) => variables[*var].reborrow(),
+                        Input::Variable(var) => variables[*var].reborrow(),
                         Input::Memory => {
                             argnum -= 1;
                             stack[argnum].asarg()
@@ -419,7 +410,7 @@ where
             let result = match &instr {
                 Instruction::Source(input) => match input {
                     Input::Literal(num) => *num,
-                    Input::Variable(var, _) => variables[*var].to_owned(),
+                    Input::Variable(var) => variables[*var].to_owned(),
                     Input::Memory => stack.pop().unwrap(),
                 },
                 Instruction::BiOperation(opr, lhs, rhs) => opr.eval(get!(lhs), get!(rhs)),
@@ -450,10 +441,9 @@ where
     }
 }
 
-impl<N, V, F> MathAssembly<'_, N, V, F>
+impl<N, F> MathAssembly<'_, N, F>
 where
     N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
-    V: VariableIdentifier,
     F: FunctionIdentifier,
 {
     pub fn eval_copy(&self, variables: &[N], stack: &mut Stack<N>) -> N {
@@ -463,7 +453,7 @@ where
                 ($inp: expr) => {
                     match $inp {
                         Input::Literal(num) => *num,
-                        Input::Variable(var, _) => variables[*var],
+                        Input::Variable(var) => variables[*var],
                         Input::Memory => stack.pop().unwrap(),
                     }
                 };
@@ -544,7 +534,7 @@ mod test {
 
     fn parse(
         input: &str,
-    ) -> Result<Vec<Instruction<'static, f64, TestVar, TestFunc>>, ParsingError> {
+    ) -> Result<Vec<Instruction<'static, f64, TestFunc>>, ParsingError> {
         crate::parse(
             input,
             |inp| if inp == "c" { Some(299792458.0) } else { None },
@@ -583,13 +573,13 @@ mod test {
         );
         assert_eq!(
             parse("x"),
-            Ok(vec![Instruction::Source(Input::Variable(0, TestVar::X))])
+            Ok(vec![Instruction::Source(Input::Variable(0))])
         );
         assert_eq!(
             parse("y+7"),
             Ok(vec![Instruction::BiOperation(
                 BiOperation::Add,
-                Input::Variable(1, TestVar::Y),
+                Input::Variable(1),
                 Input::Literal(7.0)
             )])
         );
@@ -597,12 +587,12 @@ mod test {
             parse("t!"),
             Ok(vec![Instruction::UnOperation(
                 UnOperation::Fac,
-                Input::Variable(2, TestVar::T),
+                Input::Variable(2),
             )])
         );
         assert_eq!(
             parse("sin(1)"),
-            Ok(vec![Instruction::<'_, f64, TestVar, TestFunc>::NFSingle(
+            Ok(vec![Instruction::<'_, f64, TestFunc>::NFSingle(
                 f64::sin,
                 Input::Literal(1.0),
                 NativeFunction::Sin,
@@ -610,9 +600,9 @@ mod test {
         );
         assert_eq!(
             parse("log(x, 5)"),
-            Ok(vec![Instruction::<'_, f64, TestVar, TestFunc>::NFDual(
+            Ok(vec![Instruction::<'_, f64, TestFunc>::NFDual(
                 f64::log,
-                Input::Variable(0, TestVar::X),
+                Input::Variable(0),
                 Input::Literal(5.0),
                 NativeFunction::Log
             )])
@@ -620,11 +610,11 @@ mod test {
         assert_eq!(
             parse("max(x, y, t, 0)"),
             Ok(vec![
-                Instruction::Source(Input::Variable(0, TestVar::X)),
-                Instruction::Source(Input::Variable(1, TestVar::Y)),
-                Instruction::Source(Input::Variable(2, TestVar::T)),
+                Instruction::Source(Input::Variable(0)),
+                Instruction::Source(Input::Variable(1)),
+                Instruction::Source(Input::Variable(2)),
                 Instruction::Source(Input::Literal(0.0)),
-                Instruction::<'_, f64, TestVar, TestFunc>::NFFlexible(
+                Instruction::<'_, f64, TestFunc>::NFFlexible(
                     <f64 as MathEvalNumber>::max,
                     4,
                     NativeFunction::Max
@@ -635,7 +625,7 @@ mod test {
             parse("sigmoid(x)"),
             Ok(vec![Instruction::CFSingle(
                 &sigmoid,
-                Input::Variable(0, TestVar::X),
+                Input::Variable(0),
                 TestFunc::Sigmoid
             )])
         );
@@ -643,8 +633,8 @@ mod test {
             parse("isqrt(x, y)"),
             Ok(vec![Instruction::CFDual(
                 &isqrt,
-                Input::Variable(0, TestVar::X),
-                Input::Variable(1, TestVar::Y),
+                Input::Variable(0),
+                Input::Variable(1),
                 TestFunc::ISqrt
             )])
         );
@@ -652,8 +642,8 @@ mod test {
             parse("dist3(x, y, 3)"),
             Ok(vec![Instruction::CFTriple(
                 &dist3,
-                Input::Variable(0, TestVar::X),
-                Input::Variable(1, TestVar::Y),
+                Input::Variable(0),
+                Input::Variable(1),
                 Input::Literal(3.0),
                 TestFunc::Dist3
             )])
@@ -662,8 +652,8 @@ mod test {
             parse("dist2(x, y, 3, 4)"),
             Ok(vec![Instruction::CFQuad(
                 &dist2,
-                Input::Variable(0, TestVar::X),
-                Input::Variable(1, TestVar::Y),
+                Input::Variable(0),
+                Input::Variable(1),
                 Input::Literal(3.0),
                 Input::Literal(4.0),
                 TestFunc::Dist2
@@ -672,7 +662,7 @@ mod test {
         assert_eq!(
             parse("mean(x, 2)"),
             Ok(vec![
-                Instruction::Source(Input::Variable(0, TestVar::X)),
+                Instruction::Source(Input::Variable(0)),
                 Instruction::Source(Input::Literal(2.0)),
                 Instruction::CFFlexible(&mean, 2, TestFunc::Mean)
             ])
@@ -682,15 +672,15 @@ mod test {
             Ok(vec![
                 Instruction::CFDual(
                     &isqrt,
-                    Input::Variable(0, TestVar::X),
-                    Input::Variable(1, TestVar::Y),
+                    Input::Variable(0),
+                    Input::Variable(1),
                     TestFunc::ISqrt
                 ),
                 Instruction::BiOperation(BiOperation::Div, Input::Memory, Input::Literal(32.0)),
                 Instruction::BiOperation(
                     BiOperation::Div,
-                    Input::Variable(0, TestVar::X),
-                    Input::Variable(1, TestVar::Y)
+                    Input::Variable(0),
+                    Input::Variable(1)
                 ),
                 Instruction::NFSingle(
                     <f64 as MathEvalNumber>::atan,
@@ -713,13 +703,13 @@ mod test {
         macro_rules! assert_eval {
             ([$($x:expr),+], $res: expr) => {
                 assert_eq!(
-                    MathAssembly::<'_, f64, TestVar, TestFunc>(vec![$($x),+])
+                    MathAssembly::<'_, f64, TestFunc>(vec![$($x),+])
                         .eval(&[1.0, 8.0, 23.0], &mut super::Stack::new()),
                     $res
                 );
             };
         }
-        assert_eval!([Instruction::Source(Input::Variable(0, TestVar::X))], 1.0);
+        assert_eval!([Instruction::Source(Input::Variable(0))], 1.0);
         assert_eval!(
             [Instruction::BiOperation(
                 BiOperation::Add,
@@ -731,15 +721,15 @@ mod test {
         assert_eval!(
             [Instruction::BiOperation(
                 BiOperation::Mul,
-                Input::Variable(0, TestVar::X),
-                Input::Variable(1, TestVar::Y),
+                Input::Variable(0),
+                Input::Variable(1),
             )],
             8.0
         );
         assert_eval!(
             [Instruction::UnOperation(
                 UnOperation::Neg,
-                Input::Variable(2, TestVar::T),
+                Input::Variable(2),
             )],
             -23.0
         );
@@ -764,7 +754,7 @@ mod test {
             [
                 Instruction::Source(Input::Literal(8.0)),
                 Instruction::Source(Input::Literal(-2.0)),
-                Instruction::Source(Input::Variable(2, TestVar::T)),
+                Instruction::Source(Input::Variable(2)),
                 Instruction::NFFlexible(<f64 as MathEvalNumber>::max, 3, NativeFunction::Max)
             ],
             23.0
@@ -809,7 +799,7 @@ mod test {
         );
         assert_eval!(
             [
-                Instruction::Source(Input::Variable(1, TestVar::Y)),
+                Instruction::Source(Input::Variable(1)),
                 Instruction::Source(Input::Literal(8.0)),
                 Instruction::Source(Input::Literal(4.0)),
                 Instruction::Source(Input::Literal(2.0)),
@@ -835,7 +825,7 @@ mod test {
                 Instruction::BiOperation(
                     BiOperation::Mul,
                     Input::Literal(std::f64::consts::PI),
-                    Input::Variable(0, TestVar::X)
+                    Input::Variable(0)
                 ),
                 Instruction::NFSingle(
                     <f64 as MathEvalNumber>::sin,

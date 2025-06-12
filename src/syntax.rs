@@ -469,7 +469,7 @@ where
         &self,
         function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
         variable_order: &[V],
-    ) -> MathAssembly<'a, N, V, F> {
+    ) -> MathAssembly<'a, N, F> {
         MathAssembly::new(
             &self.0.arena,
             self.0.root,
