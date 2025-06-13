@@ -6,7 +6,7 @@ use crate::asm::{CFPointer, MathAssembly, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
-use crate::{ParsingError, ParsingErrorKind};
+use crate::{ParsingError, ParsingErrorKind, VariableIdentifier, FunctionIdentifier};
 use indextree::{NodeEdge, NodeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -103,14 +103,6 @@ impl Display for BiOperation {
         write!(f, "{}", self.as_char())
     }
 }
-
-pub trait VariableIdentifier: Clone + Debug + Debug + Hash + Eq + 'static {}
-
-impl<T> VariableIdentifier for T where T: Clone + Debug + Hash + Eq + 'static {}
-
-pub trait FunctionIdentifier: Clone + Debug + 'static {}
-
-impl<T> FunctionIdentifier for T where T: Clone + Debug + 'static {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxNode<N, V, F>
@@ -378,15 +370,15 @@ where
 
     pub fn eval<'a>(
         &self,
-        function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
-        variable_values: &dyn crate::VariableStore<N, V>,
+        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+        variable_values: &dyn crate::VariableStore<'_, N, V>,
     ) -> N {
         let mut stack: Stack<N> = Stack::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| self.0.arena[id].get()) {
             Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
             Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
             Some(SyntaxNode::CustomFunction(cf)) => {
-                !matches!(function_to_pointer(cf), CFPointer::Flexible(_))
+                !matches!(function_to_pointer(*cf), CFPointer::Flexible(_))
             }
             _ => false,
         };
@@ -467,7 +459,7 @@ where
 
     pub fn to_asm<'a>(
         &self,
-        function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
+        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_order: &[V],
     ) -> MathAssembly<'a, N, F> {
         MathAssembly::new(
@@ -478,7 +470,7 @@ where
         )
     }
 
-    pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>) {
+    pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(F) -> CFPointer<'a, N>) {
         let mut examin: Vec<NodeId> = Vec::new();
         for node in self.0.root.traverse(&self.0.arena) {
             if let NodeEdge::End(node) = node {
@@ -707,7 +699,7 @@ mod test {
         };
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     enum TestVar {
         X,
         Y,
@@ -724,7 +716,7 @@ mod test {
         }
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum TestFunc {
         Dist,
         Mean,
@@ -1222,8 +1214,8 @@ mod test {
             }
         }
 
-        let cf2p = |cf: &TestFunc| -> CFPointer<'_, f64> {
-            match *cf {
+        let cf2p = |cf: TestFunc| -> CFPointer<'_, f64> {
+            match cf {
                 TestFunc::Dist => CFPointer::Dual(&|x: f64, y: f64| (x * x + y * y).sqrt()),
                 TestFunc::Mean => CFPointer::Flexible(&|values: &[f64]| {
                     values.iter().sum::<f64>() / values.len() as f64

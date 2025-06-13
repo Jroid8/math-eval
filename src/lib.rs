@@ -1,9 +1,14 @@
-use std::{collections::HashMap, fmt::Display, ops::RangeInclusive};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+    hash::Hash,
+    ops::RangeInclusive,
+};
 
 use asm::{CFPointer, MathAssembly, Stack};
 use number::MathEvalNumber;
 use seq_macro::seq;
-use syntax::{FunctionIdentifier, SyntaxTree, VariableIdentifier};
+use syntax::SyntaxTree;
 use tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
 
 pub mod asm;
@@ -11,6 +16,14 @@ pub mod number;
 pub mod syntax;
 pub mod tokenizer;
 pub mod tree_utils;
+
+pub trait VariableIdentifier: Clone + Copy + Debug + Hash + Eq + 'static {}
+
+impl<T> VariableIdentifier for T where T: Clone + Copy + Debug + Hash + Eq + 'static {}
+
+pub trait FunctionIdentifier: Clone + Copy + Debug + 'static {}
+
+impl<T> FunctionIdentifier for T where T: Clone + Copy + Debug + 'static {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsingError {
@@ -93,8 +106,7 @@ pub trait VariableStore<N: MathEvalNumber, V: VariableIdentifier> {
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
-    function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
-    optimize: bool,
+    function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
     variable_order: &[V],
 ) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;

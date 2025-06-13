@@ -4,7 +4,8 @@ use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 use crate::{
     number::{MathEvalNumber, NativeFunction, Reborrow},
-    syntax::{BiOperation, FunctionIdentifier, SyntaxNode, UnOperation, VariableIdentifier},
+    syntax::{BiOperation, SyntaxNode, UnOperation},
+    FunctionIdentifier, VariableIdentifier,
 };
 
 pub type Stack<N> = SmallVec<[N; 16]>;
@@ -163,44 +164,27 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            Self::Source(arg0) => Self::Source(arg0.clone()),
-            Self::BiOperation(arg0, arg1, arg2) => {
-                Self::BiOperation(*arg0, arg1.clone(), arg2.clone())
-            }
-            Self::UnOperation(arg0, arg1) => Self::UnOperation(*arg0, arg1.clone()),
-            Self::NFSingle(arg0, arg1, arg2) => Self::NFSingle(*arg0, arg1.clone(), *arg2),
-            Self::NFDual(arg0, arg1, arg2, arg3) => {
-                Self::NFDual(*arg0, arg1.clone(), arg2.clone(), *arg3)
-            }
+            Self::Source(arg0) => Self::Source(*arg0),
+            Self::BiOperation(arg0, arg1, arg2) => Self::BiOperation(*arg0, *arg1, *arg2),
+            Self::UnOperation(arg0, arg1) => Self::UnOperation(*arg0, *arg1),
+            Self::NFSingle(arg0, arg1, arg2) => Self::NFSingle(*arg0, *arg1, *arg2),
+            Self::NFDual(arg0, arg1, arg2, arg3) => Self::NFDual(*arg0, *arg1, *arg2, *arg3),
             Self::NFFlexible(arg0, arg1, arg2) => Self::NFFlexible(*arg0, *arg1, *arg2),
-            Self::CFSingle(arg0, arg1, arg2) => Self::CFSingle(*arg0, arg1.clone(), arg2.clone()),
-            Self::CFDual(arg0, arg1, arg2, arg3) => {
-                Self::CFDual(*arg0, arg1.clone(), arg2.clone(), arg3.clone())
+            Self::CFSingle(arg0, arg1, arg2) => Self::CFSingle(*arg0, *arg1, *arg2),
+            Self::CFDual(arg0, arg1, arg2, arg3) => Self::CFDual(*arg0, *arg1, *arg2, *arg3),
+            Self::CFTriple(arg0, arg1, arg2, arg3, arg4) => {
+                Self::CFTriple(*arg0, *arg1, *arg2, *arg3, *arg4)
             }
-            Self::CFTriple(arg0, arg1, arg2, arg3, arg4) => Self::CFTriple(
-                *arg0,
-                arg1.clone(),
-                arg2.clone(),
-                arg3.clone(),
-                arg4.clone(),
-            ),
-            Self::CFQuad(arg0, arg1, arg2, arg3, arg4, arg5) => Self::CFQuad(
-                *arg0,
-                arg1.clone(),
-                arg2.clone(),
-                arg3.clone(),
-                arg4.clone(),
-                arg5.clone(),
-            ),
-            Self::CFFlexible(arg0, arg1, arg2) => Self::CFFlexible(*arg0, *arg1, arg2.clone()),
+            Self::CFQuad(arg0, arg1, arg2, arg3, arg4, arg5) => {
+                Self::CFQuad(*arg0, *arg1, *arg2, *arg3, *arg4, *arg5)
+            }
+            Self::CFFlexible(arg0, arg1, arg2) => Self::CFFlexible(*arg0, *arg1, *arg2),
         }
     }
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct MathAssembly<'a, N: MathEvalNumber, F: FunctionIdentifier>(
-    Vec<Instruction<'a, N, F>>,
-);
+pub struct MathAssembly<'a, N: MathEvalNumber, F: FunctionIdentifier>(Vec<Instruction<'a, N, F>>);
 
 impl<N, F> Debug for MathAssembly<'_, N, F>
 where
@@ -229,7 +213,10 @@ where
     Flexible(&'a dyn Fn(&[N]) -> N),
 }
 
-impl<N> Debug for CFPointer<'_, N> where N: MathEvalNumber {
+impl<N> Debug for CFPointer<'_, N>
+where
+    N: MathEvalNumber,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Single(_) => f.write_str("Single"),
@@ -250,7 +237,7 @@ where
     pub fn new<V: VariableIdentifier>(
         arena: &Arena<SyntaxNode<N, V, F>>,
         root: NodeId,
-        function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
+        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_order: &[V],
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, F>> = Vec::new();
@@ -258,23 +245,21 @@ where
             Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
             Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
             Some(SyntaxNode::CustomFunction(cf)) => {
-                !matches!(function_to_pointer(cf), CFPointer::Flexible(_))
+                !matches!(function_to_pointer(*cf), CFPointer::Flexible(_))
             }
             _ => false,
         };
         let variables = variable_order
             .iter()
             .enumerate()
-            .map(|(i, v)| (v.clone(), i))
+            .map(|(i, v)| (*v, i))
             .collect::<HashMap<V, usize>>();
 
         for current in root.traverse(arena) {
             if let NodeEdge::End(cursor) = current {
                 let mut children_as_input = cursor.children(arena).map(|c| match arena[c].get() {
                     SyntaxNode::Number(num) => Input::Literal(*num),
-                    SyntaxNode::Variable(var) => {
-                        Input::Variable(*variables.get(var).unwrap())
-                    }
+                    SyntaxNode::Variable(var) => Input::Variable(*variables.get(var).unwrap()),
                     _ => Input::Memory,
                 });
                 let parent = cursor.ancestors(arena).nth(1);
@@ -315,24 +300,22 @@ where
                             Instruction::NFFlexible(p, cursor.children(arena).count() as u8, *nf)
                         }
                     },
-                    SyntaxNode::CustomFunction(cf) => match function_to_pointer(cf) {
-                        CFPointer::Single(func) => Instruction::CFSingle(
-                            func,
-                            children_as_input.next().unwrap(),
-                            cf.clone(),
-                        ),
+                    SyntaxNode::CustomFunction(cf) => match function_to_pointer(*cf) {
+                        CFPointer::Single(func) => {
+                            Instruction::CFSingle(func, children_as_input.next().unwrap(), *cf)
+                        }
                         CFPointer::Dual(func) => Instruction::CFDual(
                             func,
                             children_as_input.next().unwrap(),
                             children_as_input.next().unwrap(),
-                            cf.clone(),
+                            *cf,
                         ),
                         CFPointer::Triple(func) => Instruction::CFTriple(
                             func,
                             children_as_input.next().unwrap(),
                             children_as_input.next().unwrap(),
                             children_as_input.next().unwrap(),
-                            cf.clone(),
+                            *cf,
                         ),
                         CFPointer::Quad(func) => Instruction::CFQuad(
                             func,
@@ -340,13 +323,11 @@ where
                             children_as_input.next().unwrap(),
                             children_as_input.next().unwrap(),
                             children_as_input.next().unwrap(),
-                            cf.clone(),
+                            *cf,
                         ),
-                        CFPointer::Flexible(func) => Instruction::CFFlexible(
-                            func,
-                            cursor.children(arena).count() as u8,
-                            cf.clone(),
-                        ),
+                        CFPointer::Flexible(func) => {
+                            Instruction::CFFlexible(func, cursor.children(arena).count() as u8, *cf)
+                        }
                     },
                 };
                 result.push(instruction);
@@ -500,14 +481,14 @@ mod test {
         ParsingError,
     };
 
-    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     enum TestVar {
         X,
         Y,
         T,
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum TestFunc {
         Sigmoid,
         ISqrt,
