@@ -86,7 +86,9 @@ impl Display for ParsingErrorKind {
     }
 }
 
-pub fn parse<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+pub trait VariableStore<N: MathEvalNumber, V: VariableIdentifier> {
+    fn get<'a>(&'a self, var: &V) -> N::AsArg<'a>;
+}
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,

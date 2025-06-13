@@ -379,7 +379,7 @@ where
     pub fn eval<'a>(
         &self,
         function_to_pointer: impl Fn(&F) -> CFPointer<'a, N>,
-        variables: impl Fn(&V) -> N::AsArg<'_>,
+        variable_values: &dyn crate::VariableStore<N, V>,
     ) -> N {
         let mut stack: Stack<N> = Stack::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| self.0.arena[id].get()) {
@@ -400,7 +400,7 @@ where
                 ($node: expr) => {
                     match self.0.arena[$node.unwrap()].get() {
                         SyntaxNode::Number(num) => num.asarg(),
-                        SyntaxNode::Variable(var) => variables(var),
+                        SyntaxNode::Variable(var) => variable_values.get(var),
                         _ => {
                             argnum -= 1;
                             stack[argnum].asarg()
@@ -424,7 +424,7 @@ where
                     if is_fixed_input(parent) {
                         continue;
                     } else {
-                        variables(var).to_owned()
+                        variable_values.get(var).to_owned()
                     }
                 }
                 SyntaxNode::UnOperation(opr) => opr.eval(get!(children.next())),
@@ -699,6 +699,7 @@ mod test {
     use super::*;
     use crate::tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
     use crate::tree_utils::VecTree::{self, Leaf};
+    use crate::VariableStore;
 
     macro_rules! branch {
         ($node:expr, $($children:expr),+) => {
@@ -1209,13 +1210,18 @@ mod test {
 
     #[test]
     fn test_ast_eval() {
-        let var_sub = |var: &TestVar| -> f64 {
-            match *var {
-                TestVar::X => 1.0,
-                TestVar::Y => 5.0,
-                TestVar::T => 0.1,
+        struct VarStore;
+
+        impl VariableStore<f64, TestVar> for VarStore {
+            fn get<'a>(&'a self, var: &TestVar) -> f64 {
+                match var {
+                    TestVar::X => 1.0,
+                    TestVar::Y => 5.0,
+                    TestVar::T => 0.1,
+                }
             }
-        };
+        }
+
         let cf2p = |cf: &TestFunc| -> CFPointer<'_, f64> {
             match *cf {
                 TestFunc::Dist => CFPointer::Dual(&|x: f64, y: f64| (x * x + y * y).sqrt()),
@@ -1226,7 +1232,7 @@ mod test {
         };
         macro_rules! assert_eval {
             ($expr: literal, $res: literal) => {
-                assert_eq!(parse($expr).unwrap().eval(cf2p, var_sub), $res);
+                assert_eq!(parse($expr).unwrap().eval(cf2p, &VarStore), $res);
             };
         }
 
