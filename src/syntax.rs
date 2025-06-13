@@ -1204,8 +1204,8 @@ mod test {
     fn test_ast_eval() {
         struct VarStore;
 
-        impl VariableStore<f64, TestVar> for VarStore {
-            fn get<'a>(&'a self, var: &TestVar) -> f64 {
+        impl<'b> VariableStore<'b, f64, TestVar> for VarStore {
+            fn get<'a: 'b>(&'a self, var: TestVar) -> f64 {
                 match var {
                     TestVar::X => 1.0,
                     TestVar::Y => 5.0,
