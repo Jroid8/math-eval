@@ -232,7 +232,7 @@ where
         for current in root.traverse(arena) {
             if let NodeEdge::End(cursor) = current {
                 let mut children_as_input = cursor.children(arena).map(|c| match arena[c].get() {
-                    SyntaxNode::Number(num) => Input::Literal(*num),
+                    SyntaxNode::Number(num) => Input::Literal(num.clone()),
                     SyntaxNode::Variable(var) => Input::Variable(*variables.get(var).unwrap()),
                     _ => Input::Memory,
                 });
@@ -242,7 +242,7 @@ where
                         if is_fixed_input(parent) {
                             continue;
                         } else {
-                            Instruction::Source(Input::Literal(*num))
+                            Instruction::Source(Input::Literal(num.clone()))
                         }
                     }
                     SyntaxNode::Variable(var) => {
@@ -364,7 +364,7 @@ where
             }
             let result = match &instr {
                 Instruction::Source(input) => match input {
-                    Input::Literal(num) => *num,
+                    Input::Literal(num) => num.clone(),
                     Input::Variable(var) => variables[*var].to_owned(),
                     Input::Memory => stack.pop().unwrap(),
                 },

@@ -409,7 +409,7 @@ where
                     if is_fixed_input(parent) {
                         continue;
                     } else {
-                        *num
+                        num.clone()
                     }
                 }
                 SyntaxNode::Variable(var) => {
@@ -533,7 +533,7 @@ where
                 panic!();
             };
             let mut symbols: [Option<(NodeId, bool)>; 2] = [None, None];
-            let mut lhs = inital_value;
+            let mut lhs = inital_value.clone();
             for (upper_side, lower) in upper.children(&self.0.arena).enumerate() {
                 match self.0.arena[lower].get() {
                     SyntaxNode::BiOperation(lower_opr) => {
