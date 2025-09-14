@@ -140,10 +140,8 @@ pub fn compile<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifi
         custom_variable_parser,
     )
     .map_err(|e| e.to_general(input, &token_tree))?;
-    if optimize {
-        syntax_tree.aot_evaluation(&function_to_pointer);
-        syntax_tree.displacing_simplification();
-    }
+    syntax_tree.aot_evaluation(&function_to_pointer);
+    syntax_tree.displacing_simplification();
     Ok(MathAssembly::new(
         &syntax_tree.0.arena,
         syntax_tree.0.root,
@@ -152,19 +150,26 @@ pub fn compile<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifi
     ))
 }
 
-pub fn evaluate<N: MathEvalNumber>(input: &str) -> Result<N, ParsingError> {
-    parse(
-        input,
-        |_| None,
-        |_| None,
-        |_| None,
-        |_: &()| unreachable!(),
-        false,
-        &[],
-    )
-    .map(|asm: MathAssembly<'_, N, (), ()>| {
-        asm.eval(&[], &mut Stack::with_capacity(asm.stack_alloc_size()))
-    })
+pub fn evaluate<'a, 'b, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+    input: &str,
+    custom_constant_parser: impl Fn(&str) -> Option<N>,
+    custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
+    custom_variable_parser: impl Fn(&str) -> Option<V>,
+    function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+    variable_values: &impl VariableStore<N, V>,
+) -> Result<N, ParsingError> {
+    let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
+    let token_tree =
+        TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+    match SyntaxTree::new(
+        &token_tree,
+        custom_constant_parser,
+        custom_function_parser,
+        custom_variable_parser,
+    ) {
+        Ok(s) => Ok(s.eval(function_to_pointer, variable_values)),
+        Err(e) => Err(e.to_general(input, &token_tree)),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -315,25 +320,16 @@ where
             evalmethod: self.evalmethod,
         }
     }
-    fn parse(
-        &self,
-        input: &str,
-        optimize: bool,
-    ) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
-        parse(
-            input,
-            |inp| self.constants.get(inp).copied(),
-            |inp| self.function_identifier.get(inp).copied(),
-            |_| None,
-            |index| self.functions[*index],
-            optimize,
-            &[],
-        )
-    }
-    pub fn build_as_parser(self) -> impl Fn(&str) -> Result<N, ParsingError> + 'a {
+    pub fn build_as_evaluator(self) -> impl Fn(&str) -> Result<N, ParsingError> + 'a {
         move |input: &str| {
-            self.parse(input, false)
-                .map(|asm| asm.eval(&[], &mut Stack::with_capacity(asm.stack_alloc_size())))
+            evaluate(
+                input,
+                |inp| self.constants.get(inp).cloned(),
+                |inp| self.function_identifier.get(inp).copied(),
+                |_| None::<()>,
+                |idx| self.functions[idx].clone(),
+                &(),
+            )
         }
     }
 }
@@ -343,7 +339,14 @@ where
     N: MathEvalNumber,
 {
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
-        let expr = self.parse(input, true)?;
+        let expr = compile(
+            input,
+            |inp| self.constants.get(inp).cloned(),
+            |inp| self.function_identifier.get(inp).copied(),
+            |_| None::<()>,
+            |idx| self.functions[idx].clone(),
+            &[],
+        )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move || expr.eval(&[], &mut stack))
     }
@@ -357,22 +360,117 @@ where
         Self::default()
     }
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
-        let expr = self.parse(input, true)?;
+        let expr = compile(
+            input,
+            |inp| self.constants.get(inp).copied(),
+            |inp| self.function_identifier.get(inp).copied(),
+            |_| None::<()>,
+            |idx| self.functions[idx],
+            &[],
+        )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move || expr.eval_copy(&[], &mut stack))
     }
 }
 
-macro_rules! fn_build_as_parser {
+impl<'a, N, E> EvalBuilder<'a, N, OneVariable, E>
+where
+    N: MathEvalNumber,
+    E: 'static,
+{
+    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, TwoVariables, E> {
+        EvalBuilder {
+            constants: self.constants,
+            function_identifier: self.function_identifier,
+            functions: self.functions,
+            variables: TwoVariables([self.variables.0, name.into()]),
+            evalmethod: self.evalmethod,
+        }
+    }
+    pub fn build_as_evaluator(self) -> impl Fn(&str, N) -> Result<N, ParsingError> + 'a {
+        move |input: &str, v0: N| {
+            evaluate(
+                input,
+                |inp| self.constants.get(inp).cloned(),
+                |inp| self.function_identifier.get(inp).copied(),
+                |inp| Some(()).filter(|_| self.variables.0 == inp),
+                |idx| self.functions[idx].clone(),
+                &(v0,),
+            )
+        }
+    }
+}
+
+impl<'a, N> EvalBuilder<'a, N, OneVariable, EvalRef>
+where
+    N: MathEvalNumber,
+{
+    pub fn build_as_function<'b>(
+        self,
+        input: &str,
+    ) -> Result<impl FnMut(N::AsArg<'b>) -> N + 'a, ParsingError> {
+        let expr = compile(
+            input,
+            |inp| self.constants.get(inp).cloned(),
+            |inp| self.function_identifier.get(inp).copied(),
+            |inp| Some(()).filter(|_| self.variables.0 == inp),
+            |idx| self.functions[idx].clone(),
+            &[()],
+        )?;
+        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
+        Ok(move |v0| expr.eval(&[v0], &mut stack))
+    }
+}
+
+impl<'a, N> EvalBuilder<'a, N, OneVariable, EvalCopy>
+where
+    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
+{
+    pub fn build_as_function<'b>(
+        self,
+        input: &str,
+    ) -> Result<impl FnMut(N::AsArg<'b>) -> N + 'a, ParsingError> {
+        let expr = compile(
+            input,
+            |inp| self.constants.get(inp).copied(),
+            |inp| self.function_identifier.get(inp).copied(),
+            |inp| Some(()).filter(|_| self.variables.0 == inp),
+            |idx| self.functions[idx],
+            &[()],
+        )?;
+        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
+        Ok(move |v0| expr.eval_copy(&[v0], &mut stack))
+    }
+}
+
+seq!(I in 2..10 {
+    impl<N> VariableStore<N, u8> for [N; I]
+    where
+        N: MathEvalNumber,
+    {
+        fn get<'a>(&'a self, var: u8) -> N::AsArg<'a> {
+            self[var as usize].asarg()
+        }
+    }
+});
+
+macro_rules! fn_build_as_evaluator {
     ($n: expr) => {
         seq!(I in 0..$n {
-            pub fn build_as_parser<'b>(
-                self,
-            ) -> impl Fn(&str, #(N::AsArg<'b>,)*) -> Result<N, ParsingError> + 'a {
+            pub fn build_as_evaluator(self)
+                -> impl Fn(&str, #(N,)*) -> Result<N, ParsingError> + 'a {
                 move |input, #(v~I,)*| {
-                    self.parse(input, false)
-                        .map(|asm| asm.eval(&[#(v~I,)*],
-                            &mut Stack::with_capacity(asm.stack_alloc_size())))
+                    evaluate(
+                        input,
+                        |inp| self.constants.get(inp).cloned(),
+                        |inp| self.function_identifier.get(inp).copied(),
+                        |inp| self.variables.0
+                            .iter()
+                            .position(|var| var == inp)
+                            .map(|i| i as u8),
+                        |idx| self.functions[idx].clone(),
+                        &[#(v~I,)*],
+                    )
                 }
             }
         });
@@ -386,7 +484,14 @@ macro_rules! fn_build_as_function {
                 self,
                 input: &str,
             ) -> Result<impl FnMut(#(N::AsArg<'b>,)*) -> N + 'a, ParsingError> {
-                let expr = self.parse(input, true)?;
+                let expr = compile(
+                    input,
+                    |inp| self.constants.get(inp).cloned(),
+                    |inp| self.function_identifier.get(inp).copied(),
+                    |inp| self.variables.0.iter().position(|var| var == inp),
+                    |idx| self.functions[idx].clone(),
+                    &[#(I,)*],
+                )?;
                 let mut stack = Stack::with_capacity(expr.stack_alloc_size());
                 Ok(move |#(v~I,)*| expr.$f(&[#(v~I,)*], &mut stack))
             }
@@ -411,94 +516,13 @@ macro_rules! fn_add_variable {
     };
 }
 
-macro_rules! fn_parse {
-    ($n: expr) => {
-        seq!(I in 0..$n {
-            fn parse(
-                &self,
-                input: &str,
-                optimize: bool,
-            ) -> Result<MathAssembly<'a, N, u8, usize>, ParsingError> {
-                parse(
-                    input,
-                    |inp| self.constants.get(inp).copied(),
-                    |inp| self.function_identifier.get(inp).copied(),
-                    |inp| {
-                        self.variables
-                            .0
-                            .iter()
-                            .position(|var| *var == inp)
-                            .map(|i| i as u8)
-                    },
-                    |index| self.functions[*index],
-                    optimize,
-                    &[#(I,)*],
-                )
-            }
-        });
-    };
-}
-
-impl<'a, N, E> EvalBuilder<'a, N, OneVariable, E>
-where
-    N: MathEvalNumber,
-    E: 'static,
-{
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, TwoVariables, E> {
-        EvalBuilder {
-            constants: self.constants,
-            function_identifier: self.function_identifier,
-            functions: self.functions,
-            variables: TwoVariables([self.variables.0, name.into()]),
-            evalmethod: self.evalmethod,
-        }
-    }
-    fn parse(
-        &self,
-        input: &str,
-        optimize: bool,
-    ) -> Result<MathAssembly<'a, N, (), usize>, ParsingError> {
-        parse(
-            input,
-            |inp| self.constants.get(inp).copied(),
-            |inp| self.function_identifier.get(inp).copied(),
-            |inp| {
-                if self.variables.0 == inp {
-                    Some(())
-                } else {
-                    None
-                }
-            },
-            |index| self.functions[*index],
-            optimize,
-            &[()],
-        )
-    }
-    fn_build_as_parser!(1);
-}
-
-impl<'a, N> EvalBuilder<'a, N, OneVariable, EvalRef>
-where
-    N: MathEvalNumber,
-{
-    fn_build_as_function!(1, eval);
-}
-
-impl<'a, N> EvalBuilder<'a, N, OneVariable, EvalCopy>
-where
-    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
-{
-    fn_build_as_function!(1, eval_copy);
-}
-
 impl<'a, N, E> EvalBuilder<'a, N, TwoVariables, E>
 where
     N: MathEvalNumber,
     E: 'static,
 {
     fn_add_variable!(2, ThreeVariables);
-    fn_parse!(2);
-    fn_build_as_parser!(2);
+    fn_build_as_evaluator!(2);
 }
 
 impl<'a, N> EvalBuilder<'a, N, TwoVariables, EvalCopy>
@@ -521,8 +545,7 @@ where
     E: 'static,
 {
     fn_add_variable!(3, FourVariables);
-    fn_parse!(3);
-    fn_build_as_parser!(3);
+    fn_build_as_evaluator!(3);
 }
 
 impl<'a, N> EvalBuilder<'a, N, ThreeVariables, EvalRef>
@@ -553,8 +576,7 @@ where
             evalmethod: self.evalmethod,
         }
     }
-    fn_parse!(4);
-    fn_build_as_parser!(4);
+    fn_build_as_evaluator!(4);
 }
 
 impl<'a, N> EvalBuilder<'a, N, FourVariables, EvalRef>
@@ -587,27 +609,16 @@ where
     N: MathEvalNumber,
     E: 'static,
 {
-    fn parse(
-        &self,
-        input: &str,
-        optimize: bool,
-    ) -> Result<MathAssembly<'a, N, usize, usize>, ParsingError> {
-        parse(
-            input,
-            |inp| self.constants.get(inp).copied(),
-            |inp| self.function_identifier.get(inp).copied(),
-            |inp| self.variables.0.iter().position(|var| *var == inp),
-            |index| self.functions[*index],
-            optimize,
-            (0..self.variables.0.len()).collect::<Vec<_>>().as_slice(),
-        )
-    }
-    pub fn build_as_parser<'b>(
-        self,
-    ) -> impl Fn(&str, &[N::AsArg<'b>]) -> Result<N, ParsingError> + 'a {
-        move |input, vars: &[N::AsArg<'b>]| {
-            self.parse(input, false)
-                .map(|asm| asm.eval(vars, &mut Stack::with_capacity(asm.stack_alloc_size())))
+    pub fn build_as_evaluator(self) -> impl Fn(&str, &[N]) -> Result<N, ParsingError> + 'a {
+        move |input, vars| {
+            evaluate(
+                input,
+                |inp| self.constants.get(inp).cloned(),
+                |inp| self.function_identifier.get(inp).copied(),
+                |inp| self.variables.0.iter().position(|var| var == inp),
+                |idx| self.functions[idx].clone(),
+                &EBManyVarStore(vars),
+            )
         }
     }
 }
@@ -619,10 +630,17 @@ where
     pub fn build_as_function<'b>(
         self,
         input: &str,
-    ) -> Result<impl FnMut(&[N::AsArg<'b>]) -> N + 'a, ParsingError> {
-        let expr = self.parse(input, true)?;
+    ) -> Result<impl FnMut(&'b [N::AsArg<'b>]) -> N + 'a, ParsingError> {
+        let expr = compile(
+            input,
+            |inp| self.constants.get(inp).cloned(),
+            |inp| self.function_identifier.get(inp).copied(),
+            |inp| self.variables.0.iter().position(|var| var == inp),
+            |idx| self.functions[idx].clone(),
+            &(0..self.variables.0.len()).collect::<Vec<_>>(),
+        )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-        Ok(move |vars: &[N::AsArg<'b>]| expr.eval(vars, &mut stack))
+        Ok(move |vars| expr.eval(vars, &mut stack))
     }
 }
 
@@ -633,10 +651,17 @@ where
     pub fn build_as_function<'b>(
         self,
         input: &str,
-    ) -> Result<impl FnMut(&[N::AsArg<'b>]) -> N + 'a, ParsingError> {
-        let expr = self.parse(input, true)?;
+    ) -> Result<impl FnMut(&'b [N::AsArg<'b>]) -> N + 'a, ParsingError> {
+        let expr = compile(
+            input,
+            |inp| self.constants.get(inp).copied(),
+            |inp| self.function_identifier.get(inp).copied(),
+            |inp| self.variables.0.iter().position(|var| var == inp),
+            |idx| self.functions[idx],
+            &(0..self.variables.0.len()).collect::<Vec<_>>(),
+        )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-        Ok(move |vars: &[N::AsArg<'b>]| expr.eval_copy(vars, &mut stack))
+        Ok(move |vars| expr.eval_copy(vars, &mut stack))
     }
 }
 
@@ -677,9 +702,9 @@ mod test {
         macro_rules! test {
             ($bldr: expr, $exp: expr, ($($vars: tt)*), $res: expr) => {
                 let func_res = $bldr.clone().build_as_function($exp).unwrap()($($vars)*);
-                let parser_res = $bldr.clone().build_as_parser()($exp, $($vars)*).unwrap();
-                let func_ref_res = $bldr.clone().use_ref().build_as_parser()($exp, $($vars)*).unwrap();
-                let parser_ref_res = $bldr.use_ref().build_as_parser()($exp, $($vars)*).unwrap();
+                let parser_res = $bldr.clone().build_as_evaluator()($exp, $($vars)*).unwrap();
+                let func_ref_res = $bldr.clone().use_ref().build_as_evaluator()($exp, $($vars)*).unwrap();
+                let parser_ref_res = $bldr.use_ref().build_as_evaluator()($exp, $($vars)*).unwrap();
                 assert!((func_res - $res).abs() < threshold, "build_as_function result returned {func_res}, expected {}", $res);
                 assert!((parser_res - $res).abs() < threshold, "build_as_parser result returned {parser_res}, expected {}", $res);
                 assert!((func_ref_res - $res).abs() < threshold, "build_as_function with use_ref result returned {func_res}, expected {}", $res);

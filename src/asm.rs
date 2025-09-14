@@ -490,7 +490,7 @@ mod test {
     fn parse(
         input: &str,
     ) -> Result<Vec<Instruction<'static, f64, TestFunc>>, ParsingError> {
-        crate::parse(
+        crate::compile(
             input,
             |inp| if inp == "c" { Some(299792458.0) } else { None },
             |inp| match inp {
@@ -514,7 +514,6 @@ mod test {
                 TestFunc::Dist2 => CFPointer::Quad(&dist2),
                 TestFunc::Mean => CFPointer::Flexible(&mean),
             },
-            false,
             &[TestVar::X, TestVar::Y, TestVar::T],
         )
         .map(|ma| ma.0)
