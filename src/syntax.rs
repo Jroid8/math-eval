@@ -6,7 +6,7 @@ use crate::asm::{CFPointer, MathAssembly, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
 use crate::tokenizer::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
-use crate::{ParsingError, ParsingErrorKind, VariableIdentifier, FunctionIdentifier};
+use crate::{FunctionIdentifier, ParsingError, ParsingErrorKind, VariableIdentifier};
 use indextree::{NodeEdge, NodeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -371,7 +371,7 @@ where
     pub fn eval<'a>(
         &self,
         function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
-        variable_values: &dyn crate::VariableStore<'_, N, V>,
+        variable_values: &impl crate::VariableStore<N, V>,
     ) -> N {
         let mut stack: Stack<N> = Stack::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| self.0.arena[id].get()) {
@@ -392,7 +392,7 @@ where
                 ($node: expr) => {
                     match self.0.arena[$node.unwrap()].get() {
                         SyntaxNode::Number(num) => num.asarg(),
-                        SyntaxNode::Variable(var) => variable_values.get(var),
+                        SyntaxNode::Variable(var) => variable_values.get(*var),
                         _ => {
                             argnum -= 1;
                             stack[argnum].asarg()
@@ -416,7 +416,7 @@ where
                     if is_fixed_input(parent) {
                         continue;
                     } else {
-                        variable_values.get(var).to_owned()
+                        variable_values.get(*var).to_owned()
                     }
                 }
                 SyntaxNode::UnOperation(opr) => opr.eval(get!(children.next())),
@@ -431,7 +431,7 @@ where
                         func(&stack[argnum..])
                     }
                 },
-                SyntaxNode::CustomFunction(cf) => match function_to_pointer(cf) {
+                SyntaxNode::CustomFunction(cf) => match function_to_pointer(*cf) {
                     CFPointer::Single(func) => func(get!(children.next())),
                     CFPointer::Dual(func) => func(get!(children.next()), get!(children.next())),
                     CFPointer::Triple(func) => func(
@@ -1204,8 +1204,8 @@ mod test {
     fn test_ast_eval() {
         struct VarStore;
 
-        impl<'b> VariableStore<'b, f64, TestVar> for VarStore {
-            fn get<'a: 'b>(&'a self, var: TestVar) -> f64 {
+        impl VariableStore<f64, TestVar> for VarStore {
+            fn get(&self, var: TestVar) -> f64 {
                 match var {
                     TestVar::X => 1.0,
                     TestVar::Y => 5.0,

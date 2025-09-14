@@ -99,16 +99,37 @@ impl Display for ParsingErrorKind {
     }
 }
 
-pub trait VariableStore<'a, N: MathEvalNumber, V: VariableIdentifier> {
-    fn get<'b: 'a>(&'b self, var: V) -> N::AsArg<'b>;
+pub trait VariableStore<N: MathEvalNumber, V: VariableIdentifier> {
+    fn get<'a>(&'a self, var: V) -> N::AsArg<'a>;
 }
+
+impl<N, V> VariableStore<N, V> for ()
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+{
+    fn get<'a>(&'a self, var: V) -> N::AsArg<'a> {
+        panic!("Tried to get \"{var:?}\" variable from an empty variable store")
+    }
+}
+
+impl<N> VariableStore<N, ()> for (N,)
+where
+    N: MathEvalNumber,
+{
+    fn get<'a>(&'a self, _var: ()) -> N::AsArg<'a> {
+        self.0.asarg()
+    }
+}
+
+pub fn compile<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
     function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
     variable_order: &[V],
-) -> Result<MathAssembly<'a, N, V, F>, ParsingError> {
+) -> Result<MathAssembly<'a, N, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let token_tree =
         TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
@@ -548,6 +569,17 @@ where
     N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
 {
     fn_build_as_function!(4, eval_copy);
+}
+
+struct EBManyVarStore<'a, N: MathEvalNumber>(&'a [N]);
+
+impl<N> VariableStore<N, usize> for EBManyVarStore<'_, N>
+where
+    N: MathEvalNumber,
+{
+    fn get<'a>(&'a self, var: usize) -> <N as MathEvalNumber>::AsArg<'a> {
+        self.0[var].asarg()
+    }
 }
 
 impl<'a, N, E> EvalBuilder<'a, N, ManyVariables, E>
