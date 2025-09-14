@@ -17,7 +17,7 @@ pub enum Input<N: MathEvalNumber> {
     Memory,
 }
 
-#[derive(Copy)]
+#[derive(Clone, Copy)]
 pub enum Instruction<'a, N: MathEvalNumber, F: FunctionIdentifier> {
     Source(Input<N>),
     BiOperation(BiOperation, Input<N>, Input<N>),
@@ -153,32 +153,6 @@ where
             Self::CFFlexible(_, arg1, arg2) => {
                 f.debug_tuple("CFFlexible").field(arg1).field(arg2).finish()
             }
-        }
-    }
-}
-
-impl<N, F> Clone for Instruction<'_, N, F>
-where
-    N: MathEvalNumber,
-    F: FunctionIdentifier,
-{
-    fn clone(&self) -> Self {
-        match self {
-            Self::Source(arg0) => Self::Source(*arg0),
-            Self::BiOperation(arg0, arg1, arg2) => Self::BiOperation(*arg0, *arg1, *arg2),
-            Self::UnOperation(arg0, arg1) => Self::UnOperation(*arg0, *arg1),
-            Self::NFSingle(arg0, arg1, arg2) => Self::NFSingle(*arg0, *arg1, *arg2),
-            Self::NFDual(arg0, arg1, arg2, arg3) => Self::NFDual(*arg0, *arg1, *arg2, *arg3),
-            Self::NFFlexible(arg0, arg1, arg2) => Self::NFFlexible(*arg0, *arg1, *arg2),
-            Self::CFSingle(arg0, arg1, arg2) => Self::CFSingle(*arg0, *arg1, *arg2),
-            Self::CFDual(arg0, arg1, arg2, arg3) => Self::CFDual(*arg0, *arg1, *arg2, *arg3),
-            Self::CFTriple(arg0, arg1, arg2, arg3, arg4) => {
-                Self::CFTriple(*arg0, *arg1, *arg2, *arg3, *arg4)
-            }
-            Self::CFQuad(arg0, arg1, arg2, arg3, arg4, arg5) => {
-                Self::CFQuad(*arg0, *arg1, *arg2, *arg3, *arg4, *arg5)
-            }
-            Self::CFFlexible(arg0, arg1, arg2) => Self::CFFlexible(*arg0, *arg1, *arg2),
         }
     }
 }
