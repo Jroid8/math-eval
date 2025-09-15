@@ -226,9 +226,8 @@ where
             _ => false,
         };
 
-        let var_index = |var: V| -> usize {
-            variable_order.iter().position(|v| *v == var).unwrap()
-        };
+        let var_index =
+            |var: V| -> usize { variable_order.iter().position(|v| *v == var).unwrap() };
 
         for current in root.traverse(arena) {
             if let NodeEdge::End(cursor) = current {
