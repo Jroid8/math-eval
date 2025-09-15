@@ -450,7 +450,8 @@ mod test {
     use crate::{
         asm::{CFPointer, Input, Instruction, MathAssembly},
         number::{MathEvalNumber, NativeFunction},
-        syntax::{BiOperation, UnOperation},
+        syntax::{BiOperation, SyntaxTree, UnOperation},
+        tokenizer::{token_stream::TokenStream, token_tree::TokenTree},
         ParsingError,
     };
 
@@ -486,11 +487,12 @@ mod test {
         nums.iter().sum::<f64>() / nums.len() as f64
     }
 
-    fn parse(
-        input: &str,
-    ) -> Result<Vec<Instruction<'static, f64, TestFunc>>, ParsingError> {
-        crate::compile(
-            input,
+    fn parse(input: &str) -> Result<Vec<Instruction<'static, f64, TestFunc>>, ParsingError> {
+        let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
+        let token_tree =
+            TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+        let syntax_tree = SyntaxTree::new(
+            &token_tree,
             |inp| if inp == "c" { Some(299792458.0) } else { None },
             |inp| match inp {
                 "sigmoid" => Some((TestFunc::Sigmoid, 1, Some(1))),
@@ -506,6 +508,11 @@ mod test {
                 "t" => Some(TestVar::T),
                 _ => None,
             },
+        )
+        .map_err(|e| e.to_general(input, &token_tree))?;
+        Ok(MathAssembly::new(
+            &syntax_tree.0.arena,
+            syntax_tree.0.root,
             |func| match func {
                 TestFunc::Sigmoid => CFPointer::Single(&sigmoid),
                 TestFunc::ISqrt => CFPointer::Dual(&isqrt),
@@ -515,7 +522,7 @@ mod test {
             },
             &[TestVar::X, TestVar::Y, TestVar::T],
         )
-        .map(|ma| ma.0)
+        .0)
     }
 
     #[test]
@@ -630,11 +637,7 @@ mod test {
                     TestFunc::ISqrt
                 ),
                 Instruction::BiOperation(BiOperation::Div, Input::Memory, Input::Literal(32.0)),
-                Instruction::BiOperation(
-                    BiOperation::Div,
-                    Input::Variable(0),
-                    Input::Variable(1)
-                ),
+                Instruction::BiOperation(BiOperation::Div, Input::Variable(0), Input::Variable(1)),
                 Instruction::NFSingle(
                     <f64 as MathEvalNumber>::atan,
                     Input::Memory,
