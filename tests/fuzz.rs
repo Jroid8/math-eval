@@ -87,13 +87,12 @@ fn test_operator() {
             x => x,
         };
         let expr_str = format!("{x}{opr}{y}");
-        let expr = math_eval::parse(
+        let expr = math_eval::compile(
             &expr_str,
             |_| None,
             |_| None::<((), _, _)>,
             |_| None::<()>,
             |_| CFPointer::Single(&|_| 0.0),
-            true,
             &[],
         )
         .unwrap();
@@ -123,7 +122,7 @@ fn test_all_valid() {
         .add_variable("z")
         .add_variable("t")
         .add_constant("c", 299792458.0)
-        .build_as_parser();
+        .build_as_evaluator();
     for n in 1..=10 {
         for _ in 1..30 {
             let expr = generate_infallible_expr(n * n);
@@ -142,14 +141,14 @@ fn test_all_valid() {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum MyVars {
     X,
     Y,
     A,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 enum MyFuncs {
     Mean,
     Dist,
@@ -175,7 +174,7 @@ fn test_fuzz_symbols() {
             .map(|_| fastrand::choice(&symbols).unwrap().as_str())
             .collect();
         if let Err(err) = std::panic::catch_unwind(|| {
-            math_eval::parse(
+            math_eval::compile(
                 &expr,
                 |inp| if inp == "ke" { Some(8.99e9) } else { None },
                 |inp| match inp {
@@ -195,7 +194,6 @@ fn test_fuzz_symbols() {
                     }
                     MyFuncs::Dist => CFPointer::Dual(&|x, y| (x * x + y * y).sqrt()),
                 },
-                true,
                 &[MyVars::X, MyVars::Y, MyVars::A],
             )
         }) {
@@ -212,7 +210,7 @@ fn test_fuzz_all() {
             .map(|_| fastrand::char('\x00'..char::MAX))
             .collect();
         if let Err(err) = std::panic::catch_unwind(|| {
-            math_eval::parse(
+            math_eval::compile(
                 &noise,
                 |inp| if inp == "ke" { Some(8.99e9) } else { None },
                 |inp| match inp {
@@ -232,7 +230,6 @@ fn test_fuzz_all() {
                     }
                     MyFuncs::Dist => CFPointer::Dual(&|x, y| (x * x + y * y).sqrt()),
                 },
-                true,
                 &[MyVars::X, MyVars::Y, MyVars::A],
             )
         }) {
