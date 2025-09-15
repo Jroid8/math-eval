@@ -1,6 +1,6 @@
 use indextree::{Arena, NodeEdge, NodeId};
 use smallvec::SmallVec;
-use std::{collections::HashMap, fmt::Debug, hash::Hash};
+use std::{fmt::Debug, hash::Hash};
 
 use crate::{
     number::{MathEvalNumber, NativeFunction, Reborrow},
@@ -223,17 +223,16 @@ where
             }
             _ => false,
         };
-        let variables = variable_order
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (*v, i))
-            .collect::<HashMap<V, usize>>();
+
+        let var_index = |var: V| -> usize {
+            variable_order.iter().position(|v| *v == var).unwrap()
+        };
 
         for current in root.traverse(arena) {
             if let NodeEdge::End(cursor) = current {
                 let mut children_as_input = cursor.children(arena).map(|c| match arena[c].get() {
                     SyntaxNode::Number(num) => Input::Literal(num.clone()),
-                    SyntaxNode::Variable(var) => Input::Variable(*variables.get(var).unwrap()),
+                    SyntaxNode::Variable(var) => Input::Variable(var_index(*var)),
                     _ => Input::Memory,
                 });
                 let parent = cursor.ancestors(arena).nth(1);
@@ -249,7 +248,7 @@ where
                         if is_fixed_input(parent) {
                             continue;
                         } else {
-                            Instruction::Source(Input::Variable(*variables.get(var).unwrap()))
+                            Instruction::Source(Input::Variable(var_index(*var)))
                         }
                     }
                     SyntaxNode::BiOperation(opr) => Instruction::BiOperation(
