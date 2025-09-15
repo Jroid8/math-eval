@@ -261,16 +261,6 @@ where
         self.functions.push(CFPointer::Triple(function));
         self
     }
-    pub fn add_fn4(
-        mut self,
-        name: impl Into<String>,
-        function: &'a dyn Fn(N::AsArg<'_>, N::AsArg<'_>, N::AsArg<'_>, N::AsArg<'_>) -> N,
-    ) -> Self {
-        self.function_identifier
-            .insert(name.into(), (self.functions.len(), 4, Some(4)));
-        self.functions.push(CFPointer::Quad(function));
-        self
-    }
     pub fn add_fn_flex(
         mut self,
         name: impl Into<String>,

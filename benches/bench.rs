@@ -35,7 +35,6 @@ fn meval_bencher(b: &mut Bencher<'_>, input: &str) {
 fn matheval_bencher(b: &mut Bencher<'_>, input: &str) {
     let mut expr = EvalBuilder::new()
         .add_fn2("dist", &dist)
-        .add_fn4("slope", &slope)
         .add_variable("x")
         .add_variable("y")
         .add_variable("t")

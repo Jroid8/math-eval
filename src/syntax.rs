@@ -439,12 +439,6 @@ where
                         get!(children.next()),
                         get!(children.next()),
                     ),
-                    CFPointer::Quad(func) => func(
-                        get!(children.next()),
-                        get!(children.next()),
-                        get!(children.next()),
-                        get!(children.next()),
-                    ),
                     CFPointer::Flexible(func) => {
                         argnum -= children.count();
                         func(&stack[argnum..])

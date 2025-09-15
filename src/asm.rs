@@ -44,14 +44,6 @@ pub enum Instruction<'a, N: MathEvalNumber, F: FunctionIdentifier> {
         Input<N>,
         F,
     ),
-    CFQuad(
-        &'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N,
-        Input<N>,
-        Input<N>,
-        Input<N>,
-        Input<N>,
-        F,
-    ),
     CFFlexible(&'a dyn Fn(&[N]) -> N, u8, F),
 }
 
@@ -78,9 +70,6 @@ where
             }
             (Self::CFTriple(_, l1, l2, l3, l4), Self::CFTriple(_, r1, r2, r3, r4)) => {
                 l1 == r1 && l2 == r2 && l3 == r3 && l4 == r4
-            }
-            (Self::CFQuad(_, l1, l2, l3, l4, l5), Self::CFQuad(_, r1, r2, r3, r4, r5)) => {
-                l1 == r1 && l2 == r2 && l3 == r3 && l4 == r4 && l5 == r5
             }
             (Self::CFFlexible(_, l1, l2), Self::CFFlexible(_, r1, r2)) => l1 == r1 && l2 == r2,
             _ => false,
@@ -142,14 +131,6 @@ where
                 .field(arg3)
                 .field(arg4)
                 .finish(),
-            Self::CFQuad(_, arg1, arg2, arg3, arg4, arg5) => f
-                .debug_tuple("CFQuad")
-                .field(arg1)
-                .field(arg2)
-                .field(arg3)
-                .field(arg4)
-                .field(arg5)
-                .finish(),
             Self::CFFlexible(_, arg1, arg2) => {
                 f.debug_tuple("CFFlexible").field(arg1).field(arg2).finish()
             }
@@ -183,7 +164,6 @@ where
     Single(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N),
     Dual(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N),
     Triple(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
-    Quad(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
     Flexible(&'a dyn Fn(&[N]) -> N),
 }
 
@@ -198,7 +178,6 @@ where
             Self::Single(_) => f.write_str("Single"),
             Self::Dual(_) => f.write_str("Dual"),
             Self::Triple(_) => f.write_str("Triple"),
-            Self::Quad(_) => f.write_str("Quad"),
             Self::Flexible(_) => f.write_str("Flexible"),
         }
     }
@@ -291,14 +270,6 @@ where
                             children_as_input.next().unwrap(),
                             *cf,
                         ),
-                        CFPointer::Quad(func) => Instruction::CFQuad(
-                            func,
-                            children_as_input.next().unwrap(),
-                            children_as_input.next().unwrap(),
-                            children_as_input.next().unwrap(),
-                            children_as_input.next().unwrap(),
-                            *cf,
-                        ),
                         CFPointer::Flexible(func) => {
                             Instruction::CFFlexible(func, cursor.children(arena).count() as u8, *cf)
                         }
@@ -330,12 +301,6 @@ where
                 | Instruction::CFSingle(_, val, _) => input_stack_effect(val),
                 Instruction::CFTriple(_, inp1, inp2, inp3, _) => {
                     input_stack_effect(inp1) + input_stack_effect(inp2) + input_stack_effect(inp3)
-                }
-                Instruction::CFQuad(_, inp1, inp2, inp3, inp4, _) => {
-                    input_stack_effect(inp1)
-                        + input_stack_effect(inp2)
-                        + input_stack_effect(inp3)
-                        + input_stack_effect(inp4)
                 }
                 Instruction::NFFlexible(_, arg_count, _)
                 | Instruction::CFFlexible(_, arg_count, _) => -(*arg_count as i32),
@@ -380,9 +345,6 @@ where
                 Instruction::CFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
                 Instruction::CFTriple(func, inp1, inp2, inp3, _) => {
                     func(get!(inp1), get!(inp2), get!(inp3))
-                }
-                Instruction::CFQuad(func, inp1, inp2, inp3, inp4, _) => {
-                    func(get!(inp1), get!(inp2), get!(inp3), get!(inp4))
                 }
                 Instruction::CFFlexible(func, arg_count, _) => {
                     argnum -= *arg_count as usize;
@@ -430,9 +392,6 @@ where
                 Instruction::CFTriple(func, inp1, inp2, inp3, _) => {
                     func(get!(inp1), get!(inp2), get!(inp3))
                 }
-                Instruction::CFQuad(func, inp1, inp2, inp3, inp4, _) => {
-                    func(get!(inp1), get!(inp2), get!(inp3), get!(inp4))
-                }
                 Instruction::CFFlexible(func, arg_count, _) => {
                     let argnum = stack.len() - *arg_count as usize;
                     let res = func(&stack[argnum..]);
@@ -468,7 +427,6 @@ mod test {
         Sigmoid,
         ISqrt,
         Dist3,
-        Dist2,
         Mean,
     }
 
@@ -480,9 +438,6 @@ mod test {
     }
     fn dist3(x: f64, y: f64, z: f64) -> f64 {
         (x * x + y * y + z * z).sqrt()
-    }
-    fn dist2(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
-        ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt()
     }
     fn mean(nums: &[f64]) -> f64 {
         nums.iter().sum::<f64>() / nums.len() as f64
@@ -499,7 +454,6 @@ mod test {
                 "sigmoid" => Some((TestFunc::Sigmoid, 1, Some(1))),
                 "isqrt" => Some((TestFunc::ISqrt, 2, Some(2))),
                 "dist3" => Some((TestFunc::Dist3, 3, Some(3))),
-                "dist2" => Some((TestFunc::Dist2, 4, Some(4))),
                 "mean" => Some((TestFunc::Mean, 2, Some(2))),
                 _ => None,
             },
@@ -518,7 +472,6 @@ mod test {
                 TestFunc::Sigmoid => CFPointer::Single(&sigmoid),
                 TestFunc::ISqrt => CFPointer::Dual(&isqrt),
                 TestFunc::Dist3 => CFPointer::Triple(&dist3),
-                TestFunc::Dist2 => CFPointer::Quad(&dist2),
                 TestFunc::Mean => CFPointer::Flexible(&mean),
             },
             &[TestVar::X, TestVar::Y, TestVar::T],
@@ -607,17 +560,6 @@ mod test {
                 Input::Variable(1),
                 Input::Literal(3.0),
                 TestFunc::Dist3
-            )])
-        );
-        assert_eq!(
-            parse("dist2(x, y, 3, 4)"),
-            Ok(vec![Instruction::CFQuad(
-                &dist2,
-                Input::Variable(0),
-                Input::Variable(1),
-                Input::Literal(3.0),
-                Input::Literal(4.0),
-                TestFunc::Dist2
             )])
         );
         assert_eq!(
@@ -739,17 +681,6 @@ mod test {
                 Input::Literal(6.0),
                 Input::Literal(0.0),
                 Input::Literal(8.0),
-                TestFunc::ISqrt
-            )],
-            10.0
-        );
-        assert_eval!(
-            [Instruction::CFQuad(
-                &dist2,
-                Input::Literal(2.0),
-                Input::Literal(13.0),
-                Input::Literal(10.0),
-                Input::Literal(19.0),
                 TestFunc::ISqrt
             )],
             10.0
