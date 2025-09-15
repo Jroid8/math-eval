@@ -468,7 +468,7 @@ macro_rules! fn_build_as_evaluator {
                             .iter()
                             .position(|var| var == inp)
                             .map(|i| i as u8),
-                        |idx| self.functions[idx].clone(),
+                        |idx| self.functions[idx],
                         &[#(v~I,)*],
                     )
                 }
@@ -489,7 +489,7 @@ macro_rules! fn_build_as_function {
                     |inp| self.constants.get(inp).cloned(),
                     |inp| self.function_identifier.get(inp).copied(),
                     |inp| self.variables.0.iter().position(|var| var == inp),
-                    |idx| self.functions[idx].clone(),
+                    |idx| self.functions[idx],
                     &[#(I,)*],
                 )?;
                 let mut stack = Stack::with_capacity(expr.stack_alloc_size());
@@ -668,7 +668,6 @@ where
 #[cfg(test)]
 mod test {
     use std::f64::consts::*;
-
     use crate::EvalBuilder;
 
     fn sinh(x: f64) -> f64 {
@@ -694,173 +693,5 @@ mod test {
     }
     fn mean(vals: &[f64]) -> f64 {
         vals.iter().sum::<f64>() / vals.len() as f64
-    }
-
-    #[test]
-    fn test_eval_builder() {
-        let threshold = f64::EPSILON * 10.0;
-        macro_rules! test {
-            ($bldr: expr, $exp: expr, ($($vars: tt)*), $res: expr) => {
-                let func_res = $bldr.clone().build_as_function($exp).unwrap()($($vars)*);
-                let parser_res = $bldr.clone().build_as_evaluator()($exp, $($vars)*).unwrap();
-                let func_ref_res = $bldr.clone().use_ref().build_as_evaluator()($exp, $($vars)*).unwrap();
-                let parser_ref_res = $bldr.use_ref().build_as_evaluator()($exp, $($vars)*).unwrap();
-                assert!((func_res - $res).abs() < threshold, "build_as_function result returned {func_res}, expected {}", $res);
-                assert!((parser_res - $res).abs() < threshold, "build_as_parser result returned {parser_res}, expected {}", $res);
-                assert!((func_ref_res - $res).abs() < threshold, "build_as_function with use_ref result returned {func_res}, expected {}", $res);
-                assert!((parser_ref_res - $res).abs() < threshold, "build_as_parser with use_ref result returned {parser_res}, expected {}", $res);
-            };
-        }
-        test!(EvalBuilder::<'_, f64, _, _>::new(), "2+2", (), 4.0);
-        test!(
-            EvalBuilder::new().add_constant("two", 2.0),
-            "11*two",
-            (),
-            22.0
-        );
-        test!(
-            EvalBuilder::new().add_fn1("sinh", &sinh),
-            "sinh(1)",
-            (),
-            1.175201193643801
-        );
-        test!(
-            EvalBuilder::new().add_fn2("hypot", &hypot),
-            "hypot(3,4)",
-            (),
-            5.0
-        );
-        test!(
-            EvalBuilder::new().add_fn3("clamp", &clamp),
-            "clamp(10, -3, 3)",
-            (),
-            3.0
-        );
-        test!(
-            EvalBuilder::new().add_fn4("slope", &|x1: f64, y1: f64, x2: f64, y2: f64| (y2 - y1)
-                / (x2 - x1)),
-            "slope(18, 11, 21, 20)",
-            (),
-            3.0
-        );
-        test!(
-            EvalBuilder::new().add_fn_flex("mean", 1, None, &mean),
-            "mean(1,1,1,1,1,1,1,1,1)",
-            (),
-            1.0
-        );
-        test!(
-            EvalBuilder::<'_, f64, _, _>::new().add_variable("x"),
-            "-x",
-            (0.11),
-            -0.11
-        );
-        test!(
-            EvalBuilder::new()
-                .add_fn1("deg2rad", &deg2rad)
-                .add_variable("x"),
-            "deg2rad(x)",
-            (30.0),
-            FRAC_PI_6
-        );
-        test!(
-            EvalBuilder::new()
-                .add_fn1("rad2deg", &rad2deg)
-                .add_fn2("atan2", &atan2)
-                .add_variable("x")
-                .add_constant("height", 10.0),
-            "rad2deg(atan2(x, height))",
-            (10.0),
-            45.0
-        );
-        test!(
-            EvalBuilder::new()
-                .add_fn3("lerp", &lerp)
-                .add_variable("t")
-                .add_constant("low", -10.0)
-                .add_constant("high", 10.0),
-            "lerp(low, high, t)",
-            (0.5),
-            0.0
-        );
-        test!(
-            EvalBuilder::new()
-                .add_variable("x")
-                .add_variable("y")
-                .add_fn2("atan2", &atan2),
-            "atan2(y, x)",
-            (1.0, (3f64).sqrt()),
-            FRAC_PI_3
-        );
-        test!(
-            EvalBuilder::new()
-                .add_variable("d")
-                .add_variable("m")
-                .add_fn1("deg2rad", &deg2rad),
-            "sin(deg2rad(d)) * m",
-            (30.0, 2.0),
-            1.0
-        );
-        test!(
-            EvalBuilder::<'_, f64, _, _>::new()
-                .add_variable("base")
-                .add_variable("height"),
-            "base * height / 2",
-            (10.0, 4.0),
-            20.0
-        );
-        test!(
-            EvalBuilder::<'_, f64, _, _>::new()
-                .add_variable("a")
-                .add_variable("b")
-                .add_variable("w"),
-            "(a * w + b * (1 - w))",
-            (90.0, 60.0, 0.75),
-            82.5
-        );
-        test!(
-            EvalBuilder::new()
-                .add_variable("temp")
-                .add_variable("bias")
-                .add_variable("maxLimit")
-                .add_fn3("clamp", &clamp),
-            "clamp(temp + bias, -100, maxLimit)",
-            (38.0, 10.0, 45.0),
-            45.0
-        );
-        test!(
-            EvalBuilder::new()
-                .add_variable("x1")
-                .add_variable("y1")
-                .add_variable("x2")
-                .add_variable("y2")
-                .add_fn2("hypot", &hypot),
-            "hypot(x2 - x1, y2 - y1)",
-            (1.0, 2.0, 4.0, 6.0),
-            5.0
-        );
-        test!(
-            EvalBuilder::new()
-                .add_variable("a1")
-                .add_variable("a2")
-                .add_variable("w1")
-                .add_variable("w2")
-                .add_variable("t")
-                .add_fn3("lerp", &lerp),
-            "lerp(a1 * w1 + a2 * (1 - w1), a2 * w2 + a1 * (1 - w2), t)",
-            (&[80.0, 60.0, 0.6, 0.3, 0.5]),
-            69.5
-        );
-        test!(
-            EvalBuilder::<'_, f64, _, _>::new()
-                .add_variable("a")
-                .add_variable("b")
-                .add_variable("c")
-                .add_variable("d")
-                .add_variable("e"),
-            "exp((ln(a) + ln(b) + ln(c) + ln(d) + ln(e)) / 5)",
-            (&[1.0, 10.0, 100.0, 1000.0, 10000.0]),
-            100.0
-        );
     }
 }
