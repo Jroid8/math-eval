@@ -175,7 +175,7 @@ where
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum CFPointer<'a, N>
 where
     N: MathEvalNumber,
@@ -186,6 +186,8 @@ where
     Quad(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
     Flexible(&'a dyn Fn(&[N]) -> N),
 }
+
+impl<'a, N> Copy for CFPointer<'a, N> where N: MathEvalNumber {}
 
 impl<N> Debug for CFPointer<'_, N>
 where

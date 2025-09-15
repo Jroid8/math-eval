@@ -327,7 +327,7 @@ where
                 |inp| self.constants.get(inp).cloned(),
                 |inp| self.function_identifier.get(inp).copied(),
                 |_| None::<()>,
-                |idx| self.functions[idx].clone(),
+                |idx| self.functions[idx],
                 &(),
             )
         }
@@ -344,7 +344,7 @@ where
             |inp| self.constants.get(inp).cloned(),
             |inp| self.function_identifier.get(inp).copied(),
             |_| None::<()>,
-            |idx| self.functions[idx].clone(),
+            |idx| self.functions[idx],
             &[],
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
@@ -394,7 +394,7 @@ where
                 |inp| self.constants.get(inp).cloned(),
                 |inp| self.function_identifier.get(inp).copied(),
                 |inp| Some(()).filter(|_| self.variables.0 == inp),
-                |idx| self.functions[idx].clone(),
+                |idx| self.functions[idx],
                 &(v0,),
             )
         }
@@ -414,7 +414,7 @@ where
             |inp| self.constants.get(inp).cloned(),
             |inp| self.function_identifier.get(inp).copied(),
             |inp| Some(()).filter(|_| self.variables.0 == inp),
-            |idx| self.functions[idx].clone(),
+            |idx| self.functions[idx],
             &[()],
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
@@ -616,7 +616,7 @@ where
                 |inp| self.constants.get(inp).cloned(),
                 |inp| self.function_identifier.get(inp).copied(),
                 |inp| self.variables.0.iter().position(|var| var == inp),
-                |idx| self.functions[idx].clone(),
+                |idx| self.functions[idx],
                 &EBManyVarStore(vars),
             )
         }
@@ -636,7 +636,7 @@ where
             |inp| self.constants.get(inp).cloned(),
             |inp| self.function_identifier.get(inp).copied(),
             |inp| self.variables.0.iter().position(|var| var == inp),
-            |idx| self.functions[idx].clone(),
+            |idx| self.functions[idx],
             &(0..self.variables.0.len()).collect::<Vec<_>>(),
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
