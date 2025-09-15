@@ -17,11 +17,11 @@ pub mod syntax;
 pub mod tokenizer;
 pub mod tree_utils;
 
-pub trait VariableIdentifier: Clone + Copy + Debug + Hash + Eq + 'static {}
+pub trait VariableIdentifier: Clone + Copy + Eq + 'static {}
 
 impl<T> VariableIdentifier for T where T: Clone + Copy + Debug + Hash + Eq + 'static {}
 
-pub trait FunctionIdentifier: Clone + Copy + Debug + 'static {}
+pub trait FunctionIdentifier: Clone + Copy + 'static {}
 
 impl<T> FunctionIdentifier for T where T: Clone + Copy + Debug + 'static {}
 
@@ -106,7 +106,7 @@ pub trait VariableStore<N: MathEvalNumber, V: VariableIdentifier> {
 impl<N, V> VariableStore<N, V> for ()
 where
     N: MathEvalNumber,
-    V: VariableIdentifier,
+    V: VariableIdentifier + Debug,
 {
     fn get<'a>(&'a self, var: V) -> N::AsArg<'a> {
         panic!("Tried to get \"{var:?}\" variable from an empty variable store")
