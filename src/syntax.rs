@@ -96,6 +96,19 @@ impl BiOperation {
             BiOperation::Mod => '%',
         }
     }
+    pub fn is_commutative(self) -> bool {
+        matches!(self, BiOperation::Add | BiOperation::Mul)
+    }
+    pub fn precedence(self) -> u8 {
+        match self {
+            BiOperation::Add => 0,
+            BiOperation::Sub => 0,
+            BiOperation::Mul => 1,
+            BiOperation::Div => 1,
+            BiOperation::Mod => 1,
+            BiOperation::Pow => 2,
+        }
+    }
 }
 
 impl Display for BiOperation {
@@ -637,39 +650,87 @@ where
     F: FunctionIdentifier + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for edge in self.0.root.traverse(&self.0.arena) {
+        let arena = &self.0.arena;
+        for edge in self.0.root.traverse(arena) {
             match edge {
-                NodeEdge::Start(node) => match self.0.arena[node].get() {
-                    SyntaxNode::Number(num) => std::fmt::Display::fmt(num, f)?,
+                NodeEdge::Start(node) => match arena[node].get() {
+                    SyntaxNode::Number(num) => Display::fmt(num, f)?,
                     SyntaxNode::Variable(var) => Display::fmt(&var, f)?,
-                    SyntaxNode::BiOperation(_) => (),
-                    SyntaxNode::UnOperation(opr) => std::fmt::Display::fmt(opr, f)?,
+                    SyntaxNode::BiOperation(opr) => {
+                        if matches!(
+                            node.ancestors(arena).nth(1).map(|p| arena[p].get()),
+                            Some(SyntaxNode::BiOperation(paopr))
+                                if opr.precedence() < paopr.precedence()
+                                || !paopr.is_commutative() && opr.precedence() <= paopr.precedence()
+                        ) {
+                            f.write_str("(")?;
+                        }
+                    }
+                    SyntaxNode::UnOperation(UnOperation::Neg) => {
+                        // parent is BiOperation, and Neg is the rhs
+                        if node
+                            .ancestors(arena)
+                            .nth(1)
+                            .filter(|p| matches!(arena[*p].get(), SyntaxNode::BiOperation(_)))
+                            .map(|p| p.children(arena).nth(1))
+                            .is_some()
+                        {
+                            f.write_str("(")?;
+                        }
+                        Display::fmt(&UnOperation::Neg, f)?;
+                    }
                     SyntaxNode::NativeFunction(nf) => {
-                        std::fmt::Display::fmt(nf, f)?;
+                        Display::fmt(nf, f)?;
                         f.write_str("(")?
                     }
                     SyntaxNode::CustomFunction(cf) => {
                         Display::fmt(&cf, f)?;
                         f.write_str("(")?
                     }
+                    _ => (),
                 },
                 NodeEdge::End(node) => {
-                    match self.0.arena[node].get() {
+                    match arena[node].get() {
+                        SyntaxNode::BiOperation(opr) => {
+                            if matches!(
+                                node.ancestors(arena).nth(1).map(|p| arena[p].get()),
+                                Some(SyntaxNode::BiOperation(paopr))
+                                    if opr.precedence() < paopr.precedence()
+                                    || !paopr.is_commutative() && opr.precedence() <= paopr.precedence()
+                            ) {
+                                f.write_str(")")?
+                            }
+                        }
+                        SyntaxNode::UnOperation(UnOperation::Neg) => {
+                            if node
+                                .ancestors(arena)
+                                .nth(1)
+                                .filter(|p| matches!(arena[*p].get(), SyntaxNode::BiOperation(_)))
+                                .map(|p| p.children(arena).nth(1))
+                                .is_some()
+                            {
+                                f.write_str(")")?;
+                            }
+                        }
+                        SyntaxNode::UnOperation(UnOperation::Fac) => {
+                            f.write_str("!")?;
+                        }
                         SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_) => {
                             f.write_str(")")?
                         }
                         _ => (),
                     };
-                    if node.following_siblings(&self.0.arena).nth(1).is_some() {
-                        match node
-                            .ancestors(&self.0.arena)
-                            .nth(1)
-                            .map(|p| self.0.arena[p].get())
-                        {
+                    if node.following_siblings(arena).nth(1).is_some() {
+                        match node.ancestors(arena).nth(1).map(|p| arena[p].get()) {
                             Some(SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_)) => {
                                 f.write_str(", ")?
                             }
-                            Some(SyntaxNode::BiOperation(opr)) => std::fmt::Display::fmt(&opr, f)?,
+                            Some(SyntaxNode::BiOperation(opr))
+                                if *opr == BiOperation::Add || *opr == BiOperation::Sub =>
+                            {
+                                write!(f, " {} ", opr.as_char())?;
+                            }
+                            Some(SyntaxNode::BiOperation(opr)) => Display::fmt(&opr, f)?,
                             _ => (),
                         }
                     }
@@ -1136,27 +1197,42 @@ mod test {
         }
         compare!("x/1/8", "0.125*x");
         compare!("(x/16)/(y*4)", "0.015625*x/y");
-        compare!("(7/x)/(y/2)", "14/x*y");
+        compare!("(7/x)/(y/2)", "14/(x*y)");
         compare!("(x/4)/(4/y)", "0.0625*x*y");
-        compare!("10-x+12", "22-x");
+        compare!("10-x+12", "22 - x");
         compare!("x*pi*2", "6.283185307179586*x");
     }
 
     #[test]
     fn test_syntax_display() {
-        macro_rules! test {
-            ($input:literal) => {
-                assert_eq!($input, parse($input).unwrap().to_string());
-            };
+        let cases = [
+            "x",
+            "-y!",
+            "1 + x",
+            "10 - t + 12",
+            "3*x - 2*y",
+            "y^3 - 4*y^2 + y - 7",
+            "x*5*y/4*3",
+            "(x + 1)*(y - 1)",
+            "1/(y - 1)",
+            "1/(2*sqrt(y))",
+            "y - (x + 1)",
+            "x - y!",
+            "x/(-y)",
+            "x/y!",
+            "(7/x)/(y/2)",
+            "(t^2 + 3*t + 2)/(t + 1)",
+            "sin(x)",
+            "x/sin(x + 1)",
+            "clamp(x, 0, 1)",
+            "min(1, x, y^2, x*y + 1)",
+            "max(1, x, y^2, x*y + 1, sin(x*cos(y) + 1))",
+            "digits(1, deg2rad(t), y^2, x*y + 1, sin(x*cos(y) + 1))",
+        ];
+
+        for c in cases {
+            assert_eq!(c, parse(c).unwrap().to_string());
         }
-        test!("x");
-        test!("1+x");
-        test!("sin(x)");
-        test!("dist(x, y)");
-        test!("min(1, x)");
-        test!("min(1, x, y^2)");
-        test!("min(1, x, y^2, x*y+1)");
-        test!("min(1, x, y^2, x*y+1, sin(x*cos(y)+1))");
     }
 
     #[test]
