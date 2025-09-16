@@ -586,15 +586,13 @@ where
     fn_build_as_function!(4, eval_copy);
 }
 
-struct EBManyVarStore<'a, N: MathEvalNumber>(&'a [N]);
-
-impl<N> VariableStore<N, usize> for EBManyVarStore<'_, N>
+impl<N> VariableStore<N, usize> for &'_ [N]
 where
     N: MathEvalNumber,
 {
     #[inline]
     fn get<'a>(&'a self, var: usize) -> <N as MathEvalNumber>::AsArg<'a> {
-        self.0[var].asarg()
+        self[var].asarg()
     }
 }
 
@@ -611,7 +609,7 @@ where
                 |inp| self.function_identifier.get(inp).copied(),
                 |inp| self.variables.0.iter().position(|var| var == inp),
                 |idx| self.functions[idx],
-                &EBManyVarStore(vars),
+                &vars,
             )
         }
     }
