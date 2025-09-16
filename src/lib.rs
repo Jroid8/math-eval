@@ -108,6 +108,7 @@ where
     N: MathEvalNumber,
     V: VariableIdentifier + Debug,
 {
+    #[inline]
     fn get<'a>(&'a self, var: V) -> N::AsArg<'a> {
         panic!("Tried to get \"{var:?}\" variable from an empty variable store")
     }
@@ -117,6 +118,7 @@ impl<N> VariableStore<N, ()> for (N,)
 where
     N: MathEvalNumber,
 {
+    #[inline]
     fn get<'a>(&'a self, _var: ()) -> N::AsArg<'a> {
         self.0.asarg()
     }
@@ -438,6 +440,7 @@ seq!(I in 2..10 {
     where
         N: MathEvalNumber,
     {
+        #[inline]
         fn get<'a>(&'a self, var: u8) -> N::AsArg<'a> {
             self[var as usize].asarg()
         }
@@ -589,6 +592,7 @@ impl<N> VariableStore<N, usize> for EBManyVarStore<'_, N>
 where
     N: MathEvalNumber,
 {
+    #[inline]
     fn get<'a>(&'a self, var: usize) -> <N as MathEvalNumber>::AsArg<'a> {
         self.0[var].asarg()
     }
