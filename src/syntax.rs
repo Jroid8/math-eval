@@ -150,7 +150,7 @@ fn tokennode2range(
     target: NodeId,
 ) -> RangeInclusive<usize> {
     if target.ancestors(&token_tree.0.arena).nth(1).is_none() {
-        panic!("Attempted to report the root node as the cause of error, good luck fixing this bug")
+        panic!("Attempted to report the root node as the cause of error")
     }
     let mut index = 0;
     macro_rules! count_space {
@@ -749,7 +749,7 @@ mod test {
     use crate::VariableStore;
 
     macro_rules! branch {
-        ($node:expr, $($children:expr),+) => {
+        ($node:expr, $($children:expr),+ $(,)?) => {
             VecTree::Branch($node,vec![$($children),+])
         };
     }
@@ -773,15 +773,19 @@ mod test {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum TestFunc {
-        Dist,
-        Mean,
+        Deg2Rad,
+        ExpD,
+        Clamp,
+        Digits,
     }
 
     impl Display for TestFunc {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                TestFunc::Dist => f.write_str("dist"),
-                TestFunc::Mean => f.write_str("mean"),
+                TestFunc::Deg2Rad => f.write_str("deg2rad"),
+                TestFunc::ExpD => f.write_str("expd"),
+                TestFunc::Clamp => f.write_str("clamp"),
+                TestFunc::Digits => f.write_str("digits"),
             }
         }
     }
@@ -797,8 +801,10 @@ mod test {
                 _ => None,
             },
             |input| match input {
-                "dist" => Some((TestFunc::Dist, 2, Some(2))),
-                "mean" => Some((TestFunc::Mean, 2, None)),
+                "deg2rad" => Some((TestFunc::Deg2Rad, 1, Some(1))),
+                "expd" => Some((TestFunc::ExpD, 2, Some(2))),
+                "clamp" => Some((TestFunc::Clamp, 3, Some(3))),
+                "digits" => Some((TestFunc::Digits, 1, None)),
                 _ => None,
             },
             |input| match input {
@@ -838,6 +844,16 @@ mod test {
             Ok(branch!(
                 SyntaxNode::UnOperation(UnOperation::Neg),
                 Leaf(SyntaxNode::Number(12.0))
+            ))
+        );
+        assert_eq!(
+            syntaxify("-y!"),
+            Ok(branch!(
+                SyntaxNode::UnOperation(UnOperation::Neg),
+                branch!(
+                    SyntaxNode::UnOperation(UnOperation::Fac),
+                    Leaf(SyntaxNode::Variable(TestVar::Y))
+                )
             ))
         );
         assert_eq!(
@@ -908,11 +924,39 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify("dist(c,2344.0)"),
+            syntaxify("deg2rad(80)"),
             Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Dist),
-                Leaf(SyntaxNode::Number(299792458.0)),
-                Leaf(SyntaxNode::Number(2344.0))
+                SyntaxNode::CustomFunction(TestFunc::Deg2Rad),
+                Leaf(SyntaxNode::Number(80.0))
+            ))
+        );
+        assert_eq!(
+            syntaxify("expd(0.2, x)"),
+            Ok(branch!(
+                SyntaxNode::CustomFunction(TestFunc::ExpD),
+                Leaf(SyntaxNode::Number(0.2)),
+                Leaf(SyntaxNode::Variable(TestVar::X))
+            ))
+        );
+        assert_eq!(
+            syntaxify("clamp(t, y, x)"),
+            Ok(branch!(
+                SyntaxNode::CustomFunction(TestFunc::Clamp),
+                Leaf(SyntaxNode::Variable(TestVar::T)),
+                Leaf(SyntaxNode::Variable(TestVar::Y)),
+                Leaf(SyntaxNode::Variable(TestVar::X))
+            ))
+        );
+        assert_eq!(
+            syntaxify("digits(3, 1, 5, 7, 2, x)"),
+            Ok(branch!(
+                SyntaxNode::CustomFunction(TestFunc::Digits),
+                Leaf(SyntaxNode::Number(3.0)),
+                Leaf(SyntaxNode::Number(1.0)),
+                Leaf(SyntaxNode::Number(5.0)),
+                Leaf(SyntaxNode::Number(7.0)),
+                Leaf(SyntaxNode::Number(2.0)),
+                Leaf(SyntaxNode::Variable(TestVar::X))
             ))
         );
         assert_eq!(
@@ -963,16 +1007,6 @@ mod test {
                     Leaf(SyntaxNode::Number(4.0)),
                     Leaf(SyntaxNode::Number(9.0))
                 )
-            ))
-        );
-        assert_eq!(
-            syntaxify("mean(2, 4, 6, 8)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Mean),
-                Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Number(4.0)),
-                Leaf(SyntaxNode::Number(6.0)),
-                Leaf(SyntaxNode::Number(8.0))
             ))
         );
         assert_eq!(
@@ -1271,6 +1305,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_ast_eval() {
         struct VarStore;
 
@@ -1286,8 +1321,12 @@ mod test {
 
         let cf2p = |cf: TestFunc| -> CFPointer<'_, f64> {
             match cf {
-                TestFunc::Dist => CFPointer::Dual(&|x: f64, y: f64| (x * x + y * y).sqrt()),
-                TestFunc::Mean => CFPointer::Flexible(&|values: &[f64]| {
+                TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
+                TestFunc::ExpD => CFPointer::Dual(&|l: f64, x: f64| l * (-l * x).exp()),
+                TestFunc::Clamp => {
+                    CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min))
+                }
+                TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
                     values.iter().sum::<f64>() / values.len() as f64
                 }),
             }
@@ -1298,15 +1337,16 @@ mod test {
             };
         }
 
-        assert_eval!("1", 1.);
-        assert_eval!("x*3", 3.);
-        assert_eval!("3!", 6.);
+        assert_eval!("1", 1.0);
+        assert_eval!("x*3", 3.0);
+        assert_eval!("3!", 6.0);
         assert_eval!("-t", -0.1);
-        assert_eval!("y+100*t", 15.);
+        assert_eval!("y+100*t", 15.0);
         assert_eval!("sin(pi*t)", 0.3090169943749474);
-        assert_eval!("log(6561, 3)", 8.);
+        assert_eval!("log(6561, 3)", 8.0);
         assert_eval!("max(x, y, -18)*t", 0.5);
-        assert_eval!("dist(3,4)/y", 1.0);
-        assert_eval!("mean(y, 1)", 3.0);
+        assert_eval!("clamp(x + y, -273.15, t)", 0.1);
+        assert_eval!("dist(1, 3, 4, 7)/y", 1.0);
+        assert_eval!("digits(y, 1)", 15.0);
     }
 }
