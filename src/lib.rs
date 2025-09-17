@@ -174,22 +174,22 @@ pub fn evaluate<'a, 'b, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIde
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NoVariable;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OneVariable(String);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TwoVariables([String; 2]);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThreeVariables([String; 3]);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FourVariables([String; 4]);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ManyVariables(Vec<String>);
 
 #[derive(Clone, Debug)]
@@ -385,7 +385,7 @@ where
                 input,
                 |inp| self.constants.get(inp).cloned(),
                 |inp| self.function_identifier.get(inp).copied(),
-                |inp| Some(()).filter(|_| self.variables.0 == inp),
+                |inp| (self.variables.0 == inp).then_some(()),
                 |idx| self.functions[idx],
                 &(v0,),
             )
@@ -405,7 +405,7 @@ where
             input,
             |inp| self.constants.get(inp).cloned(),
             |inp| self.function_identifier.get(inp).copied(),
-            |inp| Some(()).filter(|_| self.variables.0 == inp),
+            |inp| (self.variables.0 == inp).then_some(()),
             |idx| self.functions[idx],
             &[()],
         )?;
@@ -426,7 +426,7 @@ where
             input,
             |inp| self.constants.get(inp).copied(),
             |inp| self.function_identifier.get(inp).copied(),
-            |inp| Some(()).filter(|_| self.variables.0 == inp),
+            |inp| (self.variables.0 == inp).then_some(()),
             |idx| self.functions[idx],
             &[()],
         )?;
@@ -659,31 +659,365 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::f64::consts::*;
-    use crate::EvalBuilder;
+    use std::collections::HashMap;
 
-    fn sinh(x: f64) -> f64 {
-        (E.powf(x) - E.powf(-x)) / 2.0
+    use super::*;
+    use crate::asm::CFPointer;
+
+    #[derive(PartialEq, Debug)]
+    struct UnexpectedBuilderFieldValues<V> {
+        constants: Option<(HashMap<String, f64>, HashMap<String, f64>)>,
+        function_identifier: Option<(
+            HashMap<String, (usize, u8, Option<u8>)>,
+            HashMap<String, (usize, u8, Option<u8>)>,
+        )>,
+        functions: Vec<(usize, f64)>,
+        variables: Option<(V, V)>,
     }
-    fn hypot(x: f64, y: f64) -> f64 {
-        (x * x + y * y).sqrt()
+
+    impl<V> Display for UnexpectedBuilderFieldValues<V>
+    where
+        V: Debug,
+    {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            if let Some(consts) = &self.constants {
+                writeln!(f, "constants: {:?} != {:?}", consts.0, consts.1)?;
+            }
+            if let Some(fi) = &self.function_identifier {
+                writeln!(f, "function_identifier: {:?} != {:?}", fi.0, fi.1)?;
+            }
+            if !self.functions.is_empty() {
+                writeln!(f, "functions: {:?}", self.functions)?;
+            }
+            if let Some(vars) = &self.variables {
+                writeln!(f, "variables: {:?} != {:?}", vars.0, vars.1)?;
+            }
+            Ok(())
+        }
     }
-    fn clamp(x: f64, min: f64, max: f64) -> f64 {
-        x.min(max).max(min)
+
+    #[allow(clippy::result_large_err)]
+    fn compare<V: PartialEq, E>(
+        builder: EvalBuilder<'_, f64, V, E>,
+        constants: impl Iterator<Item = (&'static str, f64)>,
+        function_identifier: impl Iterator<Item = (&'static str, usize, u8, Option<u8>)>,
+        variables: V,
+        _evalmethod: E,
+    ) -> Option<UnexpectedBuilderFieldValues<V>> {
+        let constants = constants.map(|(n, v)| (n.to_string(), v)).collect();
+        let function_identifier = function_identifier
+            .map(|(n, id, min, max)| (n.to_string(), (id, min, max)))
+            .collect();
+        let res = UnexpectedBuilderFieldValues {
+            constants: (builder.constants != constants).then_some((builder.constants, constants)),
+            function_identifier: (builder.function_identifier != function_identifier)
+                .then_some((builder.function_identifier, function_identifier)),
+            functions: builder
+                .functions
+                .iter()
+                .enumerate()
+                .filter_map(|(i, cfp)| match cfp {
+                    CFPointer::Single(f) => Some((i, f(0.0))).filter(|(i, v)| *i != *v as usize),
+                    CFPointer::Dual(f) => Some((i, f(0.0, 0.0))).filter(|(i, v)| *i != *v as usize),
+                    CFPointer::Triple(f) => {
+                        Some((i, f(0.0, 0.0, 0.0))).filter(|(i, v)| *i != *v as usize)
+                    }
+                    CFPointer::Flexible(f) => Some((i, f(&[]))).filter(|(i, v)| *i != *v as usize),
+                })
+                .collect(),
+            variables: (builder.variables != variables).then_some((builder.variables, variables)),
+        };
+
+        (res.constants.is_some()
+            || res.function_identifier.is_some()
+            || !res.functions.is_empty()
+            || res.variables.is_some())
+        .then_some(res)
     }
-    fn lerp(a: f64, b: f64, t: f64) -> f64 {
-        a + t * (b - a)
-    }
-    fn deg2rad(x: f64) -> f64 {
-        x * PI / 180.0
-    }
-    fn atan2(x: f64, y: f64) -> f64 {
-        x.atan2(y)
-    }
-    fn rad2deg(x: f64) -> f64 {
-        x * 180.0 / PI
-    }
-    fn mean(vals: &[f64]) -> f64 {
-        vals.iter().sum::<f64>() / vals.len() as f64
+
+    #[test]
+    fn test_eval_builder() {
+        macro_rules! test {
+            ($cmp: expr) => {
+                if let Some(ubfv) = $cmp {
+                    panic!("Difference in parameters found:\n{ubfv}");
+                }
+            };
+        }
+
+        test!(compare(
+            EvalBuilder::new(),
+            [].into_iter(),
+            [].into_iter(),
+            NoVariable,
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new().add_constant("c", 3.57),
+            [("c", 3.57)].into_iter(),
+            [].into_iter(),
+            NoVariable,
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new().add_variable("x"),
+            [].into_iter(),
+            [].into_iter(),
+            OneVariable(String::from("x")),
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new().use_ref(),
+            [].into_iter(),
+            [].into_iter(),
+            NoVariable,
+            EvalRef
+        ));
+
+        test!(compare(
+            EvalBuilder::new().add_fn1("f1", &|_| 0.0),
+            [].into_iter(),
+            [("f1", 0, 1, Some(1))].into_iter(),
+            NoVariable,
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_fn1("f2", &|_| 0.0)
+                .add_constant("c1", 7.319),
+            [("c1", 7.319)].into_iter(),
+            [("f2", 0, 1, Some(1))].into_iter(),
+            NoVariable,
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_fn1("f1", &|_| 0.0)
+                .add_fn2("f2", &|_, _| 1.0),
+            [].into_iter(),
+            [("f1", 0, 1, Some(1)), ("f2", 1, 2, Some(2))].into_iter(),
+            NoVariable,
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_fn2("f2", &|_, _| 0.0)
+                .add_fn3("f3", &|_, _, _| 1.0),
+            [].into_iter(),
+            [("f2", 0, 2, Some(2)), ("f3", 1, 3, Some(3))].into_iter(),
+            NoVariable,
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_fn2("f2", &|_, _| 0.0)
+                .add_fn3("f3", &|_, _, _| 1.0)
+                .add_fn_flex("ff", 3, None, &|_| 2.0),
+            [].into_iter(),
+            [
+                ("f2", 0, 2, Some(2)),
+                ("f3", 1, 3, Some(3)),
+                ("ff", 2, 3, None)
+            ]
+            .into_iter(),
+            NoVariable,
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_variable("t")
+                .add_fn2("f2", &|_, _| 0.0)
+                .add_fn3("f3", &|_, _, _| 1.0)
+                .add_fn_flex("ff", 3, None, &|_| 2.0),
+            [].into_iter(),
+            [
+                ("f2", 0, 2, Some(2)),
+                ("f3", 1, 3, Some(3)),
+                ("ff", 2, 3, None)
+            ]
+            .into_iter(),
+            OneVariable(String::from("t")),
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new().add_variable("y").add_variable("x"),
+            [].into_iter(),
+            [].into_iter(),
+            TwoVariables([String::from("y"), String::from("x")]),
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_variable("y")
+                .use_ref()
+                .add_variable("x"),
+            [].into_iter(),
+            [].into_iter(),
+            TwoVariables([String::from("y"), String::from("x")]),
+            EvalRef
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_variable("y")
+                .add_fn2("f2", &|_, _| 0.0)
+                .add_variable("x")
+                .add_fn3("f3", &|_, _, _| 1.0)
+                .add_fn_flex("ff", 3, None, &|_| 2.0),
+            [].into_iter(),
+            [
+                ("f2", 0, 2, Some(2)),
+                ("f3", 1, 3, Some(3)),
+                ("ff", 2, 3, None)
+            ]
+            .into_iter(),
+            TwoVariables([String::from("y"), String::from("x")]),
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_variable("y")
+                .add_variable("x")
+                .add_variable("z"),
+            [].into_iter(),
+            [].into_iter(),
+            ThreeVariables([String::from("y"), String::from("x"), String::from("z")]),
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_fn3("f0", &|_, _, _| 0.0)
+                .add_variable("y")
+                .add_fn3("f1", &|_, _, _| 1.0)
+                .add_fn3("f2", &|_, _, _| 2.0)
+                .add_variable("x")
+                .add_fn3("f3", &|_, _, _| 3.0)
+                .add_variable("z")
+                .use_ref(),
+            [].into_iter(),
+            [
+                ("f0", 0, 3, Some(3)),
+                ("f1", 1, 3, Some(3)),
+                ("f2", 2, 3, Some(3)),
+                ("f3", 3, 3, Some(3))
+            ]
+            .into_iter(),
+            ThreeVariables([String::from("y"), String::from("x"), String::from("z")]),
+            EvalRef
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_variable("y")
+                .add_variable("x")
+                .add_variable("z")
+                .add_variable("w"),
+            [].into_iter(),
+            [].into_iter(),
+            FourVariables([
+                String::from("y"),
+                String::from("x"),
+                String::from("z"),
+                String::from("w")
+            ]),
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_fn1("f0", &|_| 0.0)
+                .add_variable("y")
+                .add_constant("c", 9.999999)
+                .add_fn2("f1", &|_, _| 1.0)
+                .add_variable("x")
+                .add_fn3("f2", &|_, _, _| 2.0)
+                .add_variable("z")
+                .add_fn_flex("f3", 1, Some(5), &|_| 3.0)
+                .add_variable("w")
+                .add_fn1("f4", &|_| 4.0),
+            [("c", 9.999999)].into_iter(),
+            [
+                ("f0", 0, 1, Some(1)),
+                ("f1", 1, 2, Some(2)),
+                ("f2", 2, 3, Some(3)),
+                ("f3", 3, 1, Some(5)),
+                ("f4", 4, 1, Some(1))
+            ]
+            .into_iter(),
+            FourVariables([
+                String::from("y"),
+                String::from("x"),
+                String::from("z"),
+                String::from("w")
+            ]),
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_variable("y")
+                .add_variable("x")
+                .add_variable("z")
+                .add_variable("v")
+                .add_variable("w"),
+            [].into_iter(),
+            [].into_iter(),
+            ManyVariables(vec![
+                String::from("y"),
+                String::from("x"),
+                String::from("z"),
+                String::from("v"),
+                String::from("w")
+            ]),
+            EvalCopy
+        ));
+
+        test!(compare(
+            EvalBuilder::new()
+                .add_fn1("f0", &|_| 0.0)
+                .add_variable("y")
+                .use_ref()
+                .add_constant("c", 9.999999)
+                .add_constant("ce", 2.222222)
+                .add_fn2("f1", &|_, _| 1.0)
+                .add_variable("x")
+                .add_fn3("f2", &|_, _, _| 2.0)
+                .add_variable("z")
+                .add_fn_flex("f3", 1, Some(5), &|_| 3.0)
+                .add_variable("w")
+                .add_fn1("f4", &|_| 4.0)
+                .add_variable("t")
+                .add_fn_flex("f5", 5, None, &|_| 5.0),
+            [("c", 9.999999), ("ce", 2.222222)].into_iter(),
+            [
+                ("f0", 0, 1, Some(1)),
+                ("f1", 1, 2, Some(2)),
+                ("f2", 2, 3, Some(3)),
+                ("f3", 3, 1, Some(5)),
+                ("f4", 4, 1, Some(1)),
+                ("f5", 5, 5, None)
+            ]
+            .into_iter(),
+            ManyVariables(vec![
+                String::from("y"),
+                String::from("x"),
+                String::from("z"),
+                String::from("w"),
+                String::from("t")
+            ]),
+            EvalRef
+        ));
     }
 }
