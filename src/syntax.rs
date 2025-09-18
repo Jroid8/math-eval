@@ -652,6 +652,43 @@ where
         }
         self
     }
+    fn verify(
+        arena: &indextree::Arena<SyntaxNode<N, V, F>>,
+        root: NodeId,
+        cf_bounds: impl Fn(F) -> (u8, Option<u8>),
+    ) -> bool {
+        macro_rules! short {
+            ($res: expr) => {
+                if !($res) {
+                    return false;
+                }
+            };
+        }
+
+        for id in root.traverse(arena).filter_map(|e| match e {
+            NodeEdge::Start(_) => None,
+            NodeEdge::End(id) => Some(id),
+        }) {
+            let child_count = id.children(arena).count();
+            match arena[id].get() {
+                SyntaxNode::Number(_) | SyntaxNode::Variable(_) => short!(child_count == 0),
+                SyntaxNode::BiOperation(_) => short!(child_count == 2),
+                SyntaxNode::UnOperation(_) => short!(child_count == 1),
+                SyntaxNode::NativeFunction(nf) => short!(
+                    child_count >= nf.min_args() as usize
+                        && nf.max_args().is_none_or(|m| child_count <= m as usize)
+                ),
+                SyntaxNode::CustomFunction(cf) => {
+                    let (min, max) = cf_bounds(*cf);
+                    short!(
+                        child_count >= min as usize
+                            && max.is_none_or(|m| child_count <= m as usize)
+                    )
+                }
+            }
+        }
+        true
+    }
 }
 
 impl<V, N, F> Display for SyntaxTree<N, V, F>
@@ -754,6 +791,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use indextree::Arena;
+
     use super::*;
     use crate::tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
     use crate::tree_utils::VecTree::{self, Leaf};
@@ -1277,6 +1316,75 @@ mod test {
 
         for c in cases {
             assert_eq!(c, parse(c).unwrap().to_string());
+        }
+    }
+
+    fn random_syntax_tree(branch_count: usize) -> SyntaxTree<f64, TestVar, TestFunc> {
+        const BRANCH_NODES: [(SyntaxNode<f64, TestVar, TestFunc>, RangeInclusive<u8>); 14] = [
+            (SyntaxNode::BiOperation(BiOperation::Add), 2..=2),
+            (SyntaxNode::BiOperation(BiOperation::Sub), 2..=2),
+            (SyntaxNode::BiOperation(BiOperation::Mul), 2..=2),
+            (SyntaxNode::BiOperation(BiOperation::Div), 2..=2),
+            (SyntaxNode::UnOperation(UnOperation::Neg), 1..=1),
+            (SyntaxNode::UnOperation(UnOperation::Fac), 1..=1),
+            (SyntaxNode::NativeFunction(NativeFunction::Sin), 1..=1),
+            (SyntaxNode::NativeFunction(NativeFunction::Sqrt), 1..=1),
+            (SyntaxNode::NativeFunction(NativeFunction::Log), 2..=2),
+            (SyntaxNode::NativeFunction(NativeFunction::Max), 2..=10),
+            (SyntaxNode::CustomFunction(TestFunc::Deg2Rad), 1..=1),
+            (SyntaxNode::CustomFunction(TestFunc::ExpD), 2..=2),
+            (SyntaxNode::CustomFunction(TestFunc::Clamp), 3..=3),
+            (SyntaxNode::CustomFunction(TestFunc::Digits), 2..=10),
+        ];
+
+        let mut arena: Arena<SyntaxNode<f64, TestVar, TestFunc>> = Arena::new();
+        let mut dangling_branches: Vec<(NodeId, RangeInclusive<u8>)> = {
+            let root = fastrand::choice(BRANCH_NODES).unwrap();
+            vec![(arena.new_node(root.0), root.1)]
+        };
+        let root = dangling_branches[0].0;
+        while arena.count() < branch_count {
+            let (node, child_range) =
+                dangling_branches.swap_remove(fastrand::usize(0..dangling_branches.len()));
+            for _ in 0..fastrand::u8(child_range) {
+                let (new_node, child_range) = fastrand::choice(BRANCH_NODES).unwrap();
+                let id = node.append_value(new_node, &mut arena);
+                dangling_branches.push((id, child_range));
+            }
+        }
+        for (node, child_range) in dangling_branches {
+            for _ in 0..fastrand::u8(child_range) {
+                node.append_value(
+                    if fastrand::bool() {
+                        SyntaxNode::Variable(
+                            fastrand::choice([TestVar::X, TestVar::Y, TestVar::T]).unwrap(),
+                        )
+                    } else {
+                        SyntaxNode::Number(fastrand::i16(i16::MIN..i16::MAX) as f64 / 128.0)
+                    },
+                    &mut arena,
+                );
+            }
+        }
+        assert!(SyntaxTree::verify(&arena, root, |cf| match cf {
+            TestFunc::Deg2Rad => (1, Some(1)),
+            TestFunc::ExpD => (2, Some(2)),
+            TestFunc::Clamp => (3, Some(3)),
+            TestFunc::Digits => (2, None),
+        }));
+        SyntaxTree(Tree { arena, root })
+    }
+
+    #[test]
+    fn test_syntax_display_random() {
+        for size in [1, 10, 50] {
+            for _ in 0..200 {
+                let original_ast = random_syntax_tree(size);
+                let expr = original_ast.to_string();
+                let parsed_ast = parse(&expr).unwrap();
+                let expr2 = parsed_ast.to_string();
+                assert_eq!(expr, expr2, "\noriginal syntax tree: {:?}\nparsed syntax tree: {:?}", original_ast.0, parsed_ast.0);
+            }
         }
     }
 
