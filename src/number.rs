@@ -70,7 +70,7 @@ impl NativeFunction {
             _ => None,
         }
     }
-    pub fn to_pointer<N: MathEvalNumber>(&self) -> NFPointer<N> {
+    pub fn to_pointer<N: MathEvalNumber>(self) -> NFPointer<N> {
         match self {
             NativeFunction::Sin => NFPointer::Single(N::sin),
             NativeFunction::Cos => NFPointer::Single(N::cos),
@@ -98,8 +98,24 @@ impl NativeFunction {
             NativeFunction::Min => NFPointer::Flexible(N::min),
         }
     }
-    pub fn is_fixed(&self) -> bool {
-        matches!(self, Self::Min | Self::Max)
+    pub fn is_fixed(self) -> bool {
+        !matches!(self, NativeFunction::Min | NativeFunction::Max)
+    }
+    pub fn min_args(self) -> u8 {
+        match self {
+            NativeFunction::Log => 2,
+            NativeFunction::Max => 2,
+            NativeFunction::Min => 2,
+            _ => 1
+        }
+    }
+    pub fn max_args(self) -> Option<u8> {
+        match self {
+            NativeFunction::Log => Some(2),
+            NativeFunction::Max => None,
+            NativeFunction::Min => None,
+            _ => Some(1)
+        }
     }
 }
 

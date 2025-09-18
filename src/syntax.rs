@@ -279,7 +279,18 @@ where
                             Ok(None)
                         }
                         TokenNode::Function(func) => match NativeFunction::parse(func)
-                            .map(|nf| (SyntaxNode::NativeFunction(nf), 1, None))
+                            .map(|nf| {
+                                (
+                                    SyntaxNode::NativeFunction(nf),
+                                    // An exception for log. substitute_log will correct it
+                                    if nf == NativeFunction::Log {
+                                        1
+                                    } else {
+                                        nf.min_args()
+                                    },
+                                    nf.max_args(),
+                                )
+                            })
                             .or_else(|| {
                                 custom_function_parser(func)
                                     .map(|cf| (SyntaxNode::CustomFunction(cf.0), cf.1, cf.2))
@@ -389,7 +400,7 @@ where
         let mut stack: Stack<N> = Stack::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| self.0.arena[id].get()) {
             Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
-            Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
+            Some(SyntaxNode::NativeFunction(nf)) => nf.is_fixed(),
             Some(SyntaxNode::CustomFunction(cf)) => {
                 !matches!(function_to_pointer(*cf), CFPointer::Flexible(_))
             }
@@ -604,7 +615,7 @@ where
     }
 
     fn substitute_log(mut self) -> Self {
-        let mut matched_logs: Vec<(NodeId, u8)> = Vec::new();
+        let mut matched_logs: Vec<(NodeId, u8)> = Vec::with_capacity(0);
         for node in self.0.root.traverse(&self.0.arena) {
             if let NodeEdge::Start(node) = node {
                 if let SyntaxNode::NativeFunction(NativeFunction::Log) = *self.0.arena[node].get() {

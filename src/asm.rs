@@ -198,7 +198,7 @@ where
         let mut result: Vec<Instruction<'a, N, F>> = Vec::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
             Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
-            Some(SyntaxNode::NativeFunction(nf)) => !nf.is_fixed(),
+            Some(SyntaxNode::NativeFunction(nf)) => nf.is_fixed(),
             Some(SyntaxNode::CustomFunction(cf)) => {
                 !matches!(function_to_pointer(*cf), CFPointer::Flexible(_))
             }
@@ -312,6 +312,7 @@ where
         stack_capacity
     }
 
+    // TODO: rename to eval_ref
     pub fn eval(&self, variables: &[N::AsArg<'_>], stack: &mut Stack<N>) -> N {
         for instr in &self.0 {
             let mut argnum = stack.len();
