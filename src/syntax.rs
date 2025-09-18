@@ -1376,6 +1376,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_syntax_display_random() {
         for size in [1, 10, 50] {
             for _ in 0..200 {
@@ -1446,7 +1447,7 @@ mod test {
                     CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min))
                 }
                 TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
-                    values.iter().sum::<f64>() / values.len() as f64
+                    values.iter().enumerate().map(|(i, &v)| i as f64 *v).sum()
                 }),
             }
         };

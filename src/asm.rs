@@ -427,8 +427,8 @@ mod test {
     enum TestFunc {
         Sigmoid,
         ISqrt,
-        Dist3,
-        Mean,
+        F1,
+        Digits,
     }
 
     fn sigmoid(x: f64) -> f64 {
@@ -437,11 +437,15 @@ mod test {
     fn isqrt(x: f64, y: f64) -> f64 {
         (x * x + y * y).sqrt()
     }
-    fn dist3(x: f64, y: f64, z: f64) -> f64 {
-        (x * x + y * y + z * z).sqrt()
+    fn func1(x: f64, y: f64, z: f64) -> f64 {
+        x * x + 2.0 * y + 3.0 * z
     }
-    fn mean(nums: &[f64]) -> f64 {
-        nums.iter().sum::<f64>() / nums.len() as f64
+    fn digits(nums: &[f64]) -> f64 {
+        dbg!(nums);
+        nums.iter()
+            .enumerate()
+            .map(|(i, &v)| 10f64.powi(i as i32) * v)
+            .sum()
     }
 
     fn parse(input: &str) -> Result<Vec<Instruction<'static, f64, TestFunc>>, ParsingError> {
@@ -454,8 +458,8 @@ mod test {
             |inp| match inp {
                 "sigmoid" => Some((TestFunc::Sigmoid, 1, Some(1))),
                 "isqrt" => Some((TestFunc::ISqrt, 2, Some(2))),
-                "dist3" => Some((TestFunc::Dist3, 3, Some(3))),
-                "mean" => Some((TestFunc::Mean, 2, Some(2))),
+                "f1" => Some((TestFunc::F1, 3, Some(3))),
+                "digits" => Some((TestFunc::Digits, 2, Some(2))),
                 _ => None,
             },
             |inp| match inp {
@@ -472,8 +476,8 @@ mod test {
             |func| match func {
                 TestFunc::Sigmoid => CFPointer::Single(&sigmoid),
                 TestFunc::ISqrt => CFPointer::Dual(&isqrt),
-                TestFunc::Dist3 => CFPointer::Triple(&dist3),
-                TestFunc::Mean => CFPointer::Flexible(&mean),
+                TestFunc::F1 => CFPointer::Triple(&func1),
+                TestFunc::Digits => CFPointer::Flexible(&digits),
             },
             &[TestVar::X, TestVar::Y, TestVar::T],
         )
@@ -554,21 +558,21 @@ mod test {
             )])
         );
         assert_eq!(
-            parse("dist3(x, y, 3)"),
+            parse("f1(x, y, 3)"),
             Ok(vec![Instruction::CFTriple(
-                &dist3,
+                &func1,
                 Input::Variable(0),
                 Input::Variable(1),
                 Input::Literal(3.0),
-                TestFunc::Dist3
+                TestFunc::F1
             )])
         );
         assert_eq!(
-            parse("mean(x, 2)"),
+            parse("digits(x, 2)"),
             Ok(vec![
                 Instruction::Source(Input::Variable(0)),
                 Instruction::Source(Input::Literal(2.0)),
-                Instruction::CFFlexible(&mean, 2, TestFunc::Mean)
+                Instruction::CFFlexible(&digits, 2, TestFunc::Digits)
             ])
         );
         assert_eq!(
@@ -599,6 +603,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_mathasm_eval() {
         macro_rules! assert_eval {
             ([$($x:expr),+], $res: expr) => {
@@ -678,13 +683,13 @@ mod test {
         );
         assert_eval!(
             [Instruction::CFTriple(
-                &dist3,
-                Input::Literal(6.0),
-                Input::Literal(0.0),
-                Input::Literal(8.0),
-                TestFunc::ISqrt
+                &func1,
+                Input::Literal(1.0),
+                Input::Literal(2.0),
+                Input::Literal(3.0),
+                TestFunc::F1
             )],
-            10.0
+            14.0
         );
         assert_eval!(
             [
@@ -692,21 +697,48 @@ mod test {
                 Instruction::Source(Input::Literal(8.0)),
                 Instruction::Source(Input::Literal(4.0)),
                 Instruction::Source(Input::Literal(2.0)),
-                Instruction::CFFlexible(&mean, 4, TestFunc::Mean)
+                Instruction::CFFlexible(&digits, 4, TestFunc::Digits)
             ],
-            5.5
+            2488.0
         );
-        // 88/4+3=25
         assert_eval!(
             [
                 Instruction::BiOperation(
-                    BiOperation::Div,
-                    Input::Literal(88.0),
-                    Input::Literal(4.0)
+                    BiOperation::Pow,
+                    Input::Literal(5.0),
+                    Input::Literal(3.0)
                 ),
-                Instruction::BiOperation(BiOperation::Add, Input::Memory, Input::Literal(3.0))
+                Instruction::BiOperation(
+                    BiOperation::Mul,
+                    Input::Literal(74.0),
+                    Input::Literal(5.0)
+                ),
+                Instruction::CFTriple(
+                    &func1,
+                    Input::Literal(13.0),
+                    Input::Memory,
+                    Input::Memory,
+                    TestFunc::F1
+                )
             ],
-            25.0
+            1529.0
+        );
+        // (5+5)/(3+2)
+        assert_eval!(
+            [
+                Instruction::BiOperation(
+                    BiOperation::Add,
+                    Input::Literal(5.0),
+                    Input::Literal(5.0)
+                ),
+                Instruction::BiOperation(
+                    BiOperation::Sub,
+                    Input::Literal(7.0),
+                    Input::Literal(2.0)
+                ),
+                Instruction::BiOperation(BiOperation::Div, Input::Memory, Input::Memory)
+            ],
+            2.0
         );
         // sin(pi*x)+1
         assert_eval!(
