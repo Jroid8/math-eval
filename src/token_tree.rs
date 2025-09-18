@@ -6,7 +6,11 @@ use crate::token_stream::{Token, TokenStream};
 use crate::tree_utils::Tree;
 use crate::{ParsingError, ParsingErrorKind};
 
-pub(crate) fn token2index(input: &str, token_stream: &TokenStream, token_index: usize) -> usize {
+pub(crate) fn token2index(
+    input: &str,
+    token_stream: &TokenStream<'_>,
+    token_index: usize,
+) -> usize {
     let mut index = 0;
     while input.chars().nth(index).unwrap().is_whitespace() {
         index += 1
@@ -26,7 +30,7 @@ pub(crate) fn token2index(input: &str, token_stream: &TokenStream, token_index: 
 
 pub(crate) fn token2range(
     input: &str,
-    token_stream: &TokenStream,
+    token_stream: &TokenStream<'_>,
     token_index: usize,
 ) -> RangeInclusive<usize> {
     let start = token2index(input, token_stream, token_index);
@@ -58,24 +62,24 @@ pub enum TokenNode<'a> {
 pub struct TokenTree<'a>(pub Tree<TokenNode<'a>>);
 
 impl<'a> TokenTree<'a> {
-    pub fn new(tokens: &'a TokenStream) -> Result<TokenTree<'a>, TokenTreeError> {
+    pub fn new(tokens: &TokenStream<'a>) -> Result<TokenTree<'a>, TokenTreeError> {
         let mut arena = Arena::new();
         let root = arena.new_node(TokenNode::Parentheses);
         let mut current_node = root;
         for (index, token) in tokens.0.iter().enumerate() {
             match token {
                 Token::Number(num) => {
-                    current_node.append_value(TokenNode::Number(num.as_str()), &mut arena);
+                    current_node.append_value(TokenNode::Number(num), &mut arena);
                 }
                 Token::Operation(opr) => {
                     current_node.append_value(TokenNode::Operation(*opr), &mut arena);
                 }
                 Token::Variable(var) => {
-                    current_node.append_value(TokenNode::Variable(var.as_str()), &mut arena);
+                    current_node.append_value(TokenNode::Variable(var), &mut arena);
                 }
                 Token::Function(func) => {
                     current_node = current_node
-                        .append_value(TokenNode::Function(func.as_str()), &mut arena)
+                        .append_value(TokenNode::Function(func), &mut arena)
                         .append_value(TokenNode::Argument, &mut arena);
                 }
                 Token::OpenParen => {
@@ -140,7 +144,7 @@ pub enum TokenTreeError {
 }
 
 impl TokenTreeError {
-    pub fn to_general(self, input: &str, token_stream: &TokenStream) -> ParsingError {
+    pub fn to_general(self, input: &str, token_stream: &TokenStream<'_>) -> ParsingError {
         match self {
             TokenTreeError::CommaOutsideFunction(i) => ParsingError {
                 kind: ParsingErrorKind::CommaOutsideFunction,
@@ -182,11 +186,11 @@ mod tests {
         }
 
         assert_eq!(
-            treefy!(Number("192".to_string())),
+            treefy!(Number("192")),
             Ok(vec![Leaf(TokenNode::Number("192"))])
         );
         assert_eq!(
-            treefy!(OpenParen, Number("3.14".to_string()), CloseParen),
+            treefy!(OpenParen, Number("3.14"), CloseParen),
             Ok(vec![branch!(
                 TokenNode::Parentheses,
                 Leaf(TokenNode::Number("3.14"))
@@ -194,10 +198,10 @@ mod tests {
         );
         assert_eq!(
             treefy!(
-                Number("7".to_string()),
+                Number("7"),
                 Operation('+'),
                 OpenParen,
-                Number("0.1".to_string()),
+                Number("0.1"),
                 CloseParen
             ),
             Ok(vec![
@@ -207,11 +211,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            treefy!(
-                Function("sin".to_string()),
-                Number("0".to_string()),
-                CloseParen
-            ),
+            treefy!(Function("sin"), Number("0"), CloseParen),
             Ok(vec![branch!(
                 TokenNode::Function("sin"),
                 branch!(TokenNode::Argument, Leaf(TokenNode::Number("0")))
@@ -219,12 +219,12 @@ mod tests {
         );
         assert_eq!(
             treefy!(
-                Function("tan".to_string()),
+                Function("tan"),
                 OpenParen,
-                Number("-4.3".to_string()),
+                Number("-4.3"),
                 CloseParen,
                 Operation('/'),
-                Number("-99.3".to_string()),
+                Number("-99.3"),
                 CloseParen
             ),
             Ok(vec![branch!(
@@ -239,13 +239,13 @@ mod tests {
         );
         assert_eq!(
             treefy!(
-                Function("tan".to_string()),
-                Variable("x".to_string()),
+                Function("tan"),
+                Variable("x"),
                 CloseParen,
                 Operation('+'),
-                Number("5".to_string()),
+                Number("5"),
                 OpenParen,
-                Number("703".to_string()),
+                Number("703"),
                 CloseParen
             ),
             Ok(vec![
@@ -264,28 +264,23 @@ mod tests {
             Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
-            treefy!(OpenParen, Number("725.4".to_string())),
+            treefy!(OpenParen, Number("725.4")),
             Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
-            treefy!(Number("-110".to_string()), OpenParen),
+            treefy!(Number("-110"), OpenParen),
             Err(TokenTreeError::MissingCloseParenthesis(1))
         );
         assert_eq!(
-            treefy!(Function("sin".to_string()), Number("1452.333".to_string())),
+            treefy!(Function("sin"), Number("1452.333")),
             Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
-            treefy!(Number("121".to_string()), Function("sin".to_string())),
+            treefy!(Number("121"), Function("sin")),
             Err(TokenTreeError::MissingCloseParenthesis(1))
         );
         assert_eq!(
-            treefy!(
-                Function("sin".to_string()),
-                OpenParen,
-                Number("121".to_string()),
-                CloseParen
-            ),
+            treefy!(Function("sin"), OpenParen, Number("121"), CloseParen),
             Err(TokenTreeError::MissingCloseParenthesis(0))
         );
         assert_eq!(
@@ -293,7 +288,7 @@ mod tests {
             Err(TokenTreeError::MissingOpenParenthesis(0))
         );
         assert_eq!(
-            treefy!(Number("455829".to_string()), CloseParen),
+            treefy!(Number("455829"), CloseParen),
             Err(TokenTreeError::MissingOpenParenthesis(1))
         );
     }
