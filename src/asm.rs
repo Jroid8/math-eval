@@ -412,7 +412,8 @@ mod test {
         asm::{CFPointer, Input, Instruction, MathAssembly},
         number::{MathEvalNumber, NativeFunction},
         syntax::{BiOperation, SyntaxTree, UnOperation},
-        tokenizer::{token_stream::TokenStream, token_tree::TokenTree},
+        token_stream::TokenStream,
+        token_tree::TokenTree,
         ParsingError,
     };
 

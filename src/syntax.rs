@@ -4,7 +4,7 @@ use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, MathAssembly, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
-use crate::tokenizer::token_tree::{TokenNode, TokenTree};
+use crate::token_tree::{TokenNode, TokenTree};
 use crate::tree_utils::{construct, Tree};
 use crate::{FunctionIdentifier, ParsingError, ParsingErrorKind, VariableIdentifier};
 use indextree::{NodeEdge, NodeId};
@@ -794,7 +794,7 @@ mod test {
     use indextree::Arena;
 
     use super::*;
-    use crate::tokenizer::{token_stream::TokenStream, token_tree::TokenTree};
+    use crate::{token_stream::TokenStream, token_tree::TokenTree};
     use crate::tree_utils::VecTree::{self, Leaf};
     use crate::VariableStore;
 
