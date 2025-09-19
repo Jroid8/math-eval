@@ -105,7 +105,9 @@ fn test_operator() {
         };
         let eval_result = expr.eval(&[], &mut math_eval::asm::Stack::new());
         if eval_result != result {
-            panic!("the result of \"{expr_str}\" didn't match the calculated result\n{eval_result} != {result}")
+            panic!(
+                "the result of \"{expr_str}\" didn't match the calculated result\n{eval_result} != {result}"
+            )
         }
     }
 }

@@ -125,6 +125,10 @@ impl<'a> TokenStream<'a> {
         }
         Ok(TokenStream(result))
     }
+
+    pub fn get(&self) -> &[Token<'a>] {
+        &self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
