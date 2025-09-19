@@ -106,7 +106,7 @@ impl NativeFunction {
             NativeFunction::Log => 2,
             NativeFunction::Max => 2,
             NativeFunction::Min => 2,
-            _ => 1
+            _ => 1,
         }
     }
     pub fn max_args(self) -> Option<u8> {
@@ -114,7 +114,7 @@ impl NativeFunction {
             NativeFunction::Log => Some(2),
             NativeFunction::Max => None,
             NativeFunction::Min => None,
-            _ => Some(1)
+            _ => Some(1),
         }
     }
 }

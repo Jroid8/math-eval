@@ -62,7 +62,7 @@ impl<'a> TokenStream<'a> {
                         CharNotion::Alphabet => state = Reading::VarFunc(pos),
                         CharNotion::OpenParen => result.push(Token::OpenParen),
                         CharNotion::CloseParen => result.push(Token::CloseParen),
-                        CharNotion::Comma => result.push(Token::CloseParen),
+                        CharNotion::Comma => result.push(Token::Comma),
                         CharNotion::Space => (),
                     },
                     Reading::Number(start, dec) => match notion {
@@ -213,6 +213,16 @@ mod tests {
             Ok(TokenStream(vec![
                 Function("sin"),
                 Variable("x"),
+                CloseParen
+            ]))
+        );
+        assert_eq!(
+            TokenStream::new("log(x, 5)"),
+            Ok(TokenStream(vec![
+                Function("log"),
+                Variable("x"),
+                Comma,
+                Number("5"),
                 CloseParen
             ]))
         );

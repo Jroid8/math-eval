@@ -3,9 +3,9 @@ use smallvec::SmallVec;
 use std::{fmt::Debug, hash::Hash};
 
 use crate::{
+    FunctionIdentifier, VariableIdentifier,
     number::{MathEvalNumber, NativeFunction, Reborrow},
     syntax::{BiOperation, SyntaxNode, UnOperation},
-    FunctionIdentifier, VariableIdentifier,
 };
 
 pub type Stack<N> = SmallVec<[N; 16]>;
@@ -409,12 +409,12 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
+        ParsingError,
         asm::{CFPointer, Input, Instruction, MathAssembly},
         number::{MathEvalNumber, NativeFunction},
         syntax::{BiOperation, SyntaxTree, UnOperation},
         token_stream::TokenStream,
         token_tree::TokenTree,
-        ParsingError,
     };
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -442,7 +442,6 @@ mod test {
         x * x + 2.0 * y + 3.0 * z
     }
     fn digits(nums: &[f64]) -> f64 {
-        dbg!(nums);
         nums.iter()
             .enumerate()
             .map(|(i, &v)| 10f64.powi(i as i32) * v)

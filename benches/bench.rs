@@ -1,7 +1,7 @@
 use criterion::{
-    black_box, criterion_group, criterion_main, Bencher, BenchmarkId, Criterion, Throughput,
+    Bencher, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
-use math_eval::{tokenizer::token_stream::TokenStream, EvalBuilder};
+use math_eval::{EvalBuilder, token_stream::TokenStream};
 use meval::{Context, Expr};
 use std::{cmp::min, time::Duration};
 
