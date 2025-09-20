@@ -101,6 +101,23 @@ impl Display for ParsingErrorKind {
     }
 }
 
+// Taken from https://doc.rust-lang.org/std/primitive.slice.html#method.subslice_range
+fn subslice_start<T>(original: &[T], subslice: &[T]) -> Option<usize> {
+    let original_start = original.as_ptr().addr();
+    let subslice_start = subslice.as_ptr().addr();
+
+    let byte_start = subslice_start.wrapping_sub(original_start);
+
+    if !byte_start.is_multiple_of(size_of::<T>()) {
+        return None;
+    }
+
+    let start = byte_start / size_of::<T>();
+    let end = start.wrapping_add(subslice.len());
+
+    (start <= original.len() && end <= original.len()).then_some(start)
+}
+
 pub trait VariableStore<N: MathEvalNumber, V: VariableIdentifier> {
     fn get<'a>(&'a self, var: V) -> N::AsArg<'a>;
 }
@@ -136,7 +153,7 @@ pub fn compile<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifi
 ) -> Result<MathAssembly<'a, N, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let token_tree =
-        TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+        TokenTree::new(&token_stream.0).map_err(|e| e.to_general(input, &token_stream))?;
     let mut syntax_tree = SyntaxTree::new(
         &token_tree,
         custom_constant_parser,
@@ -164,7 +181,7 @@ pub fn evaluate<'a, 'b, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIde
 ) -> Result<N, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let token_tree =
-        TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+        TokenTree::new(&token_stream.0).map_err(|e| e.to_general(input, &token_stream))?;
     match SyntaxTree::new(
         &token_tree,
         custom_constant_parser,

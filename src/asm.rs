@@ -451,7 +451,7 @@ mod test {
     fn parse(input: &str) -> Result<Vec<Instruction<'static, f64, TestFunc>>, ParsingError> {
         let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
         let token_tree =
-            TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+            TokenTree::new(&token_stream.0).map_err(|e| e.to_general(input, &token_stream))?;
         let syntax_tree = SyntaxTree::new(
             &token_tree,
             |inp| if inp == "c" { Some(299792458.0) } else { None },

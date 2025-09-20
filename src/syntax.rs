@@ -843,7 +843,7 @@ mod test {
     fn parse(input: &str) -> Result<SyntaxTree<f64, TestVar, TestFunc>, ParsingError> {
         let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
         let token_tree =
-            TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
+            TokenTree::new(&token_stream.0).map_err(|e| e.to_general(input, &token_stream))?;
         SyntaxTree::new(
             &token_tree,
             |inp| match inp {
