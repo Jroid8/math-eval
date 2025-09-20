@@ -144,60 +144,54 @@ pub enum SyntaxErrorKind {
     EmptyParenthesis,
 }
 
-fn tokennode2range(
-    input: &str,
-    token_tree: &TokenTree<'_>,
-    target: NodeId,
-) -> RangeInclusive<usize> {
-    if target.ancestors(&token_tree.0.arena).nth(1).is_none() {
-        panic!("Attempted to report the root node as the cause of error")
-    }
+fn tokennode2index(input: &str, token_tree: &TokenTree<'_>, target: usize) -> usize {
     let mut index = 0;
-    macro_rules! count_space {
-        () => {
-            while input.chars().nth(index).unwrap().is_whitespace() {
-                index += 1
+    let mut nests: Vec<usize> = Vec::new();
+    let mut ttidx = 0;
+    while let Some(token) = token_tree.0.get(ttidx) {
+        while input.chars().nth(index).unwrap().is_whitespace() {
+            index += 1
+        }
+        if ttidx == target {
+            return index;
+        }
+        match token {
+            TokenNode::Number(s) | TokenNode::Variable(s) => index += s.len(),
+            TokenNode::Operation(_) | TokenNode::Comma | TokenNode::Close => index += 1,
+            TokenNode::Function(name, _) => index += name.len() + 1,
+            TokenNode::Parentheses(_) => index += 1,
+        }
+        match token {
+            TokenNode::Parentheses(pos) | TokenNode::Function(_, pos) => {
+                nests.push(ttidx);
+                ttidx = *pos;
             }
-        };
-    }
-    for node in token_tree.0.root.traverse(&token_tree.0.arena).skip(1) {
-        match node {
-            NodeEdge::Start(node) => {
-                if *token_tree.0.arena[node].get() != TokenNode::Argument {
-                    count_space!();
-                }
-                let old = index;
-                index += match token_tree.0.arena[node].get() {
-                    TokenNode::Number(s) | TokenNode::Variable(s) => s.len(),
-                    TokenNode::Operation(_) => 1,
-                    TokenNode::Parentheses => 1,
-                    TokenNode::Function(f) => f.len() + 1,
-                    TokenNode::Argument => 0,
-                };
-                if node == target {
-                    return old..=index - 1;
-                }
+            TokenNode::Close => {
+                ttidx = nests.pop().unwrap() + 1;
             }
-            NodeEdge::End(node) => match token_tree.0.arena[node].get() {
-                TokenNode::Argument => {
-                    if node
-                        .following_siblings(&token_tree.0.arena)
-                        .nth(1)
-                        .is_some()
-                    {
-                        count_space!();
-                        index += 1;
-                    }
-                }
-                TokenNode::Parentheses | TokenNode::Function(_) => {
-                    count_space!();
-                    index += 1
-                }
-                _ => (),
-            },
+            _ => ttidx += 1,
         }
     }
     unreachable!()
+}
+
+fn tokennode2range(
+    input: &str,
+    token_tree: &TokenTree<'_>,
+    target: usize,
+) -> RangeInclusive<usize> {
+    let start = tokennode2index(input, token_tree, target);
+    let end = start
+        + match token_tree.0[target] {
+            TokenNode::Number(s) | TokenNode::Variable(s) => s.len(),
+            TokenNode::Operation(_)
+            | TokenNode::Parentheses(_)
+            | TokenNode::Close
+            | TokenNode::Comma => 1,
+            TokenNode::Function(name, _) => name.len() + 1,
+        }
+        - 1;
+    start..=end
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1391,37 +1385,20 @@ mod test {
 
     #[test]
     fn test_tokennode2range() {
-        let input = " max(1, -18) * sin(pi)";
-        let ts = TokenStream::new(input).unwrap();
-        let tt = TokenTree::new(&ts).unwrap();
-        assert_eq!(
-            tokennode2range(
-                input,
-                &tt,
-                tt.0.root.descendants(&tt.0.arena).nth(3).unwrap()
-            ),
-            5..=5
-        );
-        assert_eq!(
-            tokennode2range(
-                input,
-                &tt,
-                tt.0.root.descendants(&tt.0.arena).nth(6).unwrap()
-            ),
-            9..=10
-        );
-        assert_eq!(
-            tokennode2range(input, &tt, tt.0.root.children(&tt.0.arena).nth(1).unwrap()),
-            13..=13
-        );
-        assert_eq!(
-            tokennode2range(
-                input,
-                &tt,
-                tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()
-            ),
-            19..=20
-        );
+        let input = " max(0, sin(x)) * sin(pi)";
+        let tt = TokenTree::new(&TokenStream::new(input).unwrap().0).unwrap();
+        let tn2r = |target: usize| tokennode2range(input, &tt, target);
+        assert_eq!(tn2r(0), 1..=4);
+        assert_eq!(tn2r(1), 16..=16); // *
+        assert_eq!(tn2r(2), 18..=21); // >sin(<pi)
+        assert_eq!(tn2r(4), 22..=23); // sin(>pi<)
+        assert_eq!(tn2r(5), 24..=24); // sin(pi>)<
+        assert_eq!(tn2r(6), 5..=5); // 0
+        assert_eq!(tn2r(7), 6..=6); // ,
+        assert_eq!(tn2r(8), 8..=11); // >sin(<x)
+        assert_eq!(tn2r(9), 14..=14); // max(0, sin(x)>)<
+        assert_eq!(tn2r(10), 12..=12); // sin(>x<)
+        assert_eq!(tn2r(11), 13..=13); // sin(x>)<
     }
 
     #[test]
