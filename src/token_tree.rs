@@ -104,12 +104,13 @@ impl<'a> TokenTree<'a> {
             while let Some(tk) = tks_slice.get(index) {
                 index += 1;
                 if matches!(*tk, Token::Function(_) | Token::OpenParen) {
-                    let inner_len = paren_inner_length(&tks_slice[index..]).ok_or(
-                        TokenTreeError::MissingCloseParenthesis(
-                            subslice_start(tokens, tks_slice).unwrap() + index - 1,
-                        ),
-                    )?;
-                    ret_stack.push((result.len(), &tks_slice[index..index+inner_len]));
+                    let true_idx = subslice_start(tokens, tks_slice).unwrap() + index - 1;
+                    let inner_len = paren_inner_length(&tks_slice[index..])
+                        .ok_or(TokenTreeError::MissingCloseParenthesis(true_idx))?;
+                    if inner_len == 0 {
+                        return Err(TokenTreeError::EmptyParenthesis(true_idx));
+                    }
+                    ret_stack.push((result.len(), &tks_slice[index..index + inner_len]));
                     index += inner_len + 1;
                 }
                 result.push(match *tk {
@@ -131,8 +132,9 @@ impl<'a> TokenTree<'a> {
         debug_assert!(
             result
                 .iter()
-                .all(|tn| tn.get_address().is_none_or(|a| a > 0))
-        , "{result:?}");
+                .all(|tn| tn.get_address().is_none_or(|a| a > 0)),
+            "{result:?}"
+        );
         debug_assert_eq!(result.len(), tokens.len() + 1);
         Ok(TokenTree(result))
     }
@@ -142,6 +144,7 @@ impl<'a> TokenTree<'a> {
 pub enum TokenTreeError {
     ExtraClosingParenthesis(usize),
     MissingCloseParenthesis(usize),
+    EmptyParenthesis(usize),
 }
 
 impl TokenTreeError {
@@ -153,6 +156,10 @@ impl TokenTreeError {
             },
             TokenTreeError::MissingCloseParenthesis(i) => ParsingError {
                 kind: ParsingErrorKind::MissingCloseParenthesis,
+                at: token2range(input, token_stream, i),
+            },
+            TokenTreeError::EmptyParenthesis(i) => ParsingError {
+                kind: ParsingErrorKind::EmptyParenthesis,
                 at: token2range(input, token_stream, i),
             },
         }
@@ -420,6 +427,14 @@ mod tests {
         assert_eq!(
             treefy(&[OpenParen, Number("455829"), CloseParen, CloseParen]),
             Err(TokenTreeError::ExtraClosingParenthesis(3))
+        );
+        assert_eq!(
+            treefy(&[OpenParen, CloseParen]),
+            Err(TokenTreeError::EmptyParenthesis(0))
+        );
+        assert_eq!(
+            treefy(&[OpenParen, OpenParen, CloseParen, CloseParen]),
+            Err(TokenTreeError::EmptyParenthesis(1))
         );
     }
 
