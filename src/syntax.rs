@@ -134,7 +134,6 @@ pub enum SyntaxErrorKind {
     UnknownFunction,
     NotEnoughArguments,
     TooManyArguments,
-    MisplacedToken,
     EmptyParenthesis,
     EmptyArgument,
     EmptyInput,
@@ -175,7 +174,7 @@ pub(crate) fn token_range_to_str_range(
         + match &token_stream.0[*token_range.end()] {
             Token::Number(s) | Token::Variable(s) => s.len(),
             Token::Operation(_) | Token::OpenParen | Token::CloseParen | Token::Comma => 1,
-            Token::Function(func) => dbg!(func.len() + 1),
+            Token::Function(func) => func.len() + 1,
         }
         - 1;
     start..=end
@@ -187,7 +186,11 @@ pub struct SyntaxError(SyntaxErrorKind, RangeInclusive<usize>);
 impl SyntaxError {
     pub fn to_general(self, input: &str, token_stream: &TokenStream<'_>) -> ParsingError {
         ParsingError {
-            at: token_range_to_str_range(input, token_stream, self.1),
+            at: if self.0 == SyntaxErrorKind::EmptyInput {
+                0..=0
+            } else {
+                token_range_to_str_range(input, token_stream, self.1)
+            },
             kind: match self.0 {
                 SyntaxErrorKind::NumberParsingError => ParsingErrorKind::NumberParsingError,
                 SyntaxErrorKind::MisplacedOperator => ParsingErrorKind::MisplacedOperator,
@@ -197,7 +200,6 @@ impl SyntaxError {
                 SyntaxErrorKind::UnknownFunction => ParsingErrorKind::UnknownFunction,
                 SyntaxErrorKind::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
                 SyntaxErrorKind::TooManyArguments => ParsingErrorKind::TooManyArguments,
-                SyntaxErrorKind::MisplacedToken => ParsingErrorKind::MisplacedToken,
                 SyntaxErrorKind::EmptyParenthesis => ParsingErrorKind::EmptyParenthesis,
                 SyntaxErrorKind::EmptyArgument => ParsingErrorKind::EmptyArgument,
                 SyntaxErrorKind::MissingOpeningParenthesis => {
@@ -368,12 +370,13 @@ fn validate_consecutive_tokens<'a>(
             None | Some(Token::OpenParen | Token::Function(_)),
             Some(Token::Operation('!' | '*' | '/' | '^' | '%')),
         ) => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, pos..=pos)),
-        (Some(Token::Operation('-' | '*' | '/' | '^' | '%')), None | Some(Token::CloseParen)) => {
-            Err(SyntaxError(
-                SyntaxErrorKind::MisplacedOperator,
-                pos - 1..=pos - 1,
-            ))
-        }
+        (
+            Some(Token::Operation('+' | '-' | '*' | '/' | '^' | '%')),
+            None | Some(Token::CloseParen),
+        ) => Err(SyntaxError(
+            SyntaxErrorKind::MisplacedOperator,
+            pos - 1..=pos - 1,
+        )),
         (
             Some(Token::Operation('*' | '/' | '%' | '^')),
             Some(Token::Operation('*' | '/' | '%' | '^')),
@@ -599,10 +602,21 @@ where
         }
         validate_consecutive_tokens(last_tk, None, token_stream.0.len())?;
         shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
-        Ok(SyntaxTree(Tree {
-            arena,
-            root: output_stack.pop().unwrap(),
-        }))
+        if matches!(
+            operator_stack.last(),
+            Some(SYOperator::Function(_, _) | SYOperator::Parentheses)
+        ) {
+            let unclosed_paren_pos = find_opening_paren(&token_stream.0).unwrap();
+            Err(SyntaxError(
+                SyntaxErrorKind::MissingClosingParenthesis,
+                unclosed_paren_pos..=unclosed_paren_pos,
+            ))
+        } else {
+            Ok(SyntaxTree(Tree {
+                arena,
+                root: output_stack.pop().unwrap(),
+            }))
+        }
     }
 
     pub fn eval<'a>(
@@ -1371,7 +1385,6 @@ mod test {
                 Leaf(SyntaxNode::Number(3.0))
             ))
         );
-        println!("CASE START");
         assert_eq!(
             syntaxify("8.3 + -1"),
             Ok(branch!(
@@ -1427,11 +1440,166 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify("x*()").map_err(|e| *e.kind()),
-            Err(ParsingErrorKind::EmptyParenthesis)
-        )
-        // must make more
-        // include error test for: ()
+            syntaxify(""),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyInput,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("sin(x)+ja"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::UnknownVariableOrConstant,
+                at: 7..=8
+            })
+        );
+        assert_eq!(
+            syntaxify("x*()"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyParenthesis,
+                at: 2..=3
+            })
+        );
+        assert_eq!(
+            syntaxify("5+pi*sinj(x)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::UnknownFunction,
+                at: 5..=9
+            })
+        );
+        assert_eq!(
+            syntaxify("1+expd(2y)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::NotEnoughArguments,
+                at: 2..=9
+            })
+        );
+        assert_eq!(
+            syntaxify("5(1+clamp(2y, 1))"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::NotEnoughArguments,
+                at: 4..=15
+            })
+        );
+        assert_eq!(
+            syntaxify("deg2rad(1, pi)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::TooManyArguments,
+                at: 0..=13
+            })
+        );
+        assert_eq!(
+            syntaxify("-expd(1, pi, sin(x))"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::TooManyArguments,
+                at: 1..=19
+            })
+        );
+        assert_eq!(
+            syntaxify("9t-clamp(1, pi, sin(x), 15tan(y))"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::TooManyArguments,
+                at: 3..=32
+            })
+        );
+        assert_eq!(
+            syntaxify("x*sin()"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyArgument,
+                at: 2..=6
+            })
+        );
+        assert_eq!(
+            syntaxify("x*log(y,)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyArgument,
+                at: 7..=8
+            })
+        );
+        assert_eq!(
+            syntaxify("x*expd(,5y)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyArgument,
+                at: 2..=7
+            })
+        );
+        assert_eq!(
+            syntaxify("x*clamp(x,,5y)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyArgument,
+                at: 9..=10
+            })
+        );
+        assert_eq!(
+            syntaxify("x)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingOpenParenthesis,
+                at: 1..=1
+            })
+        );
+        assert_eq!(
+            syntaxify("(x"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingCloseParenthesis,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("(x + 1)*sin(y"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingCloseParenthesis,
+                at: 8..=11
+            })
+        );
+        assert_eq!(
+            syntaxify("(x + (y)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingCloseParenthesis,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("(10) * y) + 4x"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingOpenParenthesis,
+                at: 8..=8
+            })
+        );
+        assert_eq!(
+            syntaxify("*10 2"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("(*x 2)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 1..=1
+            })
+        );
+        assert_eq!(
+            syntaxify("1+(x 2-)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 6..=6
+            })
+        );
+        assert_eq!(
+            syntaxify("(+)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 1..=1
+            })
+        );
+        assert_eq!(
+            syntaxify("(!)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 1..=1
+            })
+        );
     }
 
     #[test]
