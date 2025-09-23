@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum Token<'a> {
     Number(&'a str),
     Operation(char),
@@ -13,7 +13,6 @@ pub enum Token<'a> {
 enum CharNotion {
     Number,
     Operation,
-    Negation,
     Alphabet,
     OpenParen,
     CloseParen,
@@ -26,8 +25,7 @@ fn recognize(input: char) -> Option<CharNotion> {
     match input {
         '0'..='9' => Some(CharNotion::Number),
         '.' => Some(CharNotion::Dot),
-        '-' => Some(CharNotion::Negation),
-        '+' | '*' | '/' | '^' | '%' | '!' => Some(CharNotion::Operation),
+        '+' | '-' | '*' | '/' | '^' | '%' | '!' => Some(CharNotion::Operation),
         'a'..='z' | 'A'..='Z' => Some(CharNotion::Alphabet),
         '(' | '[' | '{' => Some(CharNotion::OpenParen),
         ')' | ']' | '}' => Some(CharNotion::CloseParen),
@@ -55,7 +53,7 @@ impl<'a> TokenStream<'a> {
             loop {
                 match state {
                     Reading::Nothing => match notion {
-                        CharNotion::Number | CharNotion::Negation | CharNotion::Dot => {
+                        CharNotion::Number | CharNotion::Dot => {
                             state = Reading::Number(pos, cha == '.')
                         }
                         CharNotion::Operation => result.push(Token::Operation(cha)),
@@ -74,18 +72,16 @@ impl<'a> TokenStream<'a> {
                                 state = Reading::Number(start, true);
                             }
                         }
-                        CharNotion::Negation
-                        | CharNotion::Operation
+                        CharNotion::Operation
                         | CharNotion::Alphabet
                         | CharNotion::OpenParen
                         | CharNotion::CloseParen
                         | CharNotion::Comma
                         | CharNotion::Space => {
-                            match &input[start..pos] {
-                                "-" => result.push(Token::Operation('-')),
-                                "." => return Err(TokenizationError(start)),
-                                "-." => return Err(TokenizationError(start)),
-                                _ => result.push(Token::Number(&input[start..pos])),
+                            if &input[start..pos] == "." {
+                                return Err(TokenizationError(start));
+                            } else {
+                                result.push(Token::Number(&input[start..pos]))
                             }
                             state = Reading::Nothing;
                             continue;
@@ -97,8 +93,7 @@ impl<'a> TokenStream<'a> {
                             result.push(Token::Function(&input[start..pos]));
                             state = Reading::Nothing;
                         }
-                        CharNotion::Negation
-                        | CharNotion::Operation
+                        CharNotion::Operation
                         | CharNotion::CloseParen
                         | CharNotion::Dot
                         | CharNotion::Comma
@@ -114,13 +109,13 @@ impl<'a> TokenStream<'a> {
         }
         match state {
             Reading::Nothing => (),
-            Reading::Number(start, _) => match &input[start..] {
-                // this shoudln't be allowed, but it's not the right place to deal with it
-                "-" => result.push(Token::Operation('-')),
-                "." => return Err(TokenizationError(start)),
-                "-." => return Err(TokenizationError(start)),
-                _ => result.push(Token::Number(&input[start..])),
-            },
+            Reading::Number(start, _) => {
+                if &input[start..] == "." {
+                    return Err(TokenizationError(start));
+                } else {
+                    result.push(Token::Number(&input[start..]))
+                }
+            }
             Reading::VarFunc(start) => result.push(Token::Variable(&input[start..])),
         }
         Ok(TokenStream(result))
@@ -157,7 +152,7 @@ mod tests {
         );
         assert_eq!(
             TokenStream::new("-1.0"),
-            Ok(TokenStream(vec![Number("-1.0")]))
+            Ok(TokenStream(vec![Operation('-'), Number("1.0")]))
         );
         assert_eq!(
             TokenStream::new("(11)"),
@@ -194,7 +189,11 @@ mod tests {
         );
         assert_eq!(
             TokenStream::new("7.620-90.001"),
-            Ok(TokenStream(vec![Number("7.620"), Number("-90.001")]))
+            Ok(TokenStream(vec![
+                Number("7.620"),
+                Operation('-'),
+                Number("90.001")
+            ]))
         );
         assert_eq!(
             TokenStream::new("1.10/pi"),
@@ -262,10 +261,6 @@ mod tests {
         );
         assert_eq!(TokenStream::new(".5"), Ok(TokenStream(vec![Number(".5")])));
         assert_eq!(
-            TokenStream::new("-.25"),
-            Ok(TokenStream(vec![Number("-.25")]))
-        );
-        assert_eq!(
             TokenStream::new("theta+phi"),
             Ok(TokenStream(vec![
                 Variable("theta"),
@@ -282,6 +277,5 @@ mod tests {
         assert_eq!(TokenStream::new("@3"), Err(TokenizationError(0)));
         assert_eq!(TokenStream::new("10+ت"), Err(TokenizationError(3)));
         assert_eq!(TokenStream::new("."), Err(TokenizationError(0)));
-        assert_eq!(TokenStream::new("-."), Err(TokenizationError(0)));
     }
 }
