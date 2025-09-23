@@ -413,7 +413,7 @@ mod test {
         asm::{CFPointer, Input, Instruction, MathAssembly},
         number::{MathEvalNumber, NativeFunction},
         syntax::{BiOperation, SyntaxTree, UnOperation},
-        token_stream::TokenStream,
+        tokenizer::TokenStream,
     };
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

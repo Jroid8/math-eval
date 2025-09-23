@@ -4,7 +4,7 @@ use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, MathAssembly, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
-use crate::token_stream::{Token, TokenStream};
+use crate::tokenizer::{Token, TokenStream};
 use crate::tree_utils::Tree;
 use crate::{FunctionIdentifier, ParsingError, ParsingErrorKind, VariableIdentifier};
 use indextree::{Arena, NodeEdge, NodeId};
@@ -971,7 +971,7 @@ mod test {
 
     use super::*;
     use crate::VariableStore;
-    use crate::token_stream::TokenStream;
+    use crate::tokenizer::TokenStream;
     use crate::tree_utils::VecTree::{self, Leaf};
 
     macro_rules! branch {

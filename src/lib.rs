@@ -9,12 +9,12 @@ use asm::{CFPointer, MathAssembly, Stack};
 use number::MathEvalNumber;
 use seq_macro::seq;
 use syntax::SyntaxTree;
-use token_stream::TokenStream;
+use tokenizer::TokenStream;
 
 pub mod asm;
 pub mod number;
 pub mod syntax;
-pub mod token_stream;
+pub mod tokenizer;
 pub mod tree_utils;
 
 pub trait VariableIdentifier: Clone + Copy + Debug + Eq + 'static {}
