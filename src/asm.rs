@@ -87,7 +87,7 @@ where
 impl<N, F> Debug for Instruction<'_, N, F>
 where
     N: MathEvalNumber,
-    F: FunctionIdentifier + Debug,
+    F: FunctionIdentifier,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -144,7 +144,7 @@ pub struct MathAssembly<'a, N: MathEvalNumber, F: FunctionIdentifier>(Vec<Instru
 impl<N, F> Debug for MathAssembly<'_, N, F>
 where
     N: MathEvalNumber,
-    F: FunctionIdentifier + Debug,
+    F: FunctionIdentifier,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "MathAssembly[")?;

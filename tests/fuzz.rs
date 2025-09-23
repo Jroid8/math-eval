@@ -150,7 +150,7 @@ enum MyVars {
     A,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MyFuncs {
     Mean,
     Dist,

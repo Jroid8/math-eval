@@ -10,22 +10,20 @@ use number::MathEvalNumber;
 use seq_macro::seq;
 use syntax::SyntaxTree;
 use token_stream::TokenStream;
-use token_tree::TokenTree;
 
 pub mod asm;
 pub mod number;
 pub mod syntax;
 pub mod token_stream;
-pub mod token_tree;
 pub mod tree_utils;
 
-pub trait VariableIdentifier: Clone + Copy + Eq + 'static {}
+pub trait VariableIdentifier: Clone + Copy + Debug + Eq + 'static {}
 
 impl<T> VariableIdentifier for T where T: Clone + Copy + Debug + Hash + Eq + 'static {}
 
-pub trait FunctionIdentifier: Clone + Copy + 'static {}
+pub trait FunctionIdentifier: Clone + Copy + Eq + Debug + 'static {}
 
-impl<T> FunctionIdentifier for T where T: Clone + Copy + Debug + 'static {}
+impl<T> FunctionIdentifier for T where T: Clone + Copy + Debug + Eq + 'static {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsingError {
@@ -125,7 +123,7 @@ pub trait VariableStore<N: MathEvalNumber, V: VariableIdentifier> {
 impl<N, V> VariableStore<N, V> for ()
 where
     N: MathEvalNumber,
-    V: VariableIdentifier + Debug,
+    V: VariableIdentifier,
 {
     #[inline]
     fn get<'a>(&'a self, var: V) -> N::AsArg<'a> {
