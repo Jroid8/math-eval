@@ -4,10 +4,10 @@ use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, MathAssembly, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
-use crate::token_tree::{TokenNode, TokenTree};
-use crate::tree_utils::{construct, Tree};
+use crate::token_stream::{Token, TokenStream};
+use crate::tree_utils::Tree;
 use crate::{FunctionIdentifier, ParsingError, ParsingErrorKind, VariableIdentifier};
-use indextree::{NodeEdge, NodeId};
+use indextree::{Arena, NodeEdge, NodeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnOperation {
@@ -55,15 +55,6 @@ pub enum BiOperation {
     Mod,
 }
 
-const ALL_BIOPERATION_ORDERED: [BiOperation; 6] = [
-    BiOperation::Add,
-    BiOperation::Sub,
-    BiOperation::Mul,
-    BiOperation::Div,
-    BiOperation::Mod,
-    BiOperation::Pow,
-];
-
 impl BiOperation {
     pub fn parse(input: char) -> Option<BiOperation> {
         match input {
@@ -109,6 +100,9 @@ impl BiOperation {
             BiOperation::Pow => 2,
         }
     }
+    pub fn is_left_associative(self) -> bool {
+        !matches!(self, BiOperation::Pow)
+    }
 }
 
 impl Display for BiOperation {
@@ -142,65 +136,58 @@ pub enum SyntaxErrorKind {
     TooManyArguments,
     MisplacedToken,
     EmptyParenthesis,
+    EmptyArgument,
+    EmptyInput,
+    MissingOpeningParenthesis,
+    MissingClosingParenthesis,
+    CommaOutsideFunction,
 }
 
-fn tokennode2index(input: &str, token_tree: &TokenTree<'_>, target: usize) -> usize {
+pub(crate) fn token_pos_to_str_pos(
+    input: &str,
+    token_stream: &TokenStream<'_>,
+    token_index: usize,
+) -> usize {
     let mut index = 0;
-    let mut nests: Vec<usize> = Vec::new();
-    let mut ttidx = 0;
-    while let Some(token) = token_tree.0.get(ttidx) {
+    while input.chars().nth(index).unwrap().is_whitespace() {
+        index += 1
+    }
+    for token in &token_stream.0[..token_index] {
+        index += match token {
+            Token::Function(s) => s.len() + 1, // this token counts as both the function name and the opening parentheses
+            Token::Number(s) | Token::Variable(s) => s.len(),
+            Token::Operation(_) | Token::OpenParen | Token::CloseParen | Token::Comma => 1,
+        };
         while input.chars().nth(index).unwrap().is_whitespace() {
             index += 1
         }
-        if ttidx == target {
-            return index;
-        }
-        match token {
-            TokenNode::Number(s) | TokenNode::Variable(s) => index += s.len(),
-            TokenNode::Operation(_) | TokenNode::Comma | TokenNode::Close => index += 1,
-            TokenNode::Function(name, _) => index += name.len() + 1,
-            TokenNode::Parentheses(_) => index += 1,
-        }
-        match token {
-            TokenNode::Parentheses(pos) | TokenNode::Function(_, pos) => {
-                nests.push(ttidx);
-                ttidx = *pos;
-            }
-            TokenNode::Close => {
-                ttidx = nests.pop().unwrap() + 1;
-            }
-            _ => ttidx += 1,
-        }
     }
-    unreachable!()
+    index
 }
 
-fn tokennode2range(
+pub(crate) fn token_range_to_str_range(
     input: &str,
-    token_tree: &TokenTree<'_>,
-    target: usize,
+    token_stream: &TokenStream<'_>,
+    token_range: RangeInclusive<usize>,
 ) -> RangeInclusive<usize> {
-    let start = tokennode2index(input, token_tree, target);
-    let end = start
-        + match token_tree.0[target] {
-            TokenNode::Number(s) | TokenNode::Variable(s) => s.len(),
-            TokenNode::Operation(_)
-            | TokenNode::Parentheses(_)
-            | TokenNode::Close
-            | TokenNode::Comma => 1,
-            TokenNode::Function(name, _) => name.len() + 1,
+    let start = token_pos_to_str_pos(input, token_stream, *token_range.start());
+    let end = token_pos_to_str_pos(input, token_stream, *token_range.end())
+        + match &token_stream.0[*token_range.end()] {
+            Token::Number(s) | Token::Variable(s) => s.len(),
+            Token::Operation(_) | Token::OpenParen | Token::CloseParen | Token::Comma => 1,
+            Token::Function(func) => dbg!(func.len() + 1),
         }
         - 1;
     start..=end
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SyntaxError(SyntaxErrorKind, NodeId);
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyntaxError(SyntaxErrorKind, RangeInclusive<usize>);
 
 impl SyntaxError {
-    pub fn to_general(self, input: &str, token_tree: &TokenTree<'_>) -> ParsingError {
+    pub fn to_general(self, input: &str, token_stream: &TokenStream<'_>) -> ParsingError {
         ParsingError {
-            at: tokennode2range(input, token_tree, self.1),
+            at: token_range_to_str_range(input, token_stream, self.1),
             kind: match self.0 {
                 SyntaxErrorKind::NumberParsingError => ParsingErrorKind::NumberParsingError,
                 SyntaxErrorKind::MisplacedOperator => ParsingErrorKind::MisplacedOperator,
@@ -212,7 +199,77 @@ impl SyntaxError {
                 SyntaxErrorKind::TooManyArguments => ParsingErrorKind::TooManyArguments,
                 SyntaxErrorKind::MisplacedToken => ParsingErrorKind::MisplacedToken,
                 SyntaxErrorKind::EmptyParenthesis => ParsingErrorKind::EmptyParenthesis,
+                SyntaxErrorKind::EmptyArgument => ParsingErrorKind::EmptyArgument,
+                SyntaxErrorKind::MissingOpeningParenthesis => {
+                    ParsingErrorKind::MissingOpenParenthesis
+                }
+                SyntaxErrorKind::MissingClosingParenthesis => {
+                    ParsingErrorKind::MissingCloseParenthesis
+                }
+                SyntaxErrorKind::CommaOutsideFunction => ParsingErrorKind::CommaOutsideFunction,
+                SyntaxErrorKind::EmptyInput => ParsingErrorKind::EmptyInput,
             },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SYFunction<F>
+where
+    F: FunctionIdentifier,
+{
+    NativeFunction(NativeFunction),
+    CustomFunction(F, u8, Option<u8>),
+}
+
+// FIX: check size_of and reduce size if it's too large
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SYOperator<F>
+where
+    F: FunctionIdentifier,
+{
+    BiOperation(BiOperation),
+    UnOperation(UnOperation),
+    Function(SYFunction<F>, u8),
+    Parentheses,
+}
+impl<F> SYOperator<F>
+where
+    F: FunctionIdentifier,
+{
+    fn precedence(&self) -> u8 {
+        match self {
+            SYOperator::BiOperation(BiOperation::Add) => 0,
+            SYOperator::BiOperation(BiOperation::Sub) => 0,
+            SYOperator::BiOperation(BiOperation::Mul) => 1,
+            SYOperator::BiOperation(BiOperation::Div) => 1,
+            SYOperator::BiOperation(BiOperation::Mod) => 1,
+            SYOperator::UnOperation(UnOperation::Neg) => 2,
+            SYOperator::BiOperation(BiOperation::Pow) => 3,
+            SYOperator::UnOperation(UnOperation::Fac) => 4,
+            SYOperator::Function(_, _) | SYOperator::Parentheses => {
+                unreachable!()
+            }
+        }
+    }
+    fn is_right_associative(&self) -> bool {
+        matches!(self, SYOperator::BiOperation(BiOperation::Pow))
+    }
+    fn opr2syn<N, V>(self) -> SyntaxNode<N, V, F>
+    where
+        N: MathEvalNumber,
+        V: VariableIdentifier,
+    {
+        match self {
+            SYOperator::BiOperation(opr) => SyntaxNode::BiOperation(opr),
+            SYOperator::UnOperation(opr) => SyntaxNode::UnOperation(opr),
+            SYOperator::Function(SYFunction::NativeFunction(nf), _) => {
+                SyntaxNode::NativeFunction(nf)
+            }
+            SYOperator::Function(SYFunction::CustomFunction(cf, _, _), _) => {
+                SyntaxNode::CustomFunction(cf)
+            }
+            SYOperator::Parentheses => unreachable!(),
         }
     }
 }
@@ -222,168 +279,330 @@ pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdent
     pub Tree<SyntaxNode<N, V, F>>,
 );
 
+fn after_implies_neg(token: Token<'_>) -> bool {
+    matches!(
+        token,
+        Token::Operation('*' | '/' | '%' | '^' | '-' | '+')
+            | Token::OpenParen
+            | Token::Comma
+            | Token::Function(_)
+    )
+}
+
+fn shunting_yard_pop_opr<N, V, F>(
+    operator_stack: &mut Vec<SYOperator<F>>,
+    output_stack: &mut Vec<NodeId>,
+    arena: &mut Arena<SyntaxNode<N, V, F>>,
+) where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    let opr = operator_stack.pop().unwrap();
+    let node = arena.new_node(opr.opr2syn());
+    // output_stack can be empty in case of an incorrect syntax. But not enough info is available
+    // in this function to find the source of the syntax error. So either this function must report
+    // the error to the caller so it searches for the source itself, or errors must be detected
+    // before calling this function. The latter solution is used for now.
+    let child = output_stack.pop().unwrap();
+    if matches!(opr, SYOperator::BiOperation(_)) {
+        node.append(output_stack.pop().unwrap(), arena);
+    }
+    if let SyntaxNode::Number(num) = arena[child].get_mut()
+        && opr == SYOperator::UnOperation(UnOperation::Neg)
+    {
+        *num = -num.clone();
+        output_stack.push(child);
+    } else {
+        node.append(child, arena);
+        output_stack.push(node);
+    }
+}
+
+fn shunting_yard_push_opr<N, V, F>(
+    operator: SYOperator<F>,
+    operator_stack: &mut Vec<SYOperator<F>>,
+    output_stack: &mut Vec<NodeId>,
+    arena: &mut Arena<SyntaxNode<N, V, F>>,
+) where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    while let Some(top_opr) = operator_stack.last()
+        && matches!(
+            top_opr,
+            SYOperator::BiOperation(_) | SYOperator::UnOperation(_)
+        )
+        && (operator.precedence() < top_opr.precedence()
+            || operator.precedence() == top_opr.precedence() && !operator.is_right_associative())
+    {
+        shunting_yard_pop_opr(operator_stack, output_stack, arena);
+    }
+    operator_stack.push(operator);
+}
+
+fn shunting_yard_flush<N, V, F>(
+    operator_stack: &mut Vec<SYOperator<F>>,
+    output_stack: &mut Vec<NodeId>,
+    arena: &mut Arena<SyntaxNode<N, V, F>>,
+) where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    while let Some(opr) = operator_stack.last()
+        && matches!(opr, SYOperator::BiOperation(_) | SYOperator::UnOperation(_))
+    {
+        shunting_yard_pop_opr(operator_stack, output_stack, arena)
+    }
+}
+
+fn validate_consecutive_tokens<'a>(
+    last: Option<Token<'a>>,
+    current: Option<Token<'a>>,
+    pos: usize,
+) -> Result<(), SyntaxError> {
+    match (last, current) {
+        (
+            None | Some(Token::OpenParen | Token::Function(_)),
+            Some(Token::Operation('!' | '*' | '/' | '^' | '%')),
+        ) => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, pos..=pos)),
+        (Some(Token::Operation('-' | '*' | '/' | '^' | '%')), None | Some(Token::CloseParen)) => {
+            Err(SyntaxError(
+                SyntaxErrorKind::MisplacedOperator,
+                pos - 1..=pos - 1,
+            ))
+        }
+        (
+            Some(Token::Operation('*' | '/' | '%' | '^')),
+            Some(Token::Operation('*' | '/' | '%' | '^')),
+        ) => Err(SyntaxError(
+            SyntaxErrorKind::MisplacedOperator,
+            pos - 1..=pos,
+        )),
+        (Some(Token::OpenParen), Some(Token::CloseParen)) => Err(SyntaxError(
+            SyntaxErrorKind::EmptyParenthesis,
+            pos - 1..=pos,
+        )),
+        (Some(Token::Comma | Token::Function(_)), Some(Token::CloseParen | Token::Comma)) => {
+            Err(SyntaxError(SyntaxErrorKind::EmptyArgument, pos - 1..=pos))
+        }
+        (None, None) => Err(SyntaxError(SyntaxErrorKind::EmptyInput, 0..=0)),
+        _ => Ok(()),
+    }
+}
+
+fn find_opening_paren(tokens: &[Token<'_>]) -> Option<usize> {
+    let mut nesting = 1;
+    for (i, tk) in tokens.iter().enumerate().rev() {
+        match tk {
+            Token::CloseParen => nesting += 1,
+            Token::OpenParen | Token::Function(_) => {
+                nesting -= 1;
+                if nesting == 0 {
+                    return Some(i);
+                }
+            }
+            _ => (),
+        }
+    }
+    None
+}
+
 impl<V, N, F> SyntaxTree<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    pub fn new(
-        token_tree: &TokenTree<'_>,
+    pub fn new<'a>(
+        token_stream: &'a TokenStream<'a>,
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
     ) -> Result<SyntaxTree<N, V, F>, SyntaxError> {
-        let (arena, root) = (&token_tree.0.arena, token_tree.0.root);
-        construct::<(NodeId, Option<usize>, Option<usize>), SyntaxNode<N, V, F>, SyntaxError>(
-            (root, None, None),
-            |(token_node, start, end), call_stack| {
-                let children_count = token_node.children(arena).count();
-                if children_count == 0 {
-                    return Err(SyntaxError(SyntaxErrorKind::EmptyParenthesis, token_node));
-                }
-                let start = start.unwrap_or(0);
-                let end = end.unwrap_or(children_count - 1);
-                let children = || {
-                    token_node
-                        .reverse_children(arena)
-                        .enumerate()
-                        .map(|(i, n)| (children_count - 1 - i, n))
-                        .skip(children_count - 1 - end)
-                        .take(end - start + 1)
-                };
-                if start == end {
-                    let current_node = token_node.children(arena).nth(start).unwrap();
-                    match arena[current_node].get() {
-                        TokenNode::Number(num) => num
-                            .parse::<N>()
-                            .map(|n| Some(SyntaxNode::Number(n)))
-                            .map_err(|_| SyntaxErrorKind::NumberParsingError),
-                        TokenNode::Operation(_) => Err(SyntaxErrorKind::MisplacedOperator), // operations shouldn't end up here
-                        TokenNode::Variable(var) => N::parse_constant(var)
+        // Dijkstra's shunting yard algorithm
+        let mut arena: Arena<SyntaxNode<N, V, F>> = Arena::new();
+        let mut output_stack: Vec<NodeId> = Vec::new();
+        let mut operator_stack: Vec<SYOperator<F>> = Vec::new();
+        let mut last_tk: Option<Token<'a>> = None;
+        for (pos, &token) in token_stream.0.iter().enumerate() {
+            validate_consecutive_tokens(last_tk, Some(token), pos)?;
+            // for detecting implied multiplication
+            if matches!(
+                (last_tk, token),
+                (
+                    Some(
+                        Token::Operation('!')
+                            | Token::Number(_)
+                            | Token::Variable(_)
+                            | Token::CloseParen,
+                    ),
+                    Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_),
+                ),
+            ) {
+                shunting_yard_push_opr(
+                    SYOperator::BiOperation(BiOperation::Mul),
+                    &mut operator_stack,
+                    &mut output_stack,
+                    &mut arena,
+                );
+            }
+            match token {
+                Token::Number(num) => output_stack.push(
+                    arena.new_node(num.parse::<N>().map(SyntaxNode::Number).map_err(|_| {
+                        SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos)
+                    })?),
+                ),
+                Token::Variable(var) => output_stack.push(
+                    arena.new_node(
+                        N::parse_constant(var)
+                            .or_else(|| custom_constant_parser(var))
                             .map(|c| SyntaxNode::Number(c))
-                            .or_else(|| custom_constant_parser(var).map(|c| SyntaxNode::Number(c)))
                             .or_else(|| {
-                                custom_variable_parser(var).map(|v| SyntaxNode::Variable(v))
+                                custom_variable_parser(var).map(|var| SyntaxNode::Variable(var))
                             })
-                            .map(Some)
-                            .ok_or(SyntaxErrorKind::UnknownVariableOrConstant),
-                        TokenNode::Parentheses => {
-                            call_stack.push((current_node, None, None));
-                            Ok(None)
-                        }
-                        TokenNode::Function(func) => match NativeFunction::parse(func)
-                            .map(|nf| {
-                                (
-                                    SyntaxNode::NativeFunction(nf),
-                                    // An exception for log. substitute_log will correct it
-                                    if nf == NativeFunction::Log {
-                                        1
-                                    } else {
-                                        nf.min_args()
-                                    },
-                                    nf.max_args(),
-                                )
-                            })
-                            .or_else(|| {
-                                custom_function_parser(func)
-                                    .map(|cf| (SyntaxNode::CustomFunction(cf.0), cf.1, cf.2))
-                            }) {
-                            Some((f, min_args, max_args)) => {
-                                let arg_count = current_node.children(arena).count();
-                                if arg_count < min_args as usize {
-                                    Err(SyntaxErrorKind::NotEnoughArguments)
-                                } else if arg_count > 255
-                                    || max_args.is_some_and(|ma| arg_count as u8 > ma)
-                                {
-                                    Err(SyntaxErrorKind::TooManyArguments)
-                                } else {
-                                    call_stack.extend(
-                                        current_node.children(arena).map(|id| (id, None, None)),
-                                    );
-                                    Ok(Some(f))
-                                }
-                            }
-                            None => Err(SyntaxErrorKind::UnknownFunction),
-                        },
-                        TokenNode::Argument => unreachable!(),
+                            .ok_or(SyntaxError(
+                                SyntaxErrorKind::UnknownVariableOrConstant,
+                                pos..=pos,
+                            ))?,
+                    ),
+                ),
+                Token::Operation(opr) => {
+                    let mut sy_opr: SYOperator<F> = BiOperation::parse(opr)
+                        .map(|biopr| SYOperator::BiOperation(biopr))
+                        .or_else(|| {
+                            UnOperation::parse(opr).map(|unopr| SYOperator::UnOperation(unopr))
+                        })
+                        .unwrap();
+                    if opr == '-' && last_tk.is_none_or(after_implies_neg) {
+                        sy_opr = SYOperator::UnOperation(UnOperation::Neg);
                     }
-                    .map_err(|e| SyntaxError(e, current_node))
-                } else {
-                    for opr in ALL_BIOPERATION_ORDERED {
-                        // for detecting implied multiplications (e.g. 2pi,3x)
-                        if opr == BiOperation::Mul {
-                            let mut iter = children();
-                            let mut last = iter.next().unwrap().1;
-                            for (index, token) in iter {
-                                if !matches!(arena[last].get(), TokenNode::Operation(_))
-                                    && !matches!(arena[token].get(), TokenNode::Operation(_))
-                                {
-                                    call_stack.push((token_node, Some(start), Some(index)));
-                                    call_stack.push((token_node, Some(index + 1), Some(end)));
-                                    return Ok(Some(SyntaxNode::BiOperation(BiOperation::Mul)));
-                                }
-                                last = token;
-                            }
-                        }
-                        // in a syntax tree, the top item is the evaluated first, so it should be the last in the order of operations.
-                        // rev() is used to pick last operation so the constructed tree has the correct order
-                        if let Some((index, node)) =
-                            children().find(|(i, c)| match arena[*c].get() {
-                                TokenNode::Operation(oprchar) => {
-                                    *oprchar == opr.as_char()
-                                        && !(*oprchar == '-'
-                                            && *i > start
-                                            && matches!(
-                                                c.preceding_siblings(arena)
-                                                    .nth(1)
-                                                    .map(|n| arena[n].get()),
-                                                Some(TokenNode::Operation(o))
-                                                    if UnOperation::parse(*o)
-                                                    .filter(|o| *o != UnOperation::Neg).is_none()
-                                            ))
-                                }
-                                _ => false,
-                            })
-                        {
-                            return if index == start {
-                                match opr {
-                                    BiOperation::Add => {
-                                        call_stack.push((token_node, Some(start + 1), Some(end)));
-                                        Ok(None)
-                                    }
-                                    BiOperation::Sub => {
-                                        call_stack.push((token_node, Some(start + 1), Some(end)));
-                                        Ok(Some(SyntaxNode::UnOperation(UnOperation::Neg)))
-                                    }
-                                    _ => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, node)),
-                                }
-                            } else if index == end {
-                                Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, node))
-                            } else {
-                                call_stack.push((token_node, Some(start), Some(index - 1)));
-                                call_stack.push((token_node, Some(index + 1), Some(end)));
-                                Ok(Some(SyntaxNode::BiOperation(opr)))
-                            };
-                        }
-                    }
-                    if start + 1 == end
-                        && *arena[token_node.children(arena).nth(end).unwrap()].get()
-                            == TokenNode::Operation('!')
-                    {
-                        call_stack.push((token_node, Some(start), Some(end - 1)));
-                        Ok(Some(SyntaxNode::UnOperation(UnOperation::Fac)))
-                    } else {
-                        Err(SyntaxError(
-                            SyntaxErrorKind::MisplacedToken,
-                            token_node.children(arena).nth(start).unwrap(),
-                        ))
+                    if opr != '+' || last_tk.is_some_and(|tk| !after_implies_neg(tk)) {
+                        shunting_yard_push_opr(
+                            sy_opr,
+                            &mut operator_stack,
+                            &mut output_stack,
+                            &mut arena,
+                        );
                     }
                 }
-            },
-            None,
-        )
-        .map(|tree| SyntaxTree(tree).substitute_log())
+                Token::Function(name) => {
+                    let func = NativeFunction::parse(name)
+                        .map(|nf| SYOperator::Function(SYFunction::NativeFunction(nf), 1))
+                        .or_else(|| {
+                            custom_function_parser(name).map(|(cf, min, max)| {
+                                SYOperator::Function(SYFunction::CustomFunction(cf, min, max), 1)
+                            })
+                        })
+                        .ok_or(SyntaxError(SyntaxErrorKind::UnknownFunction, pos..=pos))?;
+                    operator_stack.push(func);
+                }
+                Token::OpenParen => {
+                    operator_stack.push(SYOperator::Parentheses);
+                }
+                Token::Comma => {
+                    shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
+                    match operator_stack.last_mut() {
+                        Some(SYOperator::Function(_, args)) => {
+                            *args += 1;
+                        }
+                        _ => {
+                            return Err(SyntaxError(
+                                SyntaxErrorKind::CommaOutsideFunction,
+                                pos..=pos,
+                            ));
+                        }
+                    }
+                }
+                Token::CloseParen => {
+                    shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
+                    match operator_stack.pop() {
+                        Some(SYOperator::Function(SYFunction::NativeFunction(nf), args)) => {
+                            if args < nf.min_args() && nf != NativeFunction::Log {
+                                Err(SyntaxErrorKind::NotEnoughArguments)
+                            } else if nf.max_args().is_some_and(|m| args > m) {
+                                Err(SyntaxErrorKind::TooManyArguments)
+                            } else {
+                                let node = arena.new_node(SyntaxNode::NativeFunction(nf));
+                                for _ in 0..args {
+                                    node.prepend(output_stack.pop().unwrap(), &mut arena);
+                                }
+                                if nf == NativeFunction::Log {
+                                    match node.children(&arena).nth(1) {
+                                        Some(base)
+                                            if SyntaxNode::Number(N::from(10))
+                                                == *arena[base].get() =>
+                                        {
+                                            *arena[node].get_mut() =
+                                                SyntaxNode::NativeFunction(NativeFunction::Log10);
+                                            base.remove(&mut arena);
+                                        }
+                                        Some(base)
+                                            if SyntaxNode::Number(N::from(2))
+                                                == *arena[base].get() =>
+                                        {
+                                            *arena[node].get_mut() =
+                                                SyntaxNode::NativeFunction(NativeFunction::Log2);
+                                            base.remove(&mut arena);
+                                        }
+                                        None => {
+                                            *arena[node].get_mut() =
+                                                SyntaxNode::NativeFunction(NativeFunction::Log10);
+                                        }
+                                        _ => (),
+                                    }
+                                }
+                                output_stack.push(node);
+                                Ok(())
+                            }
+                            .map_err(|e| {
+                                SyntaxError(
+                                    e,
+                                    find_opening_paren(&token_stream.0[..pos]).unwrap()..=pos,
+                                )
+                            })?
+                        }
+                        Some(SYOperator::Function(
+                            SYFunction::CustomFunction(cf, min_args, max_args),
+                            args,
+                        )) => if args < min_args {
+                            Err(SyntaxErrorKind::NotEnoughArguments)
+                        } else if max_args.is_some_and(|m| args > m) {
+                            Err(SyntaxErrorKind::TooManyArguments)
+                        } else {
+                            let node = arena.new_node(SyntaxNode::CustomFunction(cf));
+                            for _ in 0..args {
+                                node.prepend(output_stack.pop().unwrap(), &mut arena);
+                            }
+                            output_stack.push(node);
+                            Ok(())
+                        }
+                        .map_err(|e| {
+                            SyntaxError(
+                                e,
+                                find_opening_paren(&token_stream.0[..pos]).unwrap()..=pos,
+                            )
+                        })?,
+                        Some(SYOperator::Parentheses) => (),
+                        _ => {
+                            return Err(SyntaxError(
+                                SyntaxErrorKind::MissingOpeningParenthesis,
+                                pos..=pos,
+                            ));
+                        }
+                    }
+                }
+            }
+            last_tk = Some(token);
+        }
+        validate_consecutive_tokens(last_tk, None, token_stream.0.len())?;
+        shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
+        Ok(SyntaxTree(Tree {
+            arena,
+            root: output_stack.pop().unwrap(),
+        }))
     }
 
     pub fn eval<'a>(
@@ -608,44 +827,7 @@ where
         }
     }
 
-    fn substitute_log(mut self) -> Self {
-        let mut matched_logs: Vec<(NodeId, u8)> = Vec::with_capacity(0);
-        for node in self.0.root.traverse(&self.0.arena) {
-            if let NodeEdge::Start(node) = node {
-                if let SyntaxNode::NativeFunction(NativeFunction::Log) = *self.0.arena[node].get() {
-                    matched_logs.push((
-                        node,
-                        match node.children(&self.0.arena).nth(1) {
-                            Some(base) => match self.0.arena[base].get() {
-                                SyntaxNode::Number(num) => {
-                                    if *num == N::from(10) {
-                                        10
-                                    } else if *num == N::from(2) {
-                                        2
-                                    } else {
-                                        continue;
-                                    }
-                                }
-                                _ => continue,
-                            },
-                            None => 10,
-                        },
-                    ));
-                }
-            }
-        }
-        for (node, base) in matched_logs {
-            *self.0.arena[node].get_mut() = SyntaxNode::NativeFunction(match base {
-                10 => NativeFunction::Log10,
-                2 => NativeFunction::Log2,
-                _ => unreachable!(),
-            });
-            if let Some(base) = node.children(&self.0.arena).nth(1) {
-                base.remove(&mut self.0.arena)
-            }
-        }
-        self
-    }
+    #[allow(dead_code)]
     fn verify(
         arena: &indextree::Arena<SyntaxNode<N, V, F>>,
         root: NodeId,
@@ -788,9 +970,9 @@ mod test {
     use indextree::Arena;
 
     use super::*;
-    use crate::{token_stream::TokenStream, token_tree::TokenTree};
-    use crate::tree_utils::VecTree::{self, Leaf};
     use crate::VariableStore;
+    use crate::token_stream::TokenStream;
+    use crate::tree_utils::VecTree::{self, Leaf};
 
     macro_rules! branch {
         ($node:expr, $($children:expr),+ $(,)?) => {
@@ -836,10 +1018,8 @@ mod test {
 
     fn parse(input: &str) -> Result<SyntaxTree<f64, TestVar, TestFunc>, ParsingError> {
         let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-        let token_tree =
-            TokenTree::new(&token_stream.0).map_err(|e| e.to_general(input, &token_stream))?;
         SyntaxTree::new(
-            &token_tree,
+            &token_stream,
             |inp| match inp {
                 "c" => Some(299792458.0),
                 _ => None,
@@ -858,7 +1038,7 @@ mod test {
                 _ => None,
             },
         )
-        .map_err(|e| e.to_general(input, &token_tree))
+        .map_err(|e| e.to_general(input, &token_stream))
     }
 
     #[test]
@@ -883,11 +1063,13 @@ mod test {
                 Leaf(SyntaxNode::Number(1.0))
             ))
         );
+        assert_eq!(syntaxify("-0.5"), Ok(Leaf(SyntaxNode::Number(-0.5))));
         assert_eq!(
-            syntaxify("-12"),
+            syntaxify("5-3"),
             Ok(branch!(
-                SyntaxNode::UnOperation(UnOperation::Neg),
-                Leaf(SyntaxNode::Number(12.0))
+                SyntaxNode::BiOperation(BiOperation::Sub),
+                Leaf(SyntaxNode::Number(5.0)),
+                Leaf(SyntaxNode::Number(3.0))
             ))
         );
         assert_eq!(
@@ -937,9 +1119,9 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify("8*3^2+1"),
+            syntaxify("8*3^2-1"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
+                SyntaxNode::BiOperation(BiOperation::Sub),
                 branch!(
                     SyntaxNode::BiOperation(BiOperation::Mul),
                     Leaf(SyntaxNode::Number(8.0)),
@@ -1076,17 +1258,6 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify("-5+3"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
-                    Leaf(SyntaxNode::Number(5.0))
-                ),
-                Leaf(SyntaxNode::Number(3.0))
-            ))
-        );
-        assert_eq!(
             syntaxify("2*x + 3*y"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Add),
@@ -1100,13 +1271,6 @@ mod test {
                     Leaf(SyntaxNode::Number(3.0)),
                     Leaf(SyntaxNode::Variable(TestVar::Y))
                 )
-            ))
-        );
-        assert_eq!(
-            syntaxify("tan(45)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Tan),
-                Leaf(SyntaxNode::Number(45.0))
             ))
         );
         assert_eq!(
@@ -1141,21 +1305,15 @@ mod test {
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Mul),
                 Leaf(SyntaxNode::Variable(TestVar::X)),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
-                    Leaf(SyntaxNode::Number(2.0))
-                )
+                Leaf(SyntaxNode::Number(-2.0))
             ))
         );
         assert_eq!(
-            syntaxify("4/(-2)"),
+            syntaxify("4/-1.33"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Div),
                 Leaf(SyntaxNode::Number(4.0)),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
-                    Leaf(SyntaxNode::Number(2.0))
-                )
+                Leaf(SyntaxNode::Number(-1.33))
             ))
         );
         assert_eq!(
@@ -1169,18 +1327,7 @@ mod test {
             syntaxify("abs(-5)"),
             Ok(branch!(
                 SyntaxNode::NativeFunction(NativeFunction::Abs),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
-                    Leaf(SyntaxNode::Number(5.0))
-                )
-            ))
-        );
-        assert_eq!(
-            syntaxify("x/y"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Div),
-                Leaf(SyntaxNode::Variable(TestVar::X)),
-                Leaf(SyntaxNode::Variable(TestVar::Y))
+                Leaf(SyntaxNode::Number(-5.0))
             ))
         );
         assert_eq!(
@@ -1199,13 +1346,13 @@ mod test {
                 )
             ))
         );
-        assert_eq!(
-            syntaxify("log2(32)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Log2),
-                Leaf(SyntaxNode::Number(32.0))
-            ))
-        );
+        // assert_eq!(
+        //     syntaxify("|x|"),
+        //     Ok(branch!(
+        //         SyntaxNode::NativeFunction(NativeFunction::Abs),
+        //         Leaf(SyntaxNode::Variable(TestVar::X)),
+        //     ))
+        // );
         assert_eq!(
             syntaxify("4*-x"),
             Ok(branch!(
@@ -1224,6 +1371,47 @@ mod test {
                 Leaf(SyntaxNode::Number(3.0))
             ))
         );
+        println!("CASE START");
+        assert_eq!(
+            syntaxify("8.3 + -1"),
+            Ok(branch!(
+                SyntaxNode::BiOperation(BiOperation::Add),
+                Leaf(SyntaxNode::Number(8.3)),
+                Leaf(SyntaxNode::Number(-1.0))
+            ))
+        );
+        assert_eq!(syntaxify("++1"), Ok(Leaf(SyntaxNode::Number(1.0))));
+        assert_eq!(syntaxify("+-1"), Ok(Leaf(SyntaxNode::Number(-1.0))));
+        assert_eq!(
+            syntaxify("x + +1"),
+            Ok(branch!(
+                SyntaxNode::BiOperation(BiOperation::Add),
+                Leaf(SyntaxNode::Variable(TestVar::X)),
+                Leaf(SyntaxNode::Number(1.0))
+            ))
+        );
+        assert_eq!(
+            syntaxify("-1^2"),
+            Ok(branch!(
+                SyntaxNode::UnOperation(UnOperation::Neg),
+                branch!(
+                    SyntaxNode::BiOperation(BiOperation::Pow),
+                    Leaf(SyntaxNode::Number(1.0)),
+                    Leaf(SyntaxNode::Number(2.0))
+                )
+            ))
+        );
+        assert_eq!(
+            syntaxify("x!y"),
+            Ok(branch!(
+                SyntaxNode::BiOperation(BiOperation::Mul),
+                branch!(
+                    SyntaxNode::UnOperation(UnOperation::Fac),
+                    Leaf(SyntaxNode::Variable(TestVar::X)),
+                ),
+                Leaf(SyntaxNode::Variable(TestVar::Y)),
+            ))
+        );
         assert_eq!(
             syntaxify("sin(x!-1)"),
             Ok(branch!(
@@ -1238,11 +1426,12 @@ mod test {
                 )
             ))
         );
-        // temporary. must make more
         assert_eq!(
             syntaxify("x*()").map_err(|e| *e.kind()),
             Err(ParsingErrorKind::EmptyParenthesis)
         )
+        // must make more
+        // include error test for: ()
     }
 
     #[test]
@@ -1298,6 +1487,7 @@ mod test {
             "x - y!",
             "x/(-y)",
             "x/y!",
+            "(x^2)^y",
             "(7/x)/(y/2)",
             "(t^2 + 3*t + 2)/(t + 1)",
             "sin(x)",
@@ -1378,27 +1568,13 @@ mod test {
                 let expr = original_ast.to_string();
                 let parsed_ast = parse(&expr).unwrap();
                 let expr2 = parsed_ast.to_string();
-                assert_eq!(expr, expr2, "\noriginal syntax tree: {:?}\nparsed syntax tree: {:?}", original_ast.0, parsed_ast.0);
+                assert_eq!(
+                    expr, expr2,
+                    "\noriginal syntax tree: {:?}\nparsed syntax tree: {:?}",
+                    original_ast.0, parsed_ast.0
+                );
             }
         }
-    }
-
-    #[test]
-    fn test_tokennode2range() {
-        let input = " max(0, sin(x)) * sin(pi)";
-        let tt = TokenTree::new(&TokenStream::new(input).unwrap().0).unwrap();
-        let tn2r = |target: usize| tokennode2range(input, &tt, target);
-        assert_eq!(tn2r(0), 1..=4);
-        assert_eq!(tn2r(1), 16..=16); // *
-        assert_eq!(tn2r(2), 18..=21); // >sin(<pi)
-        assert_eq!(tn2r(4), 22..=23); // sin(>pi<)
-        assert_eq!(tn2r(5), 24..=24); // sin(pi>)<
-        assert_eq!(tn2r(6), 5..=5); // 0
-        assert_eq!(tn2r(7), 6..=6); // ,
-        assert_eq!(tn2r(8), 8..=11); // >sin(<x)
-        assert_eq!(tn2r(9), 14..=14); // max(0, sin(x)>)<
-        assert_eq!(tn2r(10), 12..=12); // sin(>x<)
-        assert_eq!(tn2r(11), 13..=13); // sin(x>)<
     }
 
     #[test]
@@ -1424,7 +1600,7 @@ mod test {
                     CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min))
                 }
                 TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
-                    values.iter().enumerate().map(|(i, &v)| i as f64 *v).sum()
+                    values.iter().enumerate().map(|(i, &v)| i as f64 * v).sum()
                 }),
             }
         };
@@ -1445,5 +1621,25 @@ mod test {
         assert_eval!("clamp(x + y, -273.15, t)", 0.1);
         assert_eval!("dist(1, 3, 4, 7)/y", 1.0);
         assert_eval!("digits(y, 1)", 15.0);
+    }
+
+    #[test]
+    fn test_token2index() {
+        let input = " sin(pi) +1";
+        let ts = TokenStream::new(input).unwrap();
+        assert_eq!(token_pos_to_str_pos(input, &ts, 3), 9);
+        assert_eq!(token_pos_to_str_pos(input, &ts, 4), 10);
+        assert_eq!(token_pos_to_str_pos(input, &ts, 0), 1);
+        assert_eq!(token_pos_to_str_pos(input, &ts, 1), 5);
+    }
+
+    #[test]
+    fn test_token2range() {
+        let input = " max(pi, 1, -4)*3";
+        let ts = TokenStream::new(input).unwrap();
+        assert_eq!(token_range_to_str_range(input, &ts, 0..=0), 1..=4);
+        assert_eq!(token_range_to_str_range(input, &ts, 1..=1), 5..=6);
+        assert_eq!(token_range_to_str_range(input, &ts, 2..=2), 7..=7);
+        assert_eq!(token_range_to_str_range(input, &ts, 3..=3), 9..=9);
     }
 }

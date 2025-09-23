@@ -78,6 +78,8 @@ pub enum ParsingErrorKind {
     TooManyArguments,
     MisplacedToken,
     EmptyParenthesis,
+    EmptyArgument,
+    EmptyInput,
 }
 
 impl Display for ParsingErrorKind {
@@ -95,25 +97,10 @@ impl Display for ParsingErrorKind {
             ParsingErrorKind::TooManyArguments => "Too many arguments for function",
             ParsingErrorKind::MisplacedToken => "Misplaced token",
             ParsingErrorKind::EmptyParenthesis => "Parentheses should not be empty",
+            ParsingErrorKind::EmptyArgument => "Function arguments shouldn't be empty",
+            ParsingErrorKind::EmptyInput => "Input shouldn't be empty",
         })
     }
-}
-
-// Taken from https://doc.rust-lang.org/std/primitive.slice.html#method.subslice_range
-fn subslice_start<T>(original: &[T], subslice: &[T]) -> Option<usize> {
-    let original_start = original.as_ptr().addr();
-    let subslice_start = subslice.as_ptr().addr();
-
-    let byte_start = subslice_start.wrapping_sub(original_start);
-
-    if !byte_start.is_multiple_of(size_of::<T>()) {
-        return None;
-    }
-
-    let start = byte_start / size_of::<T>();
-    let end = start.wrapping_add(subslice.len());
-
-    (start <= original.len() && end <= original.len()).then_some(start)
 }
 
 pub trait VariableStore<N: MathEvalNumber, V: VariableIdentifier> {
@@ -150,15 +137,13 @@ pub fn compile<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifi
     variable_order: &[V],
 ) -> Result<MathAssembly<'a, N, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-    let token_tree =
-        TokenTree::new(&token_stream.0).map_err(|e| e.to_general(input, &token_stream))?;
     let mut syntax_tree = SyntaxTree::new(
-        &token_tree,
+        &token_stream,
         custom_constant_parser,
         custom_function_parser,
         custom_variable_parser,
     )
-    .map_err(|e| e.to_general(input, &token_tree))?;
+    .map_err(|e| e.to_general(input, &token_stream))?;
     syntax_tree.aot_evaluation(&function_to_pointer);
     syntax_tree.displacing_simplification();
     Ok(MathAssembly::new(
@@ -178,16 +163,14 @@ pub fn evaluate<'a, 'b, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIde
     variable_values: &impl VariableStore<N, V>,
 ) -> Result<N, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-    let token_tree =
-        TokenTree::new(&token_stream.0).map_err(|e| e.to_general(input, &token_stream))?;
     match SyntaxTree::new(
-        &token_tree,
+        &token_stream,
         custom_constant_parser,
         custom_function_parser,
         custom_variable_parser,
     ) {
         Ok(s) => Ok(s.eval(function_to_pointer, variable_values)),
-        Err(e) => Err(e.to_general(input, &token_tree)),
+        Err(e) => Err(e.to_general(input, &token_stream)),
     }
 }
 

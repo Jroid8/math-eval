@@ -414,7 +414,6 @@ mod test {
         number::{MathEvalNumber, NativeFunction},
         syntax::{BiOperation, SyntaxTree, UnOperation},
         token_stream::TokenStream,
-        token_tree::TokenTree,
     };
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -450,10 +449,8 @@ mod test {
 
     fn parse(input: &str) -> Result<Vec<Instruction<'static, f64, TestFunc>>, ParsingError> {
         let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-        let token_tree =
-            TokenTree::new(&token_stream.0).map_err(|e| e.to_general(input, &token_stream))?;
         let syntax_tree = SyntaxTree::new(
-            &token_tree,
+            &token_stream,
             |inp| if inp == "c" { Some(299792458.0) } else { None },
             |inp| match inp {
                 "sigmoid" => Some((TestFunc::Sigmoid, 1, Some(1))),
@@ -469,7 +466,7 @@ mod test {
                 _ => None,
             },
         )
-        .map_err(|e| e.to_general(input, &token_tree))?;
+        .map_err(|e| e.to_general(input, &token_stream))?;
         Ok(MathAssembly::new(
             &syntax_tree.0.arena,
             syntax_tree.0.root,
