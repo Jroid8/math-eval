@@ -848,18 +848,17 @@ where
             }
         };
         for node in self.0.root.traverse(&self.0.arena) {
-            if let NodeEdge::End(upper) = node {
-                if is_targeting_opr(upper)
-                    && upper.children(&self.0.arena).all(|lower| {
-                        is_targeting_opr(lower)
-                            && lower
-                                .children(&self.0.arena)
-                                .any(|lowest| self.is_number(lowest))
-                            || self.is_number(lower)
-                    })
-                {
-                    found.push(upper);
-                }
+            if let NodeEdge::End(upper) = node
+                && is_targeting_opr(upper)
+                && upper.children(&self.0.arena).all(|lower| {
+                    is_targeting_opr(lower)
+                        && lower
+                            .children(&self.0.arena)
+                            .any(|lowest| self.is_number(lowest))
+                        || self.is_number(lower)
+                })
+            {
+                found.push(upper);
             }
         }
         for upper in found {
