@@ -280,14 +280,17 @@ pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdent
     pub Tree<SyntaxNode<N, V, F>>,
 );
 
-fn after_implies_neg(token: Token<'_>) -> bool {
+fn after_implies_neg<F>(token: Token<'_>, operator_stack: &[SYOperator<F>]) -> bool
+where
+    F: FunctionIdentifier,
+{
     matches!(
         token,
         Token::Operation('*' | '/' | '%' | '^' | '-' | '+')
             | Token::OpenParen
             | Token::Comma
             | Token::Function(_)
-    )
+    ) || matches!(token, Token::Pipe) && inside_pipe_abs(operator_stack).is_some()
 }
 
 fn shunting_yard_pop_opr<N, V, F>(
@@ -531,10 +534,13 @@ where
                             UnOperation::parse(opr).map(|unopr| SYOperator::UnOperation(unopr))
                         })
                         .unwrap();
-                    if opr == '-' && last_tk.is_none_or(after_implies_neg) {
+                    if opr == '-' && last_tk.is_none_or(|tk| after_implies_neg(tk, &operator_stack))
+                    {
                         sy_opr = SYOperator::UnOperation(UnOperation::Neg);
                     }
-                    if opr != '+' || last_tk.is_some_and(|tk| !after_implies_neg(tk)) {
+                    if opr != '+'
+                        || last_tk.is_some_and(|tk| !after_implies_neg(tk, &operator_stack))
+                    {
                         shunting_yard_push_opr(
                             sy_opr,
                             &mut operator_stack,
@@ -1448,6 +1454,16 @@ mod test {
             Ok(branch!(
                 SyntaxNode::NativeFunction(NativeFunction::Abs),
                 Leaf(SyntaxNode::Variable(TestVar::X)),
+            ))
+        );
+        assert_eq!(
+            syntaxify("|-x|"),
+            Ok(branch!(
+                SyntaxNode::NativeFunction(NativeFunction::Abs),
+                branch!(
+                    SyntaxNode::UnOperation(UnOperation::Neg),
+                    Leaf(SyntaxNode::Variable(TestVar::X))
+                )
             ))
         );
         assert_eq!(
