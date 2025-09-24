@@ -189,8 +189,7 @@ pub trait MathEvalNumber:
         + PartialEq
         + Neg<Output = Self>
         + Copy
-        + Debug
-        + 'a;
+        + Debug;
 
     fn parse_constant(input: &str) -> Option<Self>;
     fn modulo(value: Self::AsArg<'_>, rhs: Self::AsArg<'_>) -> Self;
