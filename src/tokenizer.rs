@@ -7,12 +7,29 @@ pub enum Token<'a> {
     OpenParen,
     CloseParen,
     Comma,
+    Pipe,
+}
+
+impl Token<'_> {
+    pub fn length(&self) -> usize {
+        match self {
+            // this token captures both the function name and the opening parentheses
+            Token::Function(s) => s.len() + 1,
+            Token::Number(s) | Token::Variable(s) => s.len(),
+            Token::Operation(_)
+            | Token::OpenParen
+            | Token::CloseParen
+            | Token::Comma
+            | Token::Pipe => 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 enum CharNotion {
     Number,
     Operation,
+    Pipe,
     Alphabet,
     OpenParen,
     CloseParen,
@@ -31,6 +48,7 @@ fn recognize(input: char) -> Option<CharNotion> {
         ')' | ']' | '}' => Some(CharNotion::CloseParen),
         ',' => Some(CharNotion::Comma),
         ' ' | '\x09'..='\x0d' => Some(CharNotion::Space),
+        '|' => Some(CharNotion::Pipe),
         _ => None,
     }
 }
@@ -61,6 +79,7 @@ impl<'a> TokenStream<'a> {
                         CharNotion::OpenParen => result.push(Token::OpenParen),
                         CharNotion::CloseParen => result.push(Token::CloseParen),
                         CharNotion::Comma => result.push(Token::Comma),
+                        CharNotion::Pipe => result.push(Token::Pipe),
                         CharNotion::Space => (),
                     },
                     Reading::Number(start, dec) => match notion {
@@ -77,6 +96,7 @@ impl<'a> TokenStream<'a> {
                         | CharNotion::OpenParen
                         | CharNotion::CloseParen
                         | CharNotion::Comma
+                        | CharNotion::Pipe
                         | CharNotion::Space => {
                             if &input[start..pos] == "." {
                                 return Err(TokenizationError(start));
@@ -97,6 +117,7 @@ impl<'a> TokenStream<'a> {
                         | CharNotion::CloseParen
                         | CharNotion::Dot
                         | CharNotion::Comma
+                        | CharNotion::Pipe
                         | CharNotion::Space => {
                             result.push(Token::Variable(&input[start..pos]));
                             state = Reading::Nothing;
@@ -228,6 +249,10 @@ mod tests {
                 Number("5"),
                 CloseParen
             ]))
+        );
+        assert_eq!(
+            TokenStream::new("|x|"),
+            Ok(TokenStream(vec![Pipe, Variable("x"), Pipe]))
         );
         assert_eq!(TokenStream::new(""), Ok(TokenStream(vec![])));
         assert_eq!(TokenStream::new("   "), Ok(TokenStream(vec![])));

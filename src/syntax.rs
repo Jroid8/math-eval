@@ -140,6 +140,7 @@ pub enum SyntaxErrorKind {
     MissingOpeningParenthesis,
     MissingClosingParenthesis,
     CommaOutsideFunction,
+    PipeAbsNotClosed,
 }
 
 pub(crate) fn token_pos_to_str_pos(
@@ -152,11 +153,7 @@ pub(crate) fn token_pos_to_str_pos(
         index += 1
     }
     for token in &token_stream.0[..token_index] {
-        index += match token {
-            Token::Function(s) => s.len() + 1, // this token counts as both the function name and the opening parentheses
-            Token::Number(s) | Token::Variable(s) => s.len(),
-            Token::Operation(_) | Token::OpenParen | Token::CloseParen | Token::Comma => 1,
-        };
+        index += token.length();
         while input.chars().nth(index).unwrap().is_whitespace() {
             index += 1
         }
@@ -171,11 +168,7 @@ pub(crate) fn token_range_to_str_range(
 ) -> RangeInclusive<usize> {
     let start = token_pos_to_str_pos(input, token_stream, *token_range.start());
     let end = token_pos_to_str_pos(input, token_stream, *token_range.end())
-        + match &token_stream.0[*token_range.end()] {
-            Token::Number(s) | Token::Variable(s) => s.len(),
-            Token::Operation(_) | Token::OpenParen | Token::CloseParen | Token::Comma => 1,
-            Token::Function(func) => func.len() + 1,
-        }
+        + token_stream.0[*token_range.end()].length()
         - 1;
     start..=end
 }
@@ -210,6 +203,7 @@ impl SyntaxError {
                 }
                 SyntaxErrorKind::CommaOutsideFunction => ParsingErrorKind::CommaOutsideFunction,
                 SyntaxErrorKind::EmptyInput => ParsingErrorKind::EmptyInput,
+                SyntaxErrorKind::PipeAbsNotClosed => ParsingErrorKind::PipeAbsNotClosed,
             },
         }
     }
@@ -222,6 +216,7 @@ where
 {
     NativeFunction(NativeFunction),
     CustomFunction(F, u8, Option<u8>),
+    PipeAbs,
 }
 
 // FIX: check size_of and reduce size if it's too large
@@ -235,6 +230,7 @@ where
     Function(SYFunction<F>, u8),
     Parentheses,
 }
+
 impl<F> SYOperator<F>
 where
     F: FunctionIdentifier,
@@ -270,6 +266,9 @@ where
             }
             SYOperator::Function(SYFunction::CustomFunction(cf, _, _), _) => {
                 SyntaxNode::CustomFunction(cf)
+            }
+            SYOperator::Function(SYFunction::PipeAbs, _) => {
+                SyntaxNode::NativeFunction(NativeFunction::Abs)
             }
             SYOperator::Parentheses => unreachable!(),
         }
@@ -384,7 +383,8 @@ fn validate_consecutive_tokens<'a>(
             SyntaxErrorKind::MisplacedOperator,
             pos - 1..=pos,
         )),
-        (Some(Token::OpenParen), Some(Token::CloseParen)) => Err(SyntaxError(
+        (Some(Token::OpenParen), Some(Token::CloseParen))
+        | (Some(Token::Pipe), Some(Token::Pipe)) => Err(SyntaxError(
             SyntaxErrorKind::EmptyParenthesis,
             pos - 1..=pos,
         )),
@@ -408,6 +408,39 @@ fn find_opening_paren(tokens: &[Token<'_>]) -> Option<usize> {
                 }
             }
             _ => (),
+        }
+    }
+    None
+}
+
+fn find_opening_pipe(tokens: &[Token<'_>]) -> Option<usize> {
+    let mut idx = tokens.len() - 1;
+    loop {
+        match tokens[idx] {
+            Token::CloseParen => {
+                idx = find_opening_paren(&tokens[..idx]).unwrap();
+            }
+            Token::Pipe => return Some(idx),
+            Token::OpenParen | Token::Function(_) => unreachable!(),
+            _ => (),
+        }
+        if idx == 0 {
+            return None;
+        } else {
+            idx -= 1;
+        }
+    }
+}
+
+fn inside_pipe_abs<F>(operator_stack: &[SYOperator<F>]) -> Option<usize>
+where
+    F: FunctionIdentifier,
+{
+    for (i, opr) in operator_stack.iter().enumerate().rev() {
+        match opr {
+            SYOperator::BiOperation(_) | SYOperator::UnOperation(_) => (),
+            SYOperator::Function(SYFunction::PipeAbs, _) => return Some(i),
+            SYOperator::Function(_, _) | SYOperator::Parentheses => return None,
         }
     }
     None
@@ -444,7 +477,26 @@ where
                     ),
                     Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_),
                 ),
-            ) {
+            ) || matches!(
+                (last_tk, token),
+                (
+                    Some(Token::Pipe),
+                    Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_)
+                )
+            ) && inside_pipe_abs(&operator_stack).is_none()
+                || matches!(
+                    (last_tk, token),
+                    (
+                        Some(
+                            Token::Operation('!')
+                                | Token::Number(_)
+                                | Token::Variable(_)
+                                | Token::CloseParen,
+                        ),
+                        Token::Pipe
+                    )
+                ) && inside_pipe_abs(&operator_stack).is_none()
+            {
                 shunting_yard_push_opr(
                     SYOperator::BiOperation(BiOperation::Mul),
                     &mut operator_stack,
@@ -522,6 +574,13 @@ where
                 Token::CloseParen => {
                     shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
                     match operator_stack.pop() {
+                        Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
+                            let opening = find_opening_pipe(&token_stream.0[..pos]).unwrap();
+                            return Err(SyntaxError(
+                                SyntaxErrorKind::PipeAbsNotClosed,
+                                opening..=opening,
+                            ));
+                        }
                         Some(SYOperator::Function(SYFunction::NativeFunction(nf), args)) => {
                             if args < nf.min_args() && nf != NativeFunction::Log {
                                 Err(SyntaxErrorKind::NotEnoughArguments)
@@ -597,25 +656,49 @@ where
                         }
                     }
                 }
+                Token::Pipe => {
+                    if let Some(opening_pipe) = inside_pipe_abs(&operator_stack) {
+                        shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
+                        if let Some(SYOperator::Function(SYFunction::PipeAbs, args)) =
+                            operator_stack.pop()
+                            && args > 1
+                        {
+                            return Err(SyntaxError(
+                                SyntaxErrorKind::TooManyArguments,
+                                opening_pipe..=pos,
+                            ));
+                        }
+                        let node = arena.new_node(SyntaxNode::NativeFunction(NativeFunction::Abs));
+                        node.append(output_stack.pop().unwrap(), &mut arena);
+                        output_stack.push(node);
+                    } else {
+                        operator_stack.push(SYOperator::Function(SYFunction::PipeAbs, 0));
+                    }
+                }
             }
             last_tk = Some(token);
         }
         validate_consecutive_tokens(last_tk, None, token_stream.0.len())?;
         shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
-        if matches!(
-            operator_stack.last(),
-            Some(SYOperator::Function(_, _) | SYOperator::Parentheses)
-        ) {
-            let unclosed_paren_pos = find_opening_paren(&token_stream.0).unwrap();
-            Err(SyntaxError(
-                SyntaxErrorKind::MissingClosingParenthesis,
-                unclosed_paren_pos..=unclosed_paren_pos,
-            ))
-        } else {
-            Ok(SyntaxTree(Tree {
+        match operator_stack.last() {
+            Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
+                let opening = find_opening_pipe(&token_stream.0).unwrap();
+                Err(SyntaxError(
+                    SyntaxErrorKind::PipeAbsNotClosed,
+                    opening..=opening,
+                ))
+            }
+            Some(SYOperator::Function(_, _) | SYOperator::Parentheses) => {
+                let unclosed_paren_pos = find_opening_paren(&token_stream.0).unwrap();
+                Err(SyntaxError(
+                    SyntaxErrorKind::MissingClosingParenthesis,
+                    unclosed_paren_pos..=unclosed_paren_pos,
+                ))
+            }
+            _ => Ok(SyntaxTree(Tree {
                 arena,
                 root: output_stack.pop().unwrap(),
-            }))
+            })),
         }
     }
 
@@ -1360,13 +1443,13 @@ mod test {
                 )
             ))
         );
-        // assert_eq!(
-        //     syntaxify("|x|"),
-        //     Ok(branch!(
-        //         SyntaxNode::NativeFunction(NativeFunction::Abs),
-        //         Leaf(SyntaxNode::Variable(TestVar::X)),
-        //     ))
-        // );
+        assert_eq!(
+            syntaxify("|x|"),
+            Ok(branch!(
+                SyntaxNode::NativeFunction(NativeFunction::Abs),
+                Leaf(SyntaxNode::Variable(TestVar::X)),
+            ))
+        );
         assert_eq!(
             syntaxify("4*-x"),
             Ok(branch!(
@@ -1437,6 +1520,29 @@ mod test {
                     ),
                     Leaf(SyntaxNode::Number(1.0))
                 )
+            ))
+        );
+        assert_eq!(
+            syntaxify("3|x-1|/2 + 1"),
+            Ok(branch!(
+                SyntaxNode::BiOperation(BiOperation::Add),
+                branch!(
+                    SyntaxNode::BiOperation(BiOperation::Div),
+                    branch!(
+                        SyntaxNode::BiOperation(BiOperation::Mul),
+                        Leaf(SyntaxNode::Number(3.0)),
+                        branch!(
+                            SyntaxNode::NativeFunction(NativeFunction::Abs),
+                            branch!(
+                                SyntaxNode::BiOperation(BiOperation::Sub),
+                                Leaf(SyntaxNode::Variable(TestVar::X)),
+                                Leaf(SyntaxNode::Number(1.0))
+                            )
+                        )
+                    ),
+                    Leaf(SyntaxNode::Number(2.0))
+                ),
+                Leaf(SyntaxNode::Number(1.0))
             ))
         );
         assert_eq!(
@@ -1598,6 +1704,27 @@ mod test {
             Err(ParsingError {
                 kind: ParsingErrorKind::MisplacedOperator,
                 at: 1..=1
+            })
+        );
+        assert_eq!(
+            syntaxify("|x"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::PipeAbsNotClosed,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("3+|(|y|+1)/2"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::PipeAbsNotClosed,
+                at: 2..=2
+            })
+        );
+        assert_eq!(
+            syntaxify("|sin(|x)|"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::PipeAbsNotClosed,
+                at: 5..=5
             })
         );
     }

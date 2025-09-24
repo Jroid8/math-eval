@@ -70,6 +70,7 @@ pub enum ParsingErrorKind {
     CommaOutsideFunction,
     MissingOpenParenthesis,
     MissingCloseParenthesis,
+    PipeAbsNotClosed,
     NumberParsingError,
     MisplacedOperator,
     UnknownVariableOrConstant,
@@ -97,6 +98,7 @@ impl Display for ParsingErrorKind {
             ParsingErrorKind::EmptyParenthesis => "Parentheses should not be empty",
             ParsingErrorKind::EmptyArgument => "Function arguments shouldn't be empty",
             ParsingErrorKind::EmptyInput => "Input shouldn't be empty",
+            ParsingErrorKind::PipeAbsNotClosed => "Unmatched '|' in absolute value expression"
         })
     }
 }
