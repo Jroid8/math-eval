@@ -143,34 +143,26 @@ pub enum SyntaxErrorKind {
     PipeAbsNotClosed,
 }
 
-pub(crate) fn token_pos_to_str_pos(
-    input: &str,
-    token_stream: &TokenStream<'_>,
-    token_index: usize,
-) -> usize {
-    let mut index = 0;
-    while input.chars().nth(index).unwrap().is_whitespace() {
-        index += 1
-    }
-    for token in &token_stream.0[..token_index] {
-        index += token.length();
-        while input.chars().nth(index).unwrap().is_whitespace() {
-            index += 1
-        }
-    }
-    index
-}
-
 pub(crate) fn token_range_to_str_range(
     input: &str,
     token_stream: &TokenStream<'_>,
     token_range: RangeInclusive<usize>,
 ) -> RangeInclusive<usize> {
-    let start = token_pos_to_str_pos(input, token_stream, *token_range.start());
-    let end = token_pos_to_str_pos(input, token_stream, *token_range.end())
-        + token_stream.0[*token_range.end()].length()
-        - 1;
-    start..=end
+    let mut start = 0;
+    let mut index = 0;
+    while input.chars().nth(index).unwrap().is_whitespace() {
+        index += 1
+    }
+    for (tk_idx, token) in token_stream.0[..*token_range.end()].iter().enumerate() {
+        if tk_idx == *token_range.start() {
+            start = *token_range.start()
+        }
+        index += token.length();
+        while input.chars().nth(index).unwrap().is_whitespace() {
+            index += 1
+        }
+    }
+    start..=index
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1931,16 +1923,6 @@ mod test {
         assert_eval!("clamp(x + y, -273.15, t)", 0.1);
         assert_eval!("dist(1, 3, 4, 7)/y", 1.0);
         assert_eval!("digits(y, 1)", 15.0);
-    }
-
-    #[test]
-    fn test_token2index() {
-        let input = " sin(pi) +1";
-        let ts = TokenStream::new(input).unwrap();
-        assert_eq!(token_pos_to_str_pos(input, &ts, 3), 9);
-        assert_eq!(token_pos_to_str_pos(input, &ts, 4), 10);
-        assert_eq!(token_pos_to_str_pos(input, &ts, 0), 1);
-        assert_eq!(token_pos_to_str_pos(input, &ts, 1), 5);
     }
 
     #[test]
