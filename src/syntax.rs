@@ -6,7 +6,7 @@ use crate::asm::{CFPointer, MathAssembly, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
 use crate::tokenizer::{Token, TokenStream};
 use crate::tree_utils::Tree;
-use crate::{FunctionIdentifier, ParsingError, ParsingErrorKind, VariableIdentifier};
+use crate::{FunctionIdentifier, NAME_LIMIT, ParsingError, ParsingErrorKind, VariableIdentifier};
 use indextree::{Arena, NodeEdge, NodeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -443,6 +443,119 @@ where
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Segment<N, V>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+{
+    Constant(N),
+    Variable(V),
+}
+
+fn segment_variable<N, V>(
+    input: &str,
+    constant_parser: &impl Fn(&str) -> Option<N>,
+    variable_parser: &impl Fn(&str) -> Option<V>,
+) -> Option<Vec<Segment<N, V>>>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+{
+    if input.len() > NAME_LIMIT as usize {
+        panic!();
+    }
+    let mut can_segment: Vec<Option<(Option<u8>, Segment<N, V>)>> = vec![None; input.len()];
+    for i in 1..=input.len() {
+        for j in 0..i {
+            if j == 0 || can_segment[j - 1].is_some() {
+                let prev = (j != 0).then(|| j as u8 - 1);
+                let seg = constant_parser(&input[j..i])
+                    .map(Segment::Constant)
+                    .or_else(|| variable_parser(&input[j..i]).map(Segment::Variable))
+                    .or_else(|| input[j..i].parse().ok().map(Segment::Constant));
+                if let Some(seg) = seg {
+                    can_segment[i - 1] = Some((prev, seg));
+                    break;
+                }
+            }
+        }
+    }
+    if can_segment[input.len() - 1].is_some() {
+        let mut result = Vec::with_capacity(NAME_LIMIT as usize);
+        let mut idx = Some(input.len() as u8 - 1);
+        while let Some(i) = idx {
+            let (prev, seg) = can_segment.swap_remove(i as usize).unwrap();
+            result.push(seg);
+            idx = prev;
+        }
+        result.reverse();
+        Some(result)
+    } else {
+        None
+    }
+}
+
+fn segment_function<N, V, F>(
+    input: &str,
+    constant_parser: &impl Fn(&str) -> Option<N>,
+    variable_parser: &impl Fn(&str) -> Option<V>,
+    function_parser: &impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
+) -> Option<(Vec<Segment<N, V>>, SYFunction<F>)>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    if input.len() > NAME_LIMIT as usize {
+        panic!();
+    }
+    let mut can_segment: Vec<Option<(Option<u8>, Segment<N, V>)>> = vec![None; input.len() - 1];
+    let mut function: Option<(u8, SYFunction<F>)> = None;
+    for i in 1..input.len() {
+        for j in 0..i {
+            if j == 0 || can_segment[j - 1].is_some() {
+                let prev = (j != 0).then(|| j as u8 - 1);
+                let seg = constant_parser(&input[j..i])
+                    .map(Segment::Constant)
+                    .or_else(|| variable_parser(&input[j..i]).map(Segment::Variable))
+                    .or_else(|| input[j..i].parse().ok().map(Segment::Constant));
+                if let Some(seg) = seg {
+                    can_segment[i - 1] = Some((prev, seg));
+                    break;
+                }
+            }
+        }
+    }
+    for j in 1..input.len() {
+        if can_segment[j - 1].is_some() {
+            function = NativeFunction::parse(&input[j..])
+                .map(SYFunction::NativeFunction)
+                .or_else(|| {
+                    function_parser(&input[j..])
+                        .map(|(cf, min, max)| SYFunction::CustomFunction(cf, min, max))
+                })
+                .map(|func| (j as u8 - 1, func));
+            if function.is_some() {
+                break;
+            }
+        }
+    }
+    if let Some((start, func)) = function {
+        let mut result = Vec::with_capacity(NAME_LIMIT as usize);
+        let mut idx = Some(start);
+        while let Some(i) = idx {
+            let (prev, seg) = can_segment.swap_remove(i as usize).unwrap();
+            result.push(seg);
+            idx = prev;
+        }
+        result.reverse();
+        Some((result, func))
+    } else {
+        None
+    }
+}
+
 impl<V, N, F> SyntaxTree<N, V, F>
 where
     N: MathEvalNumber,
@@ -507,20 +620,45 @@ where
                         SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos)
                     })?),
                 ),
-                Token::Variable(var) => output_stack.push(
-                    arena.new_node(
-                        N::parse_constant(var)
-                            .or_else(|| custom_constant_parser(var))
-                            .map(|c| SyntaxNode::Number(c))
-                            .or_else(|| {
-                                custom_variable_parser(var).map(|var| SyntaxNode::Variable(var))
-                            })
-                            .ok_or(SyntaxError(
-                                SyntaxErrorKind::UnknownVariableOrConstant,
-                                pos..=pos,
-                            ))?,
-                    ),
-                ),
+                Token::Variable(var) => {
+                    if var.len() > NAME_LIMIT as usize {
+                        return Err(SyntaxError(SyntaxErrorKind::NameTooLong, pos..=pos));
+                    }
+                    if let Some(node) = N::parse_constant(var)
+                        .or_else(|| custom_constant_parser(var))
+                        .map(|c| SyntaxNode::Number(c))
+                        .or_else(|| {
+                            custom_variable_parser(var).map(|var| SyntaxNode::Variable(var))
+                        })
+                    {
+                        output_stack.push(arena.new_node(node))
+                    } else if let Some(segments) =
+                        segment_variable(var, &custom_constant_parser, &custom_variable_parser)
+                    {
+                        let mut first = true;
+                        for seg in segments {
+                            output_stack.push(arena.new_node(match seg {
+                                Segment::Constant(c) => SyntaxNode::Number(c),
+                                Segment::Variable(v) => SyntaxNode::Variable(v),
+                            }));
+                            if first {
+                                first = false;
+                            } else {
+                                shunting_yard_push_opr(
+                                    SYOperator::BiOperation(BiOperation::Mul),
+                                    &mut operator_stack,
+                                    &mut output_stack,
+                                    &mut arena,
+                                );
+                            }
+                        }
+                    } else {
+                        return Err(SyntaxError(
+                            SyntaxErrorKind::UnknownVariableOrConstant,
+                            pos..=pos,
+                        ));
+                    }
+                }
                 Token::Operation(opr) => {
                     let mut sy_opr: SYOperator<F> = BiOperation::parse(opr)
                         .map(|biopr| SYOperator::BiOperation(biopr))
@@ -544,15 +682,37 @@ where
                     }
                 }
                 Token::Function(name) => {
-                    let func = NativeFunction::parse(name)
+                    if let Some(func) = NativeFunction::parse(name)
                         .map(|nf| SYOperator::Function(SYFunction::NativeFunction(nf), 1))
                         .or_else(|| {
                             custom_function_parser(name).map(|(cf, min, max)| {
                                 SYOperator::Function(SYFunction::CustomFunction(cf, min, max), 1)
                             })
                         })
-                        .ok_or(SyntaxError(SyntaxErrorKind::UnknownFunction, pos..=pos))?;
-                    operator_stack.push(func);
+                    {
+                        operator_stack.push(func);
+                    } else if let Some((segments, func)) = segment_function(
+                        name,
+                        &custom_constant_parser,
+                        &custom_variable_parser,
+                        &custom_function_parser,
+                    ) {
+                        for seg in segments {
+                            output_stack.push(arena.new_node(match seg {
+                                Segment::Constant(c) => SyntaxNode::Number(c),
+                                Segment::Variable(v) => SyntaxNode::Variable(v),
+                            }));
+                            shunting_yard_push_opr(
+                                SYOperator::BiOperation(BiOperation::Mul),
+                                &mut operator_stack,
+                                &mut output_stack,
+                                &mut arena,
+                            );
+                        }
+                        operator_stack.push(SYOperator::Function(func, 1));
+                    } else {
+                        return Err(SyntaxError(SyntaxErrorKind::UnknownFunction, pos..=pos));
+                    }
                 }
                 Token::OpenParen => {
                     operator_stack.push(SYOperator::Parentheses);
@@ -1064,6 +1224,7 @@ where
 #[cfg(test)]
 mod test {
     use indextree::Arena;
+    use std::f64::consts::*;
 
     use super::*;
     use crate::VariableStore;
@@ -1112,6 +1273,145 @@ mod test {
         }
     }
 
+    #[test]
+    fn test_segment_variable() {
+        macro_rules! seg_var {
+            ($input: expr) => {
+                segment_variable(
+                    $input,
+                    &|input| match input {
+                        "c" => Some(299792458.0),
+                        "pi2" => Some(FRAC_2_PI),
+                        _ => None,
+                    },
+                    &|input| match input {
+                        "x" => Some(0),
+                        "y" => Some(1),
+                        "var5" => Some(2),
+                        "shallnotbenamed" => Some(3),
+                        _ => None,
+                    },
+                )
+            };
+        }
+        assert_eq!(
+            seg_var!("xy"),
+            Some(vec![Segment::Variable(0), Segment::Variable(1)])
+        );
+        assert_eq!(
+            seg_var!("cx"),
+            Some(vec![Segment::Constant(299792458.0), Segment::Variable(0)])
+        );
+        assert_eq!(
+            seg_var!("x2var5"),
+            Some(vec![
+                Segment::Variable(0),
+                Segment::Constant(2.0),
+                Segment::Variable(2)
+            ])
+        );
+        assert_eq!(
+            seg_var!("x2yy"),
+            Some(vec![
+                Segment::Variable(0),
+                Segment::Constant(2.0),
+                Segment::Variable(1),
+                Segment::Variable(1)
+            ])
+        );
+        assert_eq!(
+            seg_var!("pi2x"),
+            Some(vec![Segment::Constant(FRAC_2_PI), Segment::Variable(0)])
+        );
+        assert_eq!(
+            seg_var!("x8759y"),
+            Some(vec![
+                Segment::Variable(0),
+                Segment::Constant(8759.0),
+                Segment::Variable(1)
+            ])
+        );
+        assert_eq!(
+            seg_var!("x9shallnotbenamedy"),
+            Some(vec![
+                Segment::Variable(0),
+                Segment::Constant(9.0),
+                Segment::Variable(3),
+                Segment::Variable(1),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_segment_function() {
+        macro_rules! seg_func {
+            ($input: expr) => {
+                segment_function(
+                    $input,
+                    &|input| match input {
+                        "c" => Some(299792458.0),
+                        "pi4" => Some(FRAC_PI_2),
+                        _ => None,
+                    },
+                    &|input| match input {
+                        "x" => Some(0),
+                        "y" => Some(1),
+                        "var5" => Some(2),
+                        "shallnotbenamed" => Some(3),
+                        _ => None,
+                    },
+                    &|input| match input {
+                        "func1" => Some((0, 0, None)),
+                        "f2" => Some((1, 0, None)),
+                        "verylongfunction" => Some((2, 0, None)),
+                        _ => None,
+                    },
+                )
+            };
+        }
+        assert_eq!(
+            seg_func!("cmin"),
+            Some((
+                vec![Segment::Constant(299792458.0)],
+                SYFunction::NativeFunction(NativeFunction::Min)
+            ))
+        );
+        assert_eq!(
+            seg_func!("x55sin"),
+            Some((
+                vec![Segment::Variable(0), Segment::Constant(55.0)],
+                SYFunction::NativeFunction(NativeFunction::Sin)
+            ))
+        );
+        assert_eq!(
+            seg_func!("xyf2"),
+            Some((
+                vec![Segment::Variable(0), Segment::Variable(1)],
+                SYFunction::CustomFunction(1, 0, None)
+            ))
+        );
+        assert_eq!(
+            seg_func!("xvar5func1"),
+            Some((
+                vec![Segment::Variable(0), Segment::Variable(2)],
+                SYFunction::CustomFunction(0, 0, None)
+            ))
+        );
+        assert_eq!(
+            seg_func!("xxxxvar5verylongfunction"),
+            Some((
+                vec![
+                    Segment::Variable(0),
+                    Segment::Variable(0),
+                    Segment::Variable(0),
+                    Segment::Variable(0),
+                    Segment::Variable(2)
+                ],
+                SYFunction::CustomFunction(2, 0, None)
+            ))
+        );
+    }
+
     fn parse(input: &str) -> Result<SyntaxTree<f64, TestVar, TestFunc>, ParsingError> {
         let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
         SyntaxTree::new(
@@ -1147,10 +1447,7 @@ mod test {
         assert_eq!(syntaxify("0"), Ok(Leaf(SyntaxNode::Number(0.0))));
         assert_eq!(syntaxify("(0)"), Ok(Leaf(SyntaxNode::Number(0.0))));
         assert_eq!(syntaxify("((0))"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(
-            syntaxify("pi"),
-            Ok(Leaf(SyntaxNode::Number(std::f64::consts::PI)))
-        );
+        assert_eq!(syntaxify("pi"), Ok(Leaf(SyntaxNode::Number(PI))));
         assert_eq!(
             syntaxify("1+1"),
             Ok(branch!(
@@ -1392,7 +1689,7 @@ mod test {
             syntaxify("e^x"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Pow),
-                Leaf(SyntaxNode::Number(std::f64::consts::E)),
+                Leaf(SyntaxNode::Number(E)),
                 Leaf(SyntaxNode::Variable(TestVar::X))
             ))
         );
