@@ -141,6 +141,7 @@ pub enum SyntaxErrorKind {
     MissingClosingParenthesis,
     CommaOutsideFunction,
     PipeAbsNotClosed,
+    NameTooLong,
 }
 
 pub(crate) fn token_range_to_str_range(
@@ -196,6 +197,7 @@ impl SyntaxError {
                 SyntaxErrorKind::CommaOutsideFunction => ParsingErrorKind::CommaOutsideFunction,
                 SyntaxErrorKind::EmptyInput => ParsingErrorKind::EmptyInput,
                 SyntaxErrorKind::PipeAbsNotClosed => ParsingErrorKind::PipeAbsNotClosed,
+                SyntaxErrorKind::NameTooLong => ParsingErrorKind::NameTooLong,
             },
         }
     }

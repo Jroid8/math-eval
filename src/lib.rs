@@ -17,6 +17,9 @@ pub mod syntax;
 pub mod tokenizer;
 pub mod tree_utils;
 
+const NAME_LIMIT: u8 = 32;
+const NAME_LIMIT_ERROR_MSG: &str = "Identifier exceeds maximum length of 32 characters.";
+
 pub trait VariableIdentifier: Clone + Copy + Debug + Eq + 'static {}
 
 impl<T> VariableIdentifier for T where T: Clone + Copy + Debug + Hash + Eq + 'static {}
@@ -80,6 +83,7 @@ pub enum ParsingErrorKind {
     EmptyParenthesis,
     EmptyArgument,
     EmptyInput,
+    NameTooLong,
 }
 
 impl Display for ParsingErrorKind {
@@ -98,7 +102,8 @@ impl Display for ParsingErrorKind {
             ParsingErrorKind::EmptyParenthesis => "Parentheses should not be empty",
             ParsingErrorKind::EmptyArgument => "Function arguments shouldn't be empty",
             ParsingErrorKind::EmptyInput => "Input shouldn't be empty",
-            ParsingErrorKind::PipeAbsNotClosed => "Unmatched '|' in absolute value expression"
+            ParsingErrorKind::PipeAbsNotClosed => "Unmatched '|' in absolute value expression",
+            ParsingErrorKind::NameTooLong => NAME_LIMIT_ERROR_MSG,
         })
     }
 }
