@@ -151,19 +151,16 @@ pub(crate) fn token_range_to_str_range(
 ) -> RangeInclusive<usize> {
     let mut start = 0;
     let mut index = 0;
-    while input.chars().nth(index).unwrap().is_whitespace() {
-        index += 1
-    }
-    for (tk_idx, token) in token_stream.0[..*token_range.end()].iter().enumerate() {
-        if tk_idx == *token_range.start() {
-            start = *token_range.start()
-        }
-        index += token.length();
+    for (tk_idx, token) in token_stream.0[..=*token_range.end()].iter().enumerate() {
         while input.chars().nth(index).unwrap().is_whitespace() {
             index += 1
         }
+        if tk_idx == *token_range.start() {
+            start = index;
+        }
+        index += token.length();
     }
-    start..=index
+    start..=index - 1
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
