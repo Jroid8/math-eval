@@ -98,11 +98,7 @@ where
                 .field(arg1)
                 .field(arg2)
                 .finish(),
-            Self::UnaryOp(arg0, arg1) => f
-                .debug_tuple("UnaryOp")
-                .field(arg0)
-                .field(arg1)
-                .finish(),
+            Self::UnaryOp(arg0, arg1) => f.debug_tuple("UnaryOp").field(arg0).field(arg1).finish(),
             Self::NFSingle(_, arg1, arg2) => {
                 f.debug_tuple("NFSingle").field(arg1).field(arg2).finish()
             }
@@ -501,10 +497,9 @@ mod test {
         );
         assert_eq!(
             parse("t!"),
-            Ok(vec![Instruction::UnaryOp(
-                UnaryOp::Fac,
-                Input::Variable(2),
-            )])
+            Ok(vec![
+                Instruction::UnaryOp(UnaryOp::Fac, Input::Variable(2),)
+            ])
         );
         assert_eq!(
             parse("sin(1)"),
@@ -629,10 +624,7 @@ mod test {
             8.0
         );
         assert_eval!(
-            [Instruction::UnaryOp(
-                UnaryOp::Neg,
-                Input::Variable(2),
-            )],
+            [Instruction::UnaryOp(UnaryOp::Neg, Input::Variable(2),)],
             -23.0
         );
         assert_eval!(
@@ -700,16 +692,8 @@ mod test {
         );
         assert_eval!(
             [
-                Instruction::BinaryOp(
-                    BinaryOp::Pow,
-                    Input::Literal(5.0),
-                    Input::Literal(3.0)
-                ),
-                Instruction::BinaryOp(
-                    BinaryOp::Mul,
-                    Input::Literal(74.0),
-                    Input::Literal(5.0)
-                ),
+                Instruction::BinaryOp(BinaryOp::Pow, Input::Literal(5.0), Input::Literal(3.0)),
+                Instruction::BinaryOp(BinaryOp::Mul, Input::Literal(74.0), Input::Literal(5.0)),
                 Instruction::CFTriple(
                     &func1,
                     Input::Literal(13.0),
@@ -723,16 +707,8 @@ mod test {
         // (5+5)/(3+2)
         assert_eval!(
             [
-                Instruction::BinaryOp(
-                    BinaryOp::Add,
-                    Input::Literal(5.0),
-                    Input::Literal(5.0)
-                ),
-                Instruction::BinaryOp(
-                    BinaryOp::Sub,
-                    Input::Literal(7.0),
-                    Input::Literal(2.0)
-                ),
+                Instruction::BinaryOp(BinaryOp::Add, Input::Literal(5.0), Input::Literal(5.0)),
+                Instruction::BinaryOp(BinaryOp::Sub, Input::Literal(7.0), Input::Literal(2.0)),
                 Instruction::BinaryOp(BinaryOp::Div, Input::Memory, Input::Memory)
             ],
             2.0

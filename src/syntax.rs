@@ -227,10 +227,7 @@ fn shunting_yard_push_opr<N, V, F>(
     F: FunctionIdentifier,
 {
     while let Some(top_opr) = operator_stack.last()
-        && matches!(
-            top_opr,
-            SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_)
-        )
+        && matches!(top_opr, SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_))
         && (operator.precedence() < top_opr.precedence()
             || operator.precedence() == top_opr.precedence() && !operator.is_right_associative())
     {
@@ -561,9 +558,7 @@ where
                 Token::Operation(opr) => {
                     let mut sy_opr: SYOperator<F> = BinaryOp::parse(opr)
                         .map(|biopr| SYOperator::BinaryOp(biopr))
-                        .or_else(|| {
-                            UnaryOp::parse(opr).map(|unopr| SYOperator::UnaryOp(unopr))
-                        })
+                        .or_else(|| UnaryOp::parse(opr).map(|unopr| SYOperator::UnaryOp(unopr)))
                         .unwrap();
                     if opr == '-' && last_tk.is_none_or(|tk| after_implies_neg(tk, &operator_stack))
                     {
@@ -817,9 +812,7 @@ where
                     }
                 }
                 SyntaxNode::UnaryOp(opr) => opr.eval(get!(children.next())),
-                SyntaxNode::BinaryOp(opr) => {
-                    opr.eval(get!(children.next()), get!(children.next()))
-                }
+                SyntaxNode::BinaryOp(opr) => opr.eval(get!(children.next()), get!(children.next())),
                 SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
                     NFPointer::Single(func) => func(get!(children.next())),
                     NFPointer::Dual(func) => func(get!(children.next()), get!(children.next())),
