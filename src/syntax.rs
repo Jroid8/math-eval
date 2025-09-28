@@ -1482,7 +1482,7 @@ mod test {
             ))
         );
         assert_eq!(
-            syntaxify("log2(8)"),
+            syntaxify("lb(8)"),
             Ok(branch!(
                 SyntaxNode::NativeFunction(NativeFunction::Log2),
                 Leaf(SyntaxNode::Number(8.0))

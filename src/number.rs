@@ -55,6 +55,8 @@ impl NativeFunction {
             "log2" => Some(NativeFunction::Log2),
             "log10" => Some(NativeFunction::Log10),
             "ln" => Some(NativeFunction::Ln),
+            "lg" => Some(NativeFunction::Log10),
+            "lb" => Some(NativeFunction::Log2),
             "exp" => Some(NativeFunction::Exp),
             "floor" => Some(NativeFunction::Floor),
             "ceil" => Some(NativeFunction::Ceil),
