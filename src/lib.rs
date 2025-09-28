@@ -28,6 +28,107 @@ pub trait FunctionIdentifier: Clone + Copy + Eq + Debug + 'static {}
 
 impl<T> FunctionIdentifier for T where T: Clone + Copy + Debug + Eq + 'static {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UnaryOp {
+    Fac,
+    Neg,
+    DoubleFac,
+}
+
+impl UnaryOp {
+    pub fn parse(input: char) -> Option<Self> {
+        match input {
+            '!' => Some(UnaryOp::Fac),
+            '-' => Some(UnaryOp::Neg),
+            _ => None,
+        }
+    }
+
+    pub fn eval<N: MathEvalNumber>(self, value: N::AsArg<'_>) -> N {
+        match self {
+            UnaryOp::Fac => N::factorial(value),
+            UnaryOp::Neg => -value,
+            UnaryOp::DoubleFac => N::double_factorial(value),
+        }
+    }
+}
+
+impl Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            UnaryOp::Fac => "!",
+            UnaryOp::Neg => "-",
+            UnaryOp::DoubleFac => "!!",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+    Mod,
+}
+
+impl BinaryOp {
+    pub fn parse(input: char) -> Option<BinaryOp> {
+        match input {
+            '+' => Some(BinaryOp::Add),
+            '-' => Some(BinaryOp::Sub),
+            '*' => Some(BinaryOp::Mul),
+            '/' => Some(BinaryOp::Div),
+            '^' => Some(BinaryOp::Pow),
+            '%' => Some(BinaryOp::Mod),
+            _ => None,
+        }
+    }
+    pub fn eval<N: MathEvalNumber>(self, lhs: N::AsArg<'_>, rhs: N::AsArg<'_>) -> N {
+        match self {
+            BinaryOp::Add => lhs + rhs,
+            BinaryOp::Sub => lhs - rhs,
+            BinaryOp::Mul => lhs * rhs,
+            BinaryOp::Div => lhs / rhs,
+            BinaryOp::Pow => N::pow(lhs, rhs),
+            BinaryOp::Mod => N::modulo(lhs, rhs),
+        }
+    }
+    pub fn as_char(self) -> char {
+        match self {
+            BinaryOp::Add => '+',
+            BinaryOp::Sub => '-',
+            BinaryOp::Mul => '*',
+            BinaryOp::Div => '/',
+            BinaryOp::Pow => '^',
+            BinaryOp::Mod => '%',
+        }
+    }
+    pub fn is_commutative(self) -> bool {
+        matches!(self, BinaryOp::Add | BinaryOp::Mul)
+    }
+    pub fn precedence(self) -> u8 {
+        match self {
+            BinaryOp::Add => 0,
+            BinaryOp::Sub => 0,
+            BinaryOp::Mul => 1,
+            BinaryOp::Div => 1,
+            BinaryOp::Mod => 1,
+            BinaryOp::Pow => 2,
+        }
+    }
+    pub fn is_left_associative(self) -> bool {
+        !matches!(self, BinaryOp::Pow)
+    }
+}
+
+impl Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_char())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsingError {
     kind: ParsingErrorKind,

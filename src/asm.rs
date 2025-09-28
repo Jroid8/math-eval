@@ -3,9 +3,9 @@ use smallvec::SmallVec;
 use std::{fmt::Debug, hash::Hash};
 
 use crate::{
-    FunctionIdentifier, VariableIdentifier,
+    BinaryOp, FunctionIdentifier, UnaryOp, VariableIdentifier,
     number::{MathEvalNumber, NativeFunction, Reborrow},
-    syntax::{BiOperation, SyntaxNode, UnOperation},
+    syntax::SyntaxNode,
 };
 
 pub type Stack<N> = SmallVec<[N; 16]>;
@@ -20,8 +20,8 @@ pub enum Input<N: MathEvalNumber> {
 #[derive(Clone, Copy)]
 pub enum Instruction<'a, N: MathEvalNumber, F: FunctionIdentifier> {
     Source(Input<N>),
-    BiOperation(BiOperation, Input<N>, Input<N>),
-    UnOperation(UnOperation, Input<N>),
+    BinaryOp(BinaryOp, Input<N>, Input<N>),
+    UnaryOp(UnaryOp, Input<N>),
     NFSingle(for<'b> fn(N::AsArg<'b>) -> N, Input<N>, NativeFunction),
     NFDual(
         for<'b> fn(N::AsArg<'b>, N::AsArg<'b>) -> N,
@@ -55,10 +55,10 @@ where
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Source(l0), Self::Source(r0)) => l0 == r0,
-            (Self::BiOperation(l0, l1, l2), Self::BiOperation(r0, r1, r2)) => {
+            (Self::BinaryOp(l0, l1, l2), Self::BinaryOp(r0, r1, r2)) => {
                 l0 == r0 && l1 == r1 && l2 == r2
             }
-            (Self::UnOperation(l0, l1), Self::UnOperation(r0, r1)) => l0 == r0 && l1 == r1,
+            (Self::UnaryOp(l0, l1), Self::UnaryOp(r0, r1)) => l0 == r0 && l1 == r1,
             (Self::NFSingle(_, l1, l2), Self::NFSingle(_, r1, r2)) => l1 == r1 && l2 == r2,
             (Self::NFDual(_, l1, l2, l3), Self::NFDual(_, r1, r2, r3)) => {
                 l1 == r1 && l2 == r2 && l3 == r3
@@ -92,14 +92,14 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Source(arg0) => f.debug_tuple("Source").field(arg0).finish(),
-            Self::BiOperation(arg0, arg1, arg2) => f
-                .debug_tuple("BiOperation")
+            Self::BinaryOp(arg0, arg1, arg2) => f
+                .debug_tuple("BinaryOp")
                 .field(arg0)
                 .field(arg1)
                 .field(arg2)
                 .finish(),
-            Self::UnOperation(arg0, arg1) => f
-                .debug_tuple("UnOperation")
+            Self::UnaryOp(arg0, arg1) => f
+                .debug_tuple("UnaryOp")
                 .field(arg0)
                 .field(arg1)
                 .finish(),
@@ -197,7 +197,7 @@ where
     ) -> Self {
         let mut result: Vec<Instruction<'a, N, F>> = Vec::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
-            Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
+            Some(SyntaxNode::BinaryOp(_) | SyntaxNode::UnaryOp(_)) => true,
             Some(SyntaxNode::NativeFunction(nf)) => nf.is_fixed(),
             Some(SyntaxNode::CustomFunction(cf)) => {
                 !matches!(function_to_pointer(*cf), CFPointer::Flexible(_))
@@ -231,13 +231,13 @@ where
                             Instruction::Source(Input::Variable(var_index(*var)))
                         }
                     }
-                    SyntaxNode::BiOperation(opr) => Instruction::BiOperation(
+                    SyntaxNode::BinaryOp(opr) => Instruction::BinaryOp(
                         *opr,
                         children_as_input.next().unwrap(),
                         children_as_input.next().unwrap(),
                     ),
-                    SyntaxNode::UnOperation(opr) => {
-                        Instruction::UnOperation(*opr, children_as_input.next().unwrap())
+                    SyntaxNode::UnaryOp(opr) => {
+                        Instruction::UnaryOp(*opr, children_as_input.next().unwrap())
                     }
                     SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
                         crate::number::NFPointer::Single(p) => {
@@ -291,12 +291,12 @@ where
         for instr in &self.0 {
             stack_len += match instr {
                 Instruction::Source(_) => 0,
-                Instruction::BiOperation(_, lhs, rhs)
+                Instruction::BinaryOp(_, lhs, rhs)
                 | Instruction::NFDual(_, lhs, rhs, _)
                 | Instruction::CFDual(_, lhs, rhs, _) => {
                     input_stack_effect(lhs) + input_stack_effect(rhs)
                 }
-                Instruction::UnOperation(_, val)
+                Instruction::UnaryOp(_, val)
                 | Instruction::NFSingle(_, val, _)
                 | Instruction::CFSingle(_, val, _) => input_stack_effect(val),
                 Instruction::CFTriple(_, inp1, inp2, inp3, _) => {
@@ -334,8 +334,8 @@ where
                     Input::Variable(var) => variables[*var].to_owned(),
                     Input::Memory => stack.pop().unwrap(),
                 },
-                Instruction::BiOperation(opr, lhs, rhs) => opr.eval(get!(lhs), get!(rhs)),
-                Instruction::UnOperation(opr, val) => opr.eval(get!(val)),
+                Instruction::BinaryOp(opr, lhs, rhs) => opr.eval(get!(lhs), get!(rhs)),
+                Instruction::UnaryOp(opr, val) => opr.eval(get!(val)),
                 Instruction::NFSingle(func, input, _) => func(get!(input)),
                 Instruction::NFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
                 Instruction::NFFlexible(func, arg_count, _) => {
@@ -378,8 +378,8 @@ where
             }
             let result = match &instr {
                 Instruction::Source(input) => get!(input),
-                Instruction::BiOperation(opr, lhs, rhs) => opr.eval(get!(lhs), get!(rhs)),
-                Instruction::UnOperation(opr, val) => opr.eval(get!(val)),
+                Instruction::BinaryOp(opr, lhs, rhs) => opr.eval(get!(lhs), get!(rhs)),
+                Instruction::UnaryOp(opr, val) => opr.eval(get!(val)),
                 Instruction::NFSingle(func, input, _) => func(get!(input)),
                 Instruction::NFDual(func, inp1, inp2, _) => func(get!(inp1), get!(inp2)),
                 Instruction::NFFlexible(func, arg_count, _) => {
@@ -409,10 +409,10 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        ParsingError,
+        BinaryOp, ParsingError, UnaryOp,
         asm::{CFPointer, Input, Instruction, MathAssembly},
         number::{MathEvalNumber, NativeFunction},
-        syntax::{BiOperation, SyntaxTree, UnOperation},
+        syntax::SyntaxTree,
         tokenizer::TokenStream,
     };
 
@@ -493,16 +493,16 @@ mod test {
         );
         assert_eq!(
             parse("y+7"),
-            Ok(vec![Instruction::BiOperation(
-                BiOperation::Add,
+            Ok(vec![Instruction::BinaryOp(
+                BinaryOp::Add,
                 Input::Variable(1),
                 Input::Literal(7.0)
             )])
         );
         assert_eq!(
             parse("t!"),
-            Ok(vec![Instruction::UnOperation(
-                UnOperation::Fac,
+            Ok(vec![Instruction::UnaryOp(
+                UnaryOp::Fac,
                 Input::Variable(2),
             )])
         );
@@ -581,15 +581,15 @@ mod test {
                     Input::Variable(1),
                     TestFunc::ISqrt
                 ),
-                Instruction::BiOperation(BiOperation::Div, Input::Memory, Input::Literal(32.0)),
-                Instruction::BiOperation(BiOperation::Div, Input::Variable(0), Input::Variable(1)),
+                Instruction::BinaryOp(BinaryOp::Div, Input::Memory, Input::Literal(32.0)),
+                Instruction::BinaryOp(BinaryOp::Div, Input::Variable(0), Input::Variable(1)),
                 Instruction::NFSingle(
                     <f64 as MathEvalNumber>::atan,
                     Input::Memory,
                     NativeFunction::Atan
                 ),
-                Instruction::BiOperation(BiOperation::Div, Input::Memory, Input::Literal(4.0)),
-                Instruction::BiOperation(BiOperation::Add, Input::Memory, Input::Memory),
+                Instruction::BinaryOp(BinaryOp::Div, Input::Memory, Input::Literal(4.0)),
+                Instruction::BinaryOp(BinaryOp::Add, Input::Memory, Input::Memory),
                 Instruction::NFSingle(
                     <f64 as MathEvalNumber>::sin,
                     Input::Memory,
@@ -613,24 +613,24 @@ mod test {
         }
         assert_eval!([Instruction::Source(Input::Variable(0))], 1.0);
         assert_eval!(
-            [Instruction::BiOperation(
-                BiOperation::Add,
+            [Instruction::BinaryOp(
+                BinaryOp::Add,
                 Input::Literal(1.0),
                 Input::Literal(1.0)
             )],
             2.0
         );
         assert_eval!(
-            [Instruction::BiOperation(
-                BiOperation::Mul,
+            [Instruction::BinaryOp(
+                BinaryOp::Mul,
                 Input::Variable(0),
                 Input::Variable(1),
             )],
             8.0
         );
         assert_eval!(
-            [Instruction::UnOperation(
-                UnOperation::Neg,
+            [Instruction::UnaryOp(
+                UnaryOp::Neg,
                 Input::Variable(2),
             )],
             -23.0
@@ -700,13 +700,13 @@ mod test {
         );
         assert_eval!(
             [
-                Instruction::BiOperation(
-                    BiOperation::Pow,
+                Instruction::BinaryOp(
+                    BinaryOp::Pow,
                     Input::Literal(5.0),
                     Input::Literal(3.0)
                 ),
-                Instruction::BiOperation(
-                    BiOperation::Mul,
+                Instruction::BinaryOp(
+                    BinaryOp::Mul,
                     Input::Literal(74.0),
                     Input::Literal(5.0)
                 ),
@@ -723,25 +723,25 @@ mod test {
         // (5+5)/(3+2)
         assert_eval!(
             [
-                Instruction::BiOperation(
-                    BiOperation::Add,
+                Instruction::BinaryOp(
+                    BinaryOp::Add,
                     Input::Literal(5.0),
                     Input::Literal(5.0)
                 ),
-                Instruction::BiOperation(
-                    BiOperation::Sub,
+                Instruction::BinaryOp(
+                    BinaryOp::Sub,
                     Input::Literal(7.0),
                     Input::Literal(2.0)
                 ),
-                Instruction::BiOperation(BiOperation::Div, Input::Memory, Input::Memory)
+                Instruction::BinaryOp(BinaryOp::Div, Input::Memory, Input::Memory)
             ],
             2.0
         );
         // sin(pi*x)+1
         assert_eval!(
             [
-                Instruction::BiOperation(
-                    BiOperation::Mul,
+                Instruction::BinaryOp(
+                    BinaryOp::Mul,
                     Input::Literal(std::f64::consts::PI),
                     Input::Variable(0)
                 ),
@@ -750,7 +750,7 @@ mod test {
                     Input::Memory,
                     NativeFunction::Sin
                 ),
-                Instruction::BiOperation(BiOperation::Add, Input::Memory, Input::Literal(1.0))
+                Instruction::BinaryOp(BinaryOp::Add, Input::Memory, Input::Literal(1.0))
             ],
             1.0000000000000002
         );

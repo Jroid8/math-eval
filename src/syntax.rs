@@ -6,109 +6,11 @@ use crate::asm::{CFPointer, MathAssembly, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
 use crate::tokenizer::{Token, TokenStream};
 use crate::tree_utils::Tree;
-use crate::{FunctionIdentifier, NAME_LIMIT, ParsingError, ParsingErrorKind, VariableIdentifier};
+use crate::{
+    BinaryOp, FunctionIdentifier, NAME_LIMIT, ParsingError, ParsingErrorKind, UnaryOp,
+    VariableIdentifier,
+};
 use indextree::{Arena, NodeEdge, NodeId};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum UnOperation {
-    Fac,
-    Neg,
-    DoubleFac,
-}
-
-impl UnOperation {
-    pub fn parse(input: char) -> Option<Self> {
-        match input {
-            '!' => Some(UnOperation::Fac),
-            '-' => Some(UnOperation::Neg),
-            _ => None,
-        }
-    }
-
-    pub fn eval<N: MathEvalNumber>(self, value: N::AsArg<'_>) -> N {
-        match self {
-            UnOperation::Fac => N::factorial(value),
-            UnOperation::Neg => -value,
-            UnOperation::DoubleFac => N::double_factorial(value),
-        }
-    }
-}
-
-impl Display for UnOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            UnOperation::Fac => "!",
-            UnOperation::Neg => "-",
-            UnOperation::DoubleFac => "!!",
-        })
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BiOperation {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Pow,
-    Mod,
-}
-
-impl BiOperation {
-    pub fn parse(input: char) -> Option<BiOperation> {
-        match input {
-            '+' => Some(BiOperation::Add),
-            '-' => Some(BiOperation::Sub),
-            '*' => Some(BiOperation::Mul),
-            '/' => Some(BiOperation::Div),
-            '^' => Some(BiOperation::Pow),
-            '%' => Some(BiOperation::Mod),
-            _ => None,
-        }
-    }
-    pub fn eval<N: MathEvalNumber>(self, lhs: N::AsArg<'_>, rhs: N::AsArg<'_>) -> N {
-        match self {
-            BiOperation::Add => lhs + rhs,
-            BiOperation::Sub => lhs - rhs,
-            BiOperation::Mul => lhs * rhs,
-            BiOperation::Div => lhs / rhs,
-            BiOperation::Pow => N::pow(lhs, rhs),
-            BiOperation::Mod => N::modulo(lhs, rhs),
-        }
-    }
-    pub fn as_char(self) -> char {
-        match self {
-            BiOperation::Add => '+',
-            BiOperation::Sub => '-',
-            BiOperation::Mul => '*',
-            BiOperation::Div => '/',
-            BiOperation::Pow => '^',
-            BiOperation::Mod => '%',
-        }
-    }
-    pub fn is_commutative(self) -> bool {
-        matches!(self, BiOperation::Add | BiOperation::Mul)
-    }
-    pub fn precedence(self) -> u8 {
-        match self {
-            BiOperation::Add => 0,
-            BiOperation::Sub => 0,
-            BiOperation::Mul => 1,
-            BiOperation::Div => 1,
-            BiOperation::Mod => 1,
-            BiOperation::Pow => 2,
-        }
-    }
-    pub fn is_left_associative(self) -> bool {
-        !matches!(self, BiOperation::Pow)
-    }
-}
-
-impl Display for BiOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_char())
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxNode<N, V, F>
@@ -119,8 +21,8 @@ where
 {
     Number(N),
     Variable(V),
-    BiOperation(BiOperation),
-    UnOperation(UnOperation),
+    BinaryOp(BinaryOp),
+    UnaryOp(UnaryOp),
     NativeFunction(NativeFunction),
     CustomFunction(F),
 }
@@ -215,8 +117,8 @@ enum SYOperator<F>
 where
     F: FunctionIdentifier,
 {
-    BiOperation(BiOperation),
-    UnOperation(UnOperation),
+    BinaryOp(BinaryOp),
+    UnaryOp(UnaryOp),
     Function(SYFunction<F>, u8),
     Parentheses,
 }
@@ -227,22 +129,22 @@ where
 {
     fn precedence(&self) -> u8 {
         match self {
-            SYOperator::BiOperation(BiOperation::Add) => 0,
-            SYOperator::BiOperation(BiOperation::Sub) => 0,
-            SYOperator::BiOperation(BiOperation::Mul) => 1,
-            SYOperator::BiOperation(BiOperation::Div) => 1,
-            SYOperator::BiOperation(BiOperation::Mod) => 1,
-            SYOperator::UnOperation(UnOperation::Neg) => 2,
-            SYOperator::BiOperation(BiOperation::Pow) => 3,
-            SYOperator::UnOperation(UnOperation::Fac) => 4,
-            SYOperator::UnOperation(UnOperation::DoubleFac) => 4,
+            SYOperator::BinaryOp(BinaryOp::Add) => 0,
+            SYOperator::BinaryOp(BinaryOp::Sub) => 0,
+            SYOperator::BinaryOp(BinaryOp::Mul) => 1,
+            SYOperator::BinaryOp(BinaryOp::Div) => 1,
+            SYOperator::BinaryOp(BinaryOp::Mod) => 1,
+            SYOperator::UnaryOp(UnaryOp::Neg) => 2,
+            SYOperator::BinaryOp(BinaryOp::Pow) => 3,
+            SYOperator::UnaryOp(UnaryOp::Fac) => 4,
+            SYOperator::UnaryOp(UnaryOp::DoubleFac) => 4,
             SYOperator::Function(_, _) | SYOperator::Parentheses => {
                 unreachable!()
             }
         }
     }
     fn is_right_associative(&self) -> bool {
-        matches!(self, SYOperator::BiOperation(BiOperation::Pow))
+        matches!(self, SYOperator::BinaryOp(BinaryOp::Pow))
     }
     fn opr2syn<N, V>(self) -> SyntaxNode<N, V, F>
     where
@@ -250,8 +152,8 @@ where
         V: VariableIdentifier,
     {
         match self {
-            SYOperator::BiOperation(opr) => SyntaxNode::BiOperation(opr),
-            SYOperator::UnOperation(opr) => SyntaxNode::UnOperation(opr),
+            SYOperator::BinaryOp(opr) => SyntaxNode::BinaryOp(opr),
+            SYOperator::UnaryOp(opr) => SyntaxNode::UnaryOp(opr),
             SYOperator::Function(SYFunction::NativeFunction(nf), _) => {
                 SyntaxNode::NativeFunction(nf)
             }
@@ -300,11 +202,11 @@ fn shunting_yard_pop_opr<N, V, F>(
     // the error to the caller so it searches for the source itself, or errors must be detected
     // before calling this function. The latter solution is used for now.
     let child = output_stack.pop().unwrap();
-    if matches!(opr, SYOperator::BiOperation(_)) {
+    if matches!(opr, SYOperator::BinaryOp(_)) {
         node.append(output_stack.pop().unwrap(), arena);
     }
     if let SyntaxNode::Number(num) = arena[child].get_mut()
-        && opr == SYOperator::UnOperation(UnOperation::Neg)
+        && opr == SYOperator::UnaryOp(UnaryOp::Neg)
     {
         *num = -num.clone();
         output_stack.push(child);
@@ -327,7 +229,7 @@ fn shunting_yard_push_opr<N, V, F>(
     while let Some(top_opr) = operator_stack.last()
         && matches!(
             top_opr,
-            SYOperator::BiOperation(_) | SYOperator::UnOperation(_)
+            SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_)
         )
         && (operator.precedence() < top_opr.precedence()
             || operator.precedence() == top_opr.precedence() && !operator.is_right_associative())
@@ -347,7 +249,7 @@ fn shunting_yard_flush<N, V, F>(
     F: FunctionIdentifier,
 {
     while let Some(opr) = operator_stack.last()
-        && matches!(opr, SYOperator::BiOperation(_) | SYOperator::UnOperation(_))
+        && matches!(opr, SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_))
     {
         shunting_yard_pop_opr(operator_stack, output_stack, arena)
     }
@@ -432,7 +334,7 @@ where
 {
     for (i, opr) in operator_stack.iter().enumerate().rev() {
         match opr {
-            SYOperator::BiOperation(_) | SYOperator::UnOperation(_) => (),
+            SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_) => (),
             SYOperator::Function(SYFunction::PipeAbs, _) => return Some(i),
             SYOperator::Function(_, _) | SYOperator::Parentheses => return None,
         }
@@ -605,7 +507,7 @@ where
                 ) && inside_pipe_abs(&operator_stack).is_none()
             {
                 shunting_yard_push_opr(
-                    SYOperator::BiOperation(BiOperation::Mul),
+                    SYOperator::BinaryOp(BinaryOp::Mul),
                     &mut operator_stack,
                     &mut output_stack,
                     &mut arena,
@@ -642,7 +544,7 @@ where
                                 first = false;
                             } else {
                                 shunting_yard_push_opr(
-                                    SYOperator::BiOperation(BiOperation::Mul),
+                                    SYOperator::BinaryOp(BinaryOp::Mul),
                                     &mut operator_stack,
                                     &mut output_stack,
                                     &mut arena,
@@ -657,22 +559,19 @@ where
                     }
                 }
                 Token::Operation(opr) => {
-                    let mut sy_opr: SYOperator<F> = BiOperation::parse(opr)
-                        .map(|biopr| SYOperator::BiOperation(biopr))
+                    let mut sy_opr: SYOperator<F> = BinaryOp::parse(opr)
+                        .map(|biopr| SYOperator::BinaryOp(biopr))
                         .or_else(|| {
-                            UnOperation::parse(opr).map(|unopr| SYOperator::UnOperation(unopr))
+                            UnaryOp::parse(opr).map(|unopr| SYOperator::UnaryOp(unopr))
                         })
                         .unwrap();
                     if opr == '-' && last_tk.is_none_or(|tk| after_implies_neg(tk, &operator_stack))
                     {
-                        sy_opr = SYOperator::UnOperation(UnOperation::Neg);
+                        sy_opr = SYOperator::UnaryOp(UnaryOp::Neg);
                     } else if opr == '!' && last_tk.is_some_and(|tk| tk == Token::Operation('!')) {
                         let fac = operator_stack.pop();
-                        debug_assert_eq!(
-                            fac,
-                            Some(SYOperator::UnOperation(UnOperation::Fac))
-                        );
-                        sy_opr = SYOperator::UnOperation(UnOperation::DoubleFac)
+                        debug_assert_eq!(fac, Some(SYOperator::UnaryOp(UnaryOp::Fac)));
+                        sy_opr = SYOperator::UnaryOp(UnaryOp::DoubleFac)
                     }
                     if opr != '+'
                         || last_tk.is_some_and(|tk| !after_implies_neg(tk, &operator_stack))
@@ -707,7 +606,7 @@ where
                                 Segment::Variable(v) => SyntaxNode::Variable(v),
                             }));
                             shunting_yard_push_opr(
-                                SYOperator::BiOperation(BiOperation::Mul),
+                                SYOperator::BinaryOp(BinaryOp::Mul),
                                 &mut operator_stack,
                                 &mut output_stack,
                                 &mut arena,
@@ -873,7 +772,7 @@ where
     ) -> N {
         let mut stack: Stack<N> = Stack::new();
         let is_fixed_input = |node: Option<NodeId>| match node.map(|id| self.0.arena[id].get()) {
-            Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
+            Some(SyntaxNode::BinaryOp(_) | SyntaxNode::UnaryOp(_)) => true,
             Some(SyntaxNode::NativeFunction(nf)) => nf.is_fixed(),
             Some(SyntaxNode::CustomFunction(cf)) => {
                 !matches!(function_to_pointer(*cf), CFPointer::Flexible(_))
@@ -917,8 +816,8 @@ where
                         variable_values.get(*var).to_owned()
                     }
                 }
-                SyntaxNode::UnOperation(opr) => opr.eval(get!(children.next())),
-                SyntaxNode::BiOperation(opr) => {
+                SyntaxNode::UnaryOp(opr) => opr.eval(get!(children.next())),
+                SyntaxNode::BinaryOp(opr) => {
                     opr.eval(get!(children.next()), get!(children.next()))
                 }
                 SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
@@ -989,14 +888,14 @@ where
     }
 
     pub fn displacing_simplification(&mut self) {
-        self._displacing_simplification(BiOperation::Add, BiOperation::Sub, 0.into());
-        self._displacing_simplification(BiOperation::Mul, BiOperation::Div, 1.into());
+        self._displacing_simplification(BinaryOp::Add, BinaryOp::Sub, 0.into());
+        self._displacing_simplification(BinaryOp::Mul, BinaryOp::Div, 1.into());
     }
 
-    fn _displacing_simplification(&mut self, pos: BiOperation, neg: BiOperation, inital_value: N) {
-        let is_targeting_opr = |node: NodeId| matches!(self.0.arena[node].get(), SyntaxNode::BiOperation(opr) if *opr == pos || *opr == neg);
+    fn _displacing_simplification(&mut self, pos: BinaryOp, neg: BinaryOp, inital_value: N) {
+        let is_targeting_opr = |node: NodeId| matches!(self.0.arena[node].get(), SyntaxNode::BinaryOp(opr) if *opr == pos || *opr == neg);
         let mut found: Vec<NodeId> = Vec::new();
-        let mul_opr = |target: BiOperation, side: usize, parent: BiOperation| {
+        let mul_opr = |target: BinaryOp, side: usize, parent: BinaryOp| {
             if side == 0 {
                 parent
             } else if target == parent {
@@ -1020,14 +919,14 @@ where
             }
         }
         for upper in found {
-            let SyntaxNode::BiOperation(upper_opr) = self.0.arena[upper].get() else {
+            let SyntaxNode::BinaryOp(upper_opr) = self.0.arena[upper].get() else {
                 panic!();
             };
             let mut symbols: [Option<(NodeId, bool)>; 2] = [None, None];
             let mut lhs = inital_value.clone();
             for (upper_side, lower) in upper.children(&self.0.arena).enumerate() {
                 match self.0.arena[lower].get() {
-                    SyntaxNode::BiOperation(lower_opr) => {
+                    SyntaxNode::BinaryOp(lower_opr) => {
                         for (lower_side, lowest) in lower.children(&self.0.arena).enumerate() {
                             let opr = mul_opr(
                                 *lower_opr,
@@ -1064,13 +963,13 @@ where
             if let Some(symb2) = symbols[1] {
                 if symb1.1 == symb2.1 {
                     *self.0.arena[upper].get_mut() =
-                        SyntaxNode::BiOperation(if symb1.1 { neg } else { pos });
-                    let lower = upper.append_value(SyntaxNode::BiOperation(pos), &mut self.0.arena);
+                        SyntaxNode::BinaryOp(if symb1.1 { neg } else { pos });
+                    let lower = upper.append_value(SyntaxNode::BinaryOp(pos), &mut self.0.arena);
                     lower.append(symb1.0, &mut self.0.arena);
                     lower.append(symb2.0, &mut self.0.arena);
                 } else {
-                    *self.0.arena[upper].get_mut() = SyntaxNode::BiOperation(pos);
-                    let lower = upper.append_value(SyntaxNode::BiOperation(neg), &mut self.0.arena);
+                    *self.0.arena[upper].get_mut() = SyntaxNode::BinaryOp(pos);
+                    let lower = upper.append_value(SyntaxNode::BinaryOp(neg), &mut self.0.arena);
                     if symb2.1 {
                         lower.append(symb1.0, &mut self.0.arena);
                         lower.append(symb2.0, &mut self.0.arena);
@@ -1081,7 +980,7 @@ where
                 }
             } else {
                 *self.0.arena[upper].get_mut() =
-                    SyntaxNode::BiOperation(if symb1.1 { neg } else { pos });
+                    SyntaxNode::BinaryOp(if symb1.1 { neg } else { pos });
                 upper.append(symb1.0, &mut self.0.arena);
             }
         }
@@ -1108,8 +1007,8 @@ where
             let child_count = id.children(arena).count();
             match arena[id].get() {
                 SyntaxNode::Number(_) | SyntaxNode::Variable(_) => short!(child_count == 0),
-                SyntaxNode::BiOperation(_) => short!(child_count == 2),
-                SyntaxNode::UnOperation(_) => short!(child_count == 1),
+                SyntaxNode::BinaryOp(_) => short!(child_count == 2),
+                SyntaxNode::UnaryOp(_) => short!(child_count == 1),
                 SyntaxNode::NativeFunction(nf) => short!(
                     child_count >= nf.min_args() as usize
                         && nf.max_args().is_none_or(|m| child_count <= m as usize)
@@ -1140,28 +1039,28 @@ where
                 NodeEdge::Start(node) => match arena[node].get() {
                     SyntaxNode::Number(num) => Display::fmt(num, f)?,
                     SyntaxNode::Variable(var) => Display::fmt(&var, f)?,
-                    SyntaxNode::BiOperation(opr) => {
+                    SyntaxNode::BinaryOp(opr) => {
                         if matches!(
                             node.ancestors(arena).nth(1).map(|p| arena[p].get()),
-                            Some(SyntaxNode::BiOperation(paopr))
+                            Some(SyntaxNode::BinaryOp(paopr))
                                 if opr.precedence() < paopr.precedence()
                                 || !paopr.is_commutative() && opr.precedence() <= paopr.precedence()
                         ) {
                             f.write_str("(")?;
                         }
                     }
-                    SyntaxNode::UnOperation(UnOperation::Neg) => {
-                        // parent is BiOperation, and Neg is the rhs
+                    SyntaxNode::UnaryOp(UnaryOp::Neg) => {
+                        // parent is BinaryOp, and Neg is the rhs
                         if node
                             .ancestors(arena)
                             .nth(1)
-                            .filter(|p| matches!(arena[*p].get(), SyntaxNode::BiOperation(_)))
+                            .filter(|p| matches!(arena[*p].get(), SyntaxNode::BinaryOp(_)))
                             .map(|p| p.children(arena).nth(1))
                             .is_some()
                         {
                             f.write_str("(")?;
                         }
-                        Display::fmt(&UnOperation::Neg, f)?;
+                        Display::fmt(&UnaryOp::Neg, f)?;
                     }
                     SyntaxNode::NativeFunction(nf) => {
                         Display::fmt(nf, f)?;
@@ -1175,28 +1074,28 @@ where
                 },
                 NodeEdge::End(node) => {
                     match arena[node].get() {
-                        SyntaxNode::BiOperation(opr) => {
+                        SyntaxNode::BinaryOp(opr) => {
                             if matches!(
                                 node.ancestors(arena).nth(1).map(|p| arena[p].get()),
-                                Some(SyntaxNode::BiOperation(paopr))
+                                Some(SyntaxNode::BinaryOp(paopr))
                                     if opr.precedence() < paopr.precedence()
                                     || !paopr.is_commutative() && opr.precedence() <= paopr.precedence()
                             ) {
                                 f.write_str(")")?
                             }
                         }
-                        SyntaxNode::UnOperation(UnOperation::Neg) => {
+                        SyntaxNode::UnaryOp(UnaryOp::Neg) => {
                             if node
                                 .ancestors(arena)
                                 .nth(1)
-                                .filter(|p| matches!(arena[*p].get(), SyntaxNode::BiOperation(_)))
+                                .filter(|p| matches!(arena[*p].get(), SyntaxNode::BinaryOp(_)))
                                 .map(|p| p.children(arena).nth(1))
                                 .is_some()
                             {
                                 f.write_str(")")?;
                             }
                         }
-                        SyntaxNode::UnOperation(UnOperation::Fac) => {
+                        SyntaxNode::UnaryOp(UnaryOp::Fac) => {
                             f.write_str("!")?;
                         }
                         SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_) => {
@@ -1209,12 +1108,12 @@ where
                             Some(SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_)) => {
                                 f.write_str(", ")?
                             }
-                            Some(SyntaxNode::BiOperation(opr))
-                                if *opr == BiOperation::Add || *opr == BiOperation::Sub =>
+                            Some(SyntaxNode::BinaryOp(opr))
+                                if *opr == BinaryOp::Add || *opr == BinaryOp::Sub =>
                             {
                                 write!(f, " {} ", opr.as_char())?;
                             }
-                            Some(SyntaxNode::BiOperation(opr)) => Display::fmt(&opr, f)?,
+                            Some(SyntaxNode::BinaryOp(opr)) => Display::fmt(&opr, f)?,
                             _ => (),
                         }
                     }
@@ -1455,7 +1354,7 @@ mod test {
         assert_eq!(
             syntaxify("1+1"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
                 Leaf(SyntaxNode::Number(1.0)),
                 Leaf(SyntaxNode::Number(1.0))
             ))
@@ -1464,7 +1363,7 @@ mod test {
         assert_eq!(
             syntaxify("5-3"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Sub),
+                SyntaxNode::BinaryOp(BinaryOp::Sub),
                 Leaf(SyntaxNode::Number(5.0)),
                 Leaf(SyntaxNode::Number(3.0))
             ))
@@ -1472,9 +1371,9 @@ mod test {
         assert_eq!(
             syntaxify("-y!"),
             Ok(branch!(
-                SyntaxNode::UnOperation(UnOperation::Neg),
+                SyntaxNode::UnaryOp(UnaryOp::Neg),
                 branch!(
-                    SyntaxNode::UnOperation(UnOperation::Fac),
+                    SyntaxNode::UnaryOp(UnaryOp::Fac),
                     Leaf(SyntaxNode::Variable(TestVar::Y))
                 )
             ))
@@ -1482,16 +1381,16 @@ mod test {
         assert_eq!(
             syntaxify("t!!"),
             Ok(branch!(
-                SyntaxNode::UnOperation(UnOperation::DoubleFac),
+                SyntaxNode::UnaryOp(UnaryOp::DoubleFac),
                 Leaf(SyntaxNode::Variable(TestVar::T))
             ))
         );
         assert_eq!(
             syntaxify("8*3+1"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
+                    SyntaxNode::BinaryOp(BinaryOp::Mul),
                     Leaf(SyntaxNode::Number(8.0)),
                     Leaf(SyntaxNode::Number(3.0))
                 ),
@@ -1501,9 +1400,9 @@ mod test {
         assert_eq!(
             syntaxify("12/3/2"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Div),
+                SyntaxNode::BinaryOp(BinaryOp::Div),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Div),
+                    SyntaxNode::BinaryOp(BinaryOp::Div),
                     Leaf(SyntaxNode::Number(12.0)),
                     Leaf(SyntaxNode::Number(3.0))
                 ),
@@ -1513,10 +1412,10 @@ mod test {
         assert_eq!(
             syntaxify("8*(3+1)"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Mul),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
                 Leaf(SyntaxNode::Number(8.0)),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Add),
+                    SyntaxNode::BinaryOp(BinaryOp::Add),
                     Leaf(SyntaxNode::Number(3.0)),
                     Leaf(SyntaxNode::Number(1.0))
                 )
@@ -1525,12 +1424,12 @@ mod test {
         assert_eq!(
             syntaxify("8*3^2-1"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Sub),
+                SyntaxNode::BinaryOp(BinaryOp::Sub),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
+                    SyntaxNode::BinaryOp(BinaryOp::Mul),
                     Leaf(SyntaxNode::Number(8.0)),
                     branch!(
-                        SyntaxNode::BiOperation(BiOperation::Pow),
+                        SyntaxNode::BinaryOp(BinaryOp::Pow),
                         Leaf(SyntaxNode::Number(3.0)),
                         Leaf(SyntaxNode::Number(2.0))
                     )
@@ -1541,7 +1440,7 @@ mod test {
         assert_eq!(
             syntaxify("2x"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Mul),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
                 Leaf(SyntaxNode::Number(2.0)),
                 Leaf(SyntaxNode::Variable(TestVar::X))
             ))
@@ -1616,9 +1515,9 @@ mod test {
         assert_eq!(
             syntaxify("x^2 + sin(y)"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Pow),
+                    SyntaxNode::BinaryOp(BinaryOp::Pow),
                     Leaf(SyntaxNode::Variable(TestVar::X)),
                     Leaf(SyntaxNode::Number(2.0))
                 ),
@@ -1646,14 +1545,14 @@ mod test {
                 Leaf(SyntaxNode::Number(2.0)),
                 Leaf(SyntaxNode::Variable(TestVar::X)),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
+                    SyntaxNode::BinaryOp(BinaryOp::Mul),
                     Leaf(SyntaxNode::Number(8.0)),
                     Leaf(SyntaxNode::Variable(TestVar::Y))
                 ),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Add),
+                    SyntaxNode::BinaryOp(BinaryOp::Add),
                     branch!(
-                        SyntaxNode::BiOperation(BiOperation::Mul),
+                        SyntaxNode::BinaryOp(BinaryOp::Mul),
                         Leaf(SyntaxNode::Variable(TestVar::X)),
                         Leaf(SyntaxNode::Variable(TestVar::Y))
                     ),
@@ -1664,14 +1563,14 @@ mod test {
         assert_eq!(
             syntaxify("2*x + 3*y"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
+                    SyntaxNode::BinaryOp(BinaryOp::Mul),
                     Leaf(SyntaxNode::Number(2.0)),
                     Leaf(SyntaxNode::Variable(TestVar::X))
                 ),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
+                    SyntaxNode::BinaryOp(BinaryOp::Mul),
                     Leaf(SyntaxNode::Number(3.0)),
                     Leaf(SyntaxNode::Variable(TestVar::Y))
                 )
@@ -1687,10 +1586,10 @@ mod test {
         assert_eq!(
             syntaxify("1/(2+3)"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Div),
+                SyntaxNode::BinaryOp(BinaryOp::Div),
                 Leaf(SyntaxNode::Number(1.0)),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Add),
+                    SyntaxNode::BinaryOp(BinaryOp::Add),
                     Leaf(SyntaxNode::Number(2.0)),
                     Leaf(SyntaxNode::Number(3.0))
                 )
@@ -1699,7 +1598,7 @@ mod test {
         assert_eq!(
             syntaxify("e^x"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Pow),
+                SyntaxNode::BinaryOp(BinaryOp::Pow),
                 Leaf(SyntaxNode::Number(E)),
                 Leaf(SyntaxNode::Variable(TestVar::X))
             ))
@@ -1707,7 +1606,7 @@ mod test {
         assert_eq!(
             syntaxify("x * -2"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Mul),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
                 Leaf(SyntaxNode::Variable(TestVar::X)),
                 Leaf(SyntaxNode::Number(-2.0))
             ))
@@ -1715,7 +1614,7 @@ mod test {
         assert_eq!(
             syntaxify("4/-1.33"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Div),
+                SyntaxNode::BinaryOp(BinaryOp::Div),
                 Leaf(SyntaxNode::Number(4.0)),
                 Leaf(SyntaxNode::Number(-1.33))
             ))
@@ -1737,14 +1636,14 @@ mod test {
         assert_eq!(
             syntaxify("x^2 - y^2"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Sub),
+                SyntaxNode::BinaryOp(BinaryOp::Sub),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Pow),
+                    SyntaxNode::BinaryOp(BinaryOp::Pow),
                     Leaf(SyntaxNode::Variable(TestVar::X)),
                     Leaf(SyntaxNode::Number(2.0))
                 ),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Pow),
+                    SyntaxNode::BinaryOp(BinaryOp::Pow),
                     Leaf(SyntaxNode::Variable(TestVar::Y)),
                     Leaf(SyntaxNode::Number(2.0))
                 )
@@ -1762,7 +1661,7 @@ mod test {
             Ok(branch!(
                 SyntaxNode::NativeFunction(NativeFunction::Abs),
                 branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
+                    SyntaxNode::UnaryOp(UnaryOp::Neg),
                     Leaf(SyntaxNode::Variable(TestVar::X))
                 )
             ))
@@ -1770,10 +1669,10 @@ mod test {
         assert_eq!(
             syntaxify("4*-x"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Mul),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
                 Leaf(SyntaxNode::Number(4.0)),
                 branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
+                    SyntaxNode::UnaryOp(UnaryOp::Neg),
                     Leaf(SyntaxNode::Variable(TestVar::X))
                 )
             ))
@@ -1781,7 +1680,7 @@ mod test {
         assert_eq!(
             syntaxify("8.3 + -1"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
                 Leaf(SyntaxNode::Number(8.3)),
                 Leaf(SyntaxNode::Number(-1.0))
             ))
@@ -1791,7 +1690,7 @@ mod test {
         assert_eq!(
             syntaxify("x + +1"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
                 Leaf(SyntaxNode::Variable(TestVar::X)),
                 Leaf(SyntaxNode::Number(1.0))
             ))
@@ -1799,9 +1698,9 @@ mod test {
         assert_eq!(
             syntaxify("-1^2"),
             Ok(branch!(
-                SyntaxNode::UnOperation(UnOperation::Neg),
+                SyntaxNode::UnaryOp(UnaryOp::Neg),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Pow),
+                    SyntaxNode::BinaryOp(BinaryOp::Pow),
                     Leaf(SyntaxNode::Number(1.0)),
                     Leaf(SyntaxNode::Number(2.0))
                 )
@@ -1810,9 +1709,9 @@ mod test {
         assert_eq!(
             syntaxify("x!y"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Mul),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
                 branch!(
-                    SyntaxNode::UnOperation(UnOperation::Fac),
+                    SyntaxNode::UnaryOp(UnaryOp::Fac),
                     Leaf(SyntaxNode::Variable(TestVar::X)),
                 ),
                 Leaf(SyntaxNode::Variable(TestVar::Y)),
@@ -1823,9 +1722,9 @@ mod test {
             Ok(branch!(
                 SyntaxNode::NativeFunction(NativeFunction::Sin),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Sub),
+                    SyntaxNode::BinaryOp(BinaryOp::Sub),
                     branch!(
-                        SyntaxNode::UnOperation(UnOperation::Fac),
+                        SyntaxNode::UnaryOp(UnaryOp::Fac),
                         Leaf(SyntaxNode::Variable(TestVar::X))
                     ),
                     Leaf(SyntaxNode::Number(1.0))
@@ -1835,16 +1734,16 @@ mod test {
         assert_eq!(
             syntaxify("3|x-1|/2 + 1"),
             Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
                 branch!(
-                    SyntaxNode::BiOperation(BiOperation::Div),
+                    SyntaxNode::BinaryOp(BinaryOp::Div),
                     branch!(
-                        SyntaxNode::BiOperation(BiOperation::Mul),
+                        SyntaxNode::BinaryOp(BinaryOp::Mul),
                         Leaf(SyntaxNode::Number(3.0)),
                         branch!(
                             SyntaxNode::NativeFunction(NativeFunction::Abs),
                             branch!(
-                                SyntaxNode::BiOperation(BiOperation::Sub),
+                                SyntaxNode::BinaryOp(BinaryOp::Sub),
                                 Leaf(SyntaxNode::Variable(TestVar::X)),
                                 Leaf(SyntaxNode::Number(1.0))
                             )
@@ -2110,12 +2009,12 @@ mod test {
 
     fn random_syntax_tree(branch_count: usize) -> SyntaxTree<f64, TestVar, TestFunc> {
         const BRANCH_NODES: [(SyntaxNode<f64, TestVar, TestFunc>, RangeInclusive<u8>); 14] = [
-            (SyntaxNode::BiOperation(BiOperation::Add), 2..=2),
-            (SyntaxNode::BiOperation(BiOperation::Sub), 2..=2),
-            (SyntaxNode::BiOperation(BiOperation::Mul), 2..=2),
-            (SyntaxNode::BiOperation(BiOperation::Div), 2..=2),
-            (SyntaxNode::UnOperation(UnOperation::Neg), 1..=1),
-            (SyntaxNode::UnOperation(UnOperation::Fac), 1..=1),
+            (SyntaxNode::BinaryOp(BinaryOp::Add), 2..=2),
+            (SyntaxNode::BinaryOp(BinaryOp::Sub), 2..=2),
+            (SyntaxNode::BinaryOp(BinaryOp::Mul), 2..=2),
+            (SyntaxNode::BinaryOp(BinaryOp::Div), 2..=2),
+            (SyntaxNode::UnaryOp(UnaryOp::Neg), 1..=1),
+            (SyntaxNode::UnaryOp(UnaryOp::Fac), 1..=1),
             (SyntaxNode::NativeFunction(NativeFunction::Sin), 1..=1),
             (SyntaxNode::NativeFunction(NativeFunction::Sqrt), 1..=1),
             (SyntaxNode::NativeFunction(NativeFunction::Log), 2..=2),
