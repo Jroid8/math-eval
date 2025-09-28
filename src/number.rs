@@ -219,6 +219,7 @@ pub trait MathEvalNumber:
     fn max(value: &[Self]) -> Self;
     fn min(value: &[Self]) -> Self;
     fn factorial(value: Self::AsArg<'_>) -> Self;
+    fn double_factorial(value: Self::AsArg<'_>) -> Self;
     fn asarg(&self) -> Self::AsArg<'_>;
 }
 
@@ -255,6 +256,7 @@ impl MathEvalNumber for f64 {
     }
 
     fn cot(value: Self) -> Self {
+        // FIX: replace with a more accurate version
         let (sin, cos) = value.sin_cos();
         cos / sin
     }
@@ -347,9 +349,28 @@ impl MathEvalNumber for f64 {
     }
 
     fn factorial(value: Self) -> Self {
+        // FIX: replace with gamma function
+        if value.is_infinite() || value < 0.0 || value >= u32::MAX as f64 || value.is_nan() {
+            return f64::NAN;
+        }
         let mut result = 1.0;
-        for v in 2..=(value as u32) {
-            result *= v as f64;
+        let mut k = value as u32;
+        while k > 1 {
+            result *= k as f64;
+            k -= 1;
+        }
+        result
+    }
+
+    fn double_factorial(value: Self) -> Self {
+        if value.is_infinite() || value < 0.0 || value >= u32::MAX as f64 || value.is_nan() {
+            return f64::NAN;
+        }
+        let mut result = 1.0;
+        let mut k = value as u32;
+        while k > 1 {
+            result *= k as f64;
+            k -= 2;
         }
         result
     }

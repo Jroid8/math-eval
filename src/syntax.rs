@@ -13,6 +13,7 @@ use indextree::{Arena, NodeEdge, NodeId};
 pub enum UnOperation {
     Fac,
     Neg,
+    DoubleFac,
 }
 
 impl UnOperation {
@@ -28,20 +29,18 @@ impl UnOperation {
         match self {
             UnOperation::Fac => N::factorial(value),
             UnOperation::Neg => -value,
-        }
-    }
-
-    pub fn as_char(&self) -> char {
-        match self {
-            UnOperation::Fac => '!',
-            UnOperation::Neg => '-',
+            UnOperation::DoubleFac => N::double_factorial(value),
         }
     }
 }
 
 impl Display for UnOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_char())
+        f.write_str(match self {
+            UnOperation::Fac => "!",
+            UnOperation::Neg => "-",
+            UnOperation::DoubleFac => "!!",
+        })
     }
 }
 
@@ -236,6 +235,7 @@ where
             SYOperator::UnOperation(UnOperation::Neg) => 2,
             SYOperator::BiOperation(BiOperation::Pow) => 3,
             SYOperator::UnOperation(UnOperation::Fac) => 4,
+            SYOperator::UnOperation(UnOperation::DoubleFac) => 4,
             SYOperator::Function(_, _) | SYOperator::Parentheses => {
                 unreachable!()
             }
@@ -666,6 +666,13 @@ where
                     if opr == '-' && last_tk.is_none_or(|tk| after_implies_neg(tk, &operator_stack))
                     {
                         sy_opr = SYOperator::UnOperation(UnOperation::Neg);
+                    } else if opr == '!' && last_tk.is_some_and(|tk| tk == Token::Operation('!')) {
+                        let fac = operator_stack.pop();
+                        debug_assert_eq!(
+                            fac,
+                            Some(SYOperator::UnOperation(UnOperation::Fac))
+                        );
+                        sy_opr = SYOperator::UnOperation(UnOperation::DoubleFac)
                     }
                     if opr != '+'
                         || last_tk.is_some_and(|tk| !after_implies_neg(tk, &operator_stack))
@@ -1473,6 +1480,13 @@ mod test {
             ))
         );
         assert_eq!(
+            syntaxify("t!!"),
+            Ok(branch!(
+                SyntaxNode::UnOperation(UnOperation::DoubleFac),
+                Leaf(SyntaxNode::Variable(TestVar::T))
+            ))
+        );
+        assert_eq!(
             syntaxify("8*3+1"),
             Ok(branch!(
                 SyntaxNode::BiOperation(BiOperation::Add),
@@ -1762,13 +1776,6 @@ mod test {
                     SyntaxNode::UnOperation(UnOperation::Neg),
                     Leaf(SyntaxNode::Variable(TestVar::X))
                 )
-            ))
-        );
-        assert_eq!(
-            syntaxify("3!"),
-            Ok(branch!(
-                SyntaxNode::UnOperation(UnOperation::Fac),
-                Leaf(SyntaxNode::Number(3.0))
             ))
         );
         assert_eq!(
