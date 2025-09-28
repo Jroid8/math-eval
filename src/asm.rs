@@ -1,4 +1,3 @@
-use indextree::{Arena, NodeEdge, NodeId};
 use smallvec::SmallVec;
 use std::{fmt::Debug, hash::Hash};
 
@@ -184,97 +183,12 @@ where
     N: MathEvalNumber,
     F: FunctionIdentifier,
 {
-    // FIX: panics when variable_order is not exhaustive
     pub fn new<V: VariableIdentifier>(
-        arena: &Arena<SyntaxNode<N, V, F>>,
-        root: NodeId,
+        tree: Vec<SyntaxNode<N, V, F>>,
         function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_order: &[V],
     ) -> Self {
-        let mut result: Vec<Instruction<'a, N, F>> = Vec::new();
-        let is_fixed_input = |node: Option<NodeId>| match node.map(|id| arena[id].get()) {
-            Some(SyntaxNode::BinaryOp(_) | SyntaxNode::UnaryOp(_)) => true,
-            Some(SyntaxNode::NativeFunction(nf)) => nf.is_fixed(),
-            Some(SyntaxNode::CustomFunction(cf)) => {
-                !matches!(function_to_pointer(*cf), CFPointer::Flexible(_))
-            }
-            _ => false,
-        };
-
-        let var_index =
-            |var: V| -> usize { variable_order.iter().position(|v| *v == var).unwrap() };
-
-        for current in root.traverse(arena) {
-            if let NodeEdge::End(cursor) = current {
-                let mut children_as_input = cursor.children(arena).map(|c| match arena[c].get() {
-                    SyntaxNode::Number(num) => Input::Literal(num.clone()),
-                    SyntaxNode::Variable(var) => Input::Variable(var_index(*var)),
-                    _ => Input::Memory,
-                });
-                let parent = cursor.ancestors(arena).nth(1);
-                let instruction = match arena[cursor].get() {
-                    SyntaxNode::Number(num) => {
-                        if is_fixed_input(parent) {
-                            continue;
-                        } else {
-                            Instruction::Source(Input::Literal(num.clone()))
-                        }
-                    }
-                    SyntaxNode::Variable(var) => {
-                        if is_fixed_input(parent) {
-                            continue;
-                        } else {
-                            Instruction::Source(Input::Variable(var_index(*var)))
-                        }
-                    }
-                    SyntaxNode::BinaryOp(opr) => Instruction::BinaryOp(
-                        *opr,
-                        children_as_input.next().unwrap(),
-                        children_as_input.next().unwrap(),
-                    ),
-                    SyntaxNode::UnaryOp(opr) => {
-                        Instruction::UnaryOp(*opr, children_as_input.next().unwrap())
-                    }
-                    SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
-                        crate::number::NFPointer::Single(p) => {
-                            Instruction::NFSingle(p, children_as_input.next().unwrap(), *nf)
-                        }
-                        crate::number::NFPointer::Dual(p) => Instruction::NFDual(
-                            p,
-                            children_as_input.next().unwrap(),
-                            children_as_input.next().unwrap(),
-                            *nf,
-                        ),
-                        crate::number::NFPointer::Flexible(p) => {
-                            Instruction::NFFlexible(p, cursor.children(arena).count() as u8, *nf)
-                        }
-                    },
-                    SyntaxNode::CustomFunction(cf) => match function_to_pointer(*cf) {
-                        CFPointer::Single(func) => {
-                            Instruction::CFSingle(func, children_as_input.next().unwrap(), *cf)
-                        }
-                        CFPointer::Dual(func) => Instruction::CFDual(
-                            func,
-                            children_as_input.next().unwrap(),
-                            children_as_input.next().unwrap(),
-                            *cf,
-                        ),
-                        CFPointer::Triple(func) => Instruction::CFTriple(
-                            func,
-                            children_as_input.next().unwrap(),
-                            children_as_input.next().unwrap(),
-                            children_as_input.next().unwrap(),
-                            *cf,
-                        ),
-                        CFPointer::Flexible(func) => {
-                            Instruction::CFFlexible(func, cursor.children(arena).count() as u8, *cf)
-                        }
-                    },
-                };
-                result.push(instruction);
-            }
-        }
-        MathAssembly(result)
+        todo!()
     }
 
     pub fn stack_alloc_size(&self) -> usize {
@@ -444,37 +358,7 @@ mod test {
     }
 
     fn parse(input: &str) -> Result<Vec<Instruction<'static, f64, TestFunc>>, ParsingError> {
-        let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-        let syntax_tree = SyntaxTree::new(
-            &token_stream,
-            |inp| if inp == "c" { Some(299792458.0) } else { None },
-            |inp| match inp {
-                "sigmoid" => Some((TestFunc::Sigmoid, 1, Some(1))),
-                "isqrt" => Some((TestFunc::ISqrt, 2, Some(2))),
-                "f1" => Some((TestFunc::F1, 3, Some(3))),
-                "digits" => Some((TestFunc::Digits, 2, Some(2))),
-                _ => None,
-            },
-            |inp| match inp {
-                "x" => Some(TestVar::X),
-                "y" => Some(TestVar::Y),
-                "t" => Some(TestVar::T),
-                _ => None,
-            },
-        )
-        .map_err(|e| e.to_general(input, &token_stream))?;
-        Ok(MathAssembly::new(
-            &syntax_tree.0.arena,
-            syntax_tree.0.root,
-            |func| match func {
-                TestFunc::Sigmoid => CFPointer::Single(&sigmoid),
-                TestFunc::ISqrt => CFPointer::Dual(&isqrt),
-                TestFunc::F1 => CFPointer::Triple(&func1),
-                TestFunc::Digits => CFPointer::Flexible(&digits),
-            },
-            &[TestVar::X, TestVar::Y, TestVar::T],
-        )
-        .0)
+        todo!()
     }
 
     #[test]

@@ -15,7 +15,6 @@ pub mod asm;
 pub mod number;
 pub mod syntax;
 pub mod tokenizer;
-pub mod tree_utils;
 
 const NAME_LIMIT: u8 = 32;
 const NAME_LIMIT_ERROR_MSG: &str = "Identifier exceeds maximum length of 32 characters.";
@@ -240,7 +239,6 @@ pub fn compile<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifi
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
     function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
-    variable_order: &[V],
 ) -> Result<MathAssembly<'a, N, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let mut syntax_tree = SyntaxTree::new(
@@ -252,12 +250,7 @@ pub fn compile<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifi
     .map_err(|e| e.to_general(input, &token_stream))?;
     syntax_tree.aot_evaluation(&function_to_pointer);
     syntax_tree.displacing_simplification();
-    Ok(MathAssembly::new(
-        &syntax_tree.0.arena,
-        syntax_tree.0.root,
-        function_to_pointer,
-        variable_order,
-    ))
+    todo!()
 }
 
 pub fn evaluate<'a, 'b, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
@@ -443,7 +436,6 @@ where
             |inp| self.function_identifier.get(inp).copied(),
             |_| None::<()>,
             |idx| self.functions[idx],
-            &[],
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move || expr.eval(&[], &mut stack))
@@ -464,7 +456,6 @@ where
             |inp| self.function_identifier.get(inp).copied(),
             |_| None::<()>,
             |idx| self.functions[idx],
-            &[],
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move || expr.eval_copy(&[], &mut stack))
@@ -513,7 +504,6 @@ where
             |inp| self.function_identifier.get(inp).copied(),
             |inp| (self.variables.0 == inp).then_some(()),
             |idx| self.functions[idx],
-            &[()],
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move |v0| expr.eval(&[v0], &mut stack))
@@ -534,7 +524,6 @@ where
             |inp| self.function_identifier.get(inp).copied(),
             |inp| (self.variables.0 == inp).then_some(()),
             |idx| self.functions[idx],
-            &[()],
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move |v0| expr.eval_copy(&[v0], &mut stack))
@@ -589,7 +578,6 @@ macro_rules! fn_build_as_function {
                     |inp| self.function_identifier.get(inp).copied(),
                     |inp| self.variables.0.iter().position(|var| var == inp),
                     |idx| self.functions[idx],
-                    &[#(I,)*],
                 )?;
                 let mut stack = Stack::with_capacity(expr.stack_alloc_size());
                 Ok(move |#(v~I,)*| expr.$f(&[#(v~I,)*], &mut stack))
@@ -735,7 +723,6 @@ where
             |inp| self.function_identifier.get(inp).copied(),
             |inp| self.variables.0.iter().position(|var| var == inp),
             |idx| self.functions[idx],
-            &(0..self.variables.0.len()).collect::<Vec<_>>(),
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move |vars| expr.eval(vars, &mut stack))
@@ -756,7 +743,6 @@ where
             |inp| self.function_identifier.get(inp).copied(),
             |inp| self.variables.0.iter().position(|var| var == inp),
             |idx| self.functions[idx],
-            &(0..self.variables.0.len()).collect::<Vec<_>>(),
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move |vars| expr.eval_copy(vars, &mut stack))

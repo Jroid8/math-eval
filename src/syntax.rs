@@ -5,12 +5,10 @@ use std::ops::RangeInclusive;
 use crate::asm::{CFPointer, MathAssembly, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
 use crate::tokenizer::{Token, TokenStream};
-use crate::tree_utils::Tree;
 use crate::{
     BinaryOp, FunctionIdentifier, NAME_LIMIT, ParsingError, ParsingErrorKind, UnaryOp,
     VariableIdentifier,
 };
-use indextree::{Arena, NodeEdge, NodeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxNode<N, V, F>
@@ -23,8 +21,8 @@ where
     Variable(V),
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
-    NativeFunction(NativeFunction),
-    CustomFunction(F),
+    NativeFunction(NativeFunction, u8),
+    CustomFunction(F, u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -146,7 +144,7 @@ where
     fn is_right_associative(&self) -> bool {
         matches!(self, SYOperator::BinaryOp(BinaryOp::Pow))
     }
-    fn opr2syn<N, V>(self) -> SyntaxNode<N, V, F>
+    fn to_syn<N, V>(self) -> SyntaxNode<N, V, F>
     where
         N: MathEvalNumber,
         V: VariableIdentifier,
@@ -154,14 +152,14 @@ where
         match self {
             SYOperator::BinaryOp(opr) => SyntaxNode::BinaryOp(opr),
             SYOperator::UnaryOp(opr) => SyntaxNode::UnaryOp(opr),
-            SYOperator::Function(SYFunction::NativeFunction(nf), _) => {
-                SyntaxNode::NativeFunction(nf)
+            SYOperator::Function(SYFunction::NativeFunction(nf), args) => {
+                SyntaxNode::NativeFunction(nf, args)
             }
-            SYOperator::Function(SYFunction::CustomFunction(cf, _, _), _) => {
-                SyntaxNode::CustomFunction(cf)
+            SYOperator::Function(SYFunction::CustomFunction(cf, _, _), args) => {
+                SyntaxNode::CustomFunction(cf, args)
             }
             SYOperator::Function(SYFunction::PipeAbs, _) => {
-                SyntaxNode::NativeFunction(NativeFunction::Abs)
+                SyntaxNode::NativeFunction(NativeFunction::Abs, 1)
             }
             SYOperator::Parentheses => unreachable!(),
         }
@@ -170,7 +168,7 @@ where
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
-    pub Tree<SyntaxNode<N, V, F>>,
+    pub(crate) Vec<SyntaxNode<N, V, F>>,
 );
 
 fn after_implies_neg<F>(token: Token<'_>, operator_stack: &[SYOperator<F>]) -> bool
@@ -188,39 +186,26 @@ where
 
 fn shunting_yard_pop_opr<N, V, F>(
     operator_stack: &mut Vec<SYOperator<F>>,
-    output_stack: &mut Vec<NodeId>,
-    arena: &mut Arena<SyntaxNode<N, V, F>>,
+    output: &mut Vec<SyntaxNode<N, V, F>>,
 ) where
     N: MathEvalNumber,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
     let opr = operator_stack.pop().unwrap();
-    let node = arena.new_node(opr.opr2syn());
-    // output_stack can be empty in case of an incorrect syntax. But not enough info is available
-    // in this function to find the source of the syntax error. So either this function must report
-    // the error to the caller so it searches for the source itself, or errors must be detected
-    // before calling this function. The latter solution is used for now.
-    let child = output_stack.pop().unwrap();
-    if matches!(opr, SYOperator::BinaryOp(_)) {
-        node.append(output_stack.pop().unwrap(), arena);
-    }
-    if let SyntaxNode::Number(num) = arena[child].get_mut()
+    if let Some(SyntaxNode::Number(num)) = output.last_mut()
         && opr == SYOperator::UnaryOp(UnaryOp::Neg)
     {
         *num = -num.clone();
-        output_stack.push(child);
     } else {
-        node.append(child, arena);
-        output_stack.push(node);
+        output.push(opr.to_syn());
     }
 }
 
 fn shunting_yard_push_opr<N, V, F>(
     operator: SYOperator<F>,
     operator_stack: &mut Vec<SYOperator<F>>,
-    output_stack: &mut Vec<NodeId>,
-    arena: &mut Arena<SyntaxNode<N, V, F>>,
+    output: &mut Vec<SyntaxNode<N, V, F>>,
 ) where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -231,15 +216,14 @@ fn shunting_yard_push_opr<N, V, F>(
         && (operator.precedence() < top_opr.precedence()
             || operator.precedence() == top_opr.precedence() && !operator.is_right_associative())
     {
-        shunting_yard_pop_opr(operator_stack, output_stack, arena);
+        shunting_yard_pop_opr(operator_stack, output);
     }
     operator_stack.push(operator);
 }
 
 fn shunting_yard_flush<N, V, F>(
     operator_stack: &mut Vec<SYOperator<F>>,
-    output_stack: &mut Vec<NodeId>,
-    arena: &mut Arena<SyntaxNode<N, V, F>>,
+    output: &mut Vec<SyntaxNode<N, V, F>>,
 ) where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -248,7 +232,7 @@ fn shunting_yard_flush<N, V, F>(
     while let Some(opr) = operator_stack.last()
         && matches!(opr, SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_))
     {
-        shunting_yard_pop_opr(operator_stack, output_stack, arena)
+        shunting_yard_pop_opr(operator_stack, output)
     }
 }
 
@@ -465,8 +449,7 @@ where
         custom_variable_parser: impl Fn(&str) -> Option<V>,
     ) -> Result<SyntaxTree<N, V, F>, SyntaxError> {
         // Dijkstra's shunting yard algorithm
-        let mut arena: Arena<SyntaxNode<N, V, F>> = Arena::new();
-        let mut output_stack: Vec<NodeId> = Vec::new();
+        let mut output: Vec<SyntaxNode<N, V, F>> = Vec::new();
         let mut operator_stack: Vec<SYOperator<F>> = Vec::new();
         let mut last_tk: Option<Token<'a>> = None;
         for (pos, &token) in token_stream.0.iter().enumerate() {
@@ -506,15 +489,14 @@ where
                 shunting_yard_push_opr(
                     SYOperator::BinaryOp(BinaryOp::Mul),
                     &mut operator_stack,
-                    &mut output_stack,
-                    &mut arena,
+                    &mut output,
                 );
             }
             match token {
-                Token::Number(num) => output_stack.push(
-                    arena.new_node(num.parse::<N>().map(SyntaxNode::Number).map_err(|_| {
-                        SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos)
-                    })?),
+                Token::Number(num) => output.push(
+                    num.parse::<N>()
+                        .map(SyntaxNode::Number)
+                        .map_err(|_| SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos))?,
                 ),
                 Token::Variable(var) => {
                     if var.len() > NAME_LIMIT as usize {
@@ -527,24 +509,23 @@ where
                             custom_variable_parser(var).map(|var| SyntaxNode::Variable(var))
                         })
                     {
-                        output_stack.push(arena.new_node(node))
+                        output.push(node)
                     } else if let Some(segments) =
                         segment_variable(var, &custom_constant_parser, &custom_variable_parser)
                     {
                         let mut first = true;
                         for seg in segments {
-                            output_stack.push(arena.new_node(match seg {
+                            output.push(match seg {
                                 Segment::Constant(c) => SyntaxNode::Number(c),
                                 Segment::Variable(v) => SyntaxNode::Variable(v),
-                            }));
+                            });
                             if first {
                                 first = false;
                             } else {
                                 shunting_yard_push_opr(
                                     SYOperator::BinaryOp(BinaryOp::Mul),
                                     &mut operator_stack,
-                                    &mut output_stack,
-                                    &mut arena,
+                                    &mut output,
                                 );
                             }
                         }
@@ -571,12 +552,7 @@ where
                     if opr != '+'
                         || last_tk.is_some_and(|tk| !after_implies_neg(tk, &operator_stack))
                     {
-                        shunting_yard_push_opr(
-                            sy_opr,
-                            &mut operator_stack,
-                            &mut output_stack,
-                            &mut arena,
-                        );
+                        shunting_yard_push_opr(sy_opr, &mut operator_stack, &mut output);
                     }
                 }
                 Token::Function(name) => {
@@ -596,15 +572,14 @@ where
                         &custom_function_parser,
                     ) {
                         for seg in segments {
-                            output_stack.push(arena.new_node(match seg {
+                            output.push(match seg {
                                 Segment::Constant(c) => SyntaxNode::Number(c),
                                 Segment::Variable(v) => SyntaxNode::Variable(v),
-                            }));
+                            });
                             shunting_yard_push_opr(
                                 SYOperator::BinaryOp(BinaryOp::Mul),
                                 &mut operator_stack,
-                                &mut output_stack,
-                                &mut arena,
+                                &mut output,
                             );
                         }
                         operator_stack.push(SYOperator::Function(func, 1));
@@ -616,7 +591,7 @@ where
                     operator_stack.push(SYOperator::Parentheses);
                 }
                 Token::Comma => {
-                    shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
+                    shunting_yard_flush(&mut operator_stack, &mut output);
                     match operator_stack.last_mut() {
                         Some(SYOperator::Function(_, args)) => {
                             *args += 1;
@@ -630,7 +605,7 @@ where
                     }
                 }
                 Token::CloseParen => {
-                    shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
+                    shunting_yard_flush(&mut operator_stack, &mut output);
                     match operator_stack.pop() {
                         Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
                             let opening = find_opening_pipe(&token_stream.0[..pos]).unwrap();
@@ -639,42 +614,29 @@ where
                                 opening..=opening,
                             ));
                         }
-                        Some(SYOperator::Function(SYFunction::NativeFunction(nf), args)) => {
+                        Some(SYOperator::Function(SYFunction::NativeFunction(mut nf), args)) => {
                             if args < nf.min_args() && nf != NativeFunction::Log {
                                 Err(SyntaxErrorKind::NotEnoughArguments)
                             } else if nf.max_args().is_some_and(|m| args > m) {
                                 Err(SyntaxErrorKind::TooManyArguments)
                             } else {
-                                let node = arena.new_node(SyntaxNode::NativeFunction(nf));
-                                for _ in 0..args {
-                                    node.prepend(output_stack.pop().unwrap(), &mut arena);
-                                }
                                 if nf == NativeFunction::Log {
-                                    match node.children(&arena).nth(1) {
-                                        Some(base)
-                                            if SyntaxNode::Number(N::from(10))
-                                                == *arena[base].get() =>
-                                        {
-                                            *arena[node].get_mut() =
-                                                SyntaxNode::NativeFunction(NativeFunction::Log10);
-                                            base.remove(&mut arena);
+                                    match output.last().unwrap() {
+                                        SyntaxNode::Number(num) if *num == N::from(10) => {
+                                            output.pop();
+                                            nf = NativeFunction::Log10;
                                         }
-                                        Some(base)
-                                            if SyntaxNode::Number(N::from(2))
-                                                == *arena[base].get() =>
-                                        {
-                                            *arena[node].get_mut() =
-                                                SyntaxNode::NativeFunction(NativeFunction::Log2);
-                                            base.remove(&mut arena);
+                                        SyntaxNode::Number(num) if *num == N::from(2) => {
+                                            output.pop();
+                                            nf = NativeFunction::Log2;
                                         }
-                                        None => {
-                                            *arena[node].get_mut() =
-                                                SyntaxNode::NativeFunction(NativeFunction::Log10);
+                                        _ if args == 1 => {
+                                            nf = NativeFunction::Log10;
                                         }
                                         _ => (),
                                     }
                                 }
-                                output_stack.push(node);
+                                output.push(SyntaxNode::NativeFunction(nf, args));
                                 Ok(())
                             }
                             .map_err(|e| {
@@ -692,11 +654,7 @@ where
                         } else if max_args.is_some_and(|m| args > m) {
                             Err(SyntaxErrorKind::TooManyArguments)
                         } else {
-                            let node = arena.new_node(SyntaxNode::CustomFunction(cf));
-                            for _ in 0..args {
-                                node.prepend(output_stack.pop().unwrap(), &mut arena);
-                            }
-                            output_stack.push(node);
+                            output.push(SyntaxNode::CustomFunction(cf, args));
                             Ok(())
                         }
                         .map_err(|e| {
@@ -716,7 +674,7 @@ where
                 }
                 Token::Pipe => {
                     if let Some(opening_pipe) = inside_pipe_abs(&operator_stack) {
-                        shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
+                        shunting_yard_flush(&mut operator_stack, &mut output);
                         if let Some(SYOperator::Function(SYFunction::PipeAbs, args)) =
                             operator_stack.pop()
                             && args > 1
@@ -726,9 +684,7 @@ where
                                 opening_pipe..=pos,
                             ));
                         }
-                        let node = arena.new_node(SyntaxNode::NativeFunction(NativeFunction::Abs));
-                        node.append(output_stack.pop().unwrap(), &mut arena);
-                        output_stack.push(node);
+                        output.push(SyntaxNode::NativeFunction(NativeFunction::Abs, 1));
                     } else {
                         operator_stack.push(SYOperator::Function(SYFunction::PipeAbs, 0));
                     }
@@ -737,7 +693,7 @@ where
             last_tk = Some(token);
         }
         validate_consecutive_tokens(last_tk, None, token_stream.0.len())?;
-        shunting_yard_flush(&mut operator_stack, &mut output_stack, &mut arena);
+        shunting_yard_flush(&mut operator_stack, &mut output);
         match operator_stack.last() {
             Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
                 let opening = find_opening_pipe(&token_stream.0).unwrap();
@@ -753,10 +709,7 @@ where
                     unclosed_paren_pos..=unclosed_paren_pos,
                 ))
             }
-            _ => Ok(SyntaxTree(Tree {
-                arena,
-                root: output_stack.pop().unwrap(),
-            })),
+            _ => Ok(SyntaxTree(output)),
         }
     }
 
@@ -765,80 +718,14 @@ where
         function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_values: &impl crate::VariableStore<N, V>,
     ) -> N {
-        let mut stack: Stack<N> = Stack::new();
-        let is_fixed_input = |node: Option<NodeId>| match node.map(|id| self.0.arena[id].get()) {
-            Some(SyntaxNode::BinaryOp(_) | SyntaxNode::UnaryOp(_)) => true,
-            Some(SyntaxNode::NativeFunction(nf)) => nf.is_fixed(),
-            Some(SyntaxNode::CustomFunction(cf)) => {
-                !matches!(function_to_pointer(*cf), CFPointer::Flexible(_))
-            }
-            _ => false,
-        };
-
-        for current in self.0.root.traverse(&self.0.arena).filter_map(|n| match n {
-            NodeEdge::Start(_) => None,
-            NodeEdge::End(id) => Some(id),
-        }) {
-            let mut argnum = stack.len();
-            macro_rules! get {
-                ($node: expr) => {
-                    match self.0.arena[$node.unwrap()].get() {
-                        SyntaxNode::Number(num) => num.asarg(),
-                        SyntaxNode::Variable(var) => variable_values.get(*var),
-                        _ => {
-                            argnum -= 1;
-                            stack[argnum].asarg()
-                        }
-                    }
-                };
-            }
-
-            let mut children = current.children(&self.0.arena);
-            let parent = current.ancestors(&self.0.arena).nth(1);
-
-            let result = match self.0.arena[current].get() {
-                SyntaxNode::Number(num) => {
-                    if is_fixed_input(parent) {
-                        continue;
-                    } else {
-                        num.clone()
-                    }
-                }
-                SyntaxNode::Variable(var) => {
-                    if is_fixed_input(parent) {
-                        continue;
-                    } else {
-                        variable_values.get(*var).to_owned()
-                    }
-                }
-                SyntaxNode::UnaryOp(opr) => opr.eval(get!(children.next())),
-                SyntaxNode::BinaryOp(opr) => opr.eval(get!(children.next()), get!(children.next())),
-                SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
-                    NFPointer::Single(func) => func(get!(children.next())),
-                    NFPointer::Dual(func) => func(get!(children.next()), get!(children.next())),
-                    NFPointer::Flexible(func) => {
-                        argnum -= children.count();
-                        func(&stack[argnum..])
-                    }
-                },
-                SyntaxNode::CustomFunction(cf) => match function_to_pointer(*cf) {
-                    CFPointer::Single(func) => func(get!(children.next())),
-                    CFPointer::Dual(func) => func(get!(children.next()), get!(children.next())),
-                    CFPointer::Triple(func) => func(
-                        get!(children.next()),
-                        get!(children.next()),
-                        get!(children.next()),
-                    ),
-                    CFPointer::Flexible(func) => {
-                        argnum -= children.count();
-                        func(&stack[argnum..])
-                    }
-                },
-            };
-            stack.truncate(argnum);
-            stack.push(result);
-        }
-        stack.pop().unwrap()
+        Self::_eval(&self.0, function_to_pointer, variable_values)
+    }
+    fn _eval<'a>(
+        tree: &[SyntaxNode<N, V, F>],
+        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+        variable_values: &impl crate::VariableStore<N, V>,
+    ) -> N {
+        todo!()
     }
 
     pub fn to_asm<'a>(
@@ -846,38 +733,11 @@ where
         function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_order: &[V],
     ) -> MathAssembly<'a, N, F> {
-        MathAssembly::new(
-            &self.0.arena,
-            self.0.root,
-            function_to_pointer,
-            variable_order,
-        )
+        todo!()
     }
 
     pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(F) -> CFPointer<'a, N>) {
-        let mut examin: Vec<NodeId> = Vec::new();
-        for node in self.0.root.traverse(&self.0.arena) {
-            if let NodeEdge::End(node) = node {
-                match self.0.arena[node].get() {
-                    SyntaxNode::Number(_) | SyntaxNode::Variable(_) => (),
-                    _ => examin.push(node),
-                }
-            }
-        }
-        for node in examin {
-            if node.children(&self.0.arena).all(|c| self.is_number(c)) {
-                let answer = MathAssembly::new(&self.0.arena, node, &function_to_pointer, &[])
-                    .eval(&[], &mut crate::asm::Stack::new());
-                *self.0.arena[node].get_mut() = SyntaxNode::Number(answer);
-                while let Some(c) = self.0.arena[node].first_child() {
-                    c.remove(&mut self.0.arena);
-                }
-            }
-        }
-    }
-
-    fn is_number(&self, node: NodeId) -> bool {
-        matches!(self.0.arena[node].get(), SyntaxNode::Number(_))
+        todo!()
     }
 
     pub fn displacing_simplification(&mut self) {
@@ -886,136 +746,15 @@ where
     }
 
     fn _displacing_simplification(&mut self, pos: BinaryOp, neg: BinaryOp, inital_value: N) {
-        let is_targeting_opr = |node: NodeId| matches!(self.0.arena[node].get(), SyntaxNode::BinaryOp(opr) if *opr == pos || *opr == neg);
-        let mut found: Vec<NodeId> = Vec::new();
-        let mul_opr = |target: BinaryOp, side: usize, parent: BinaryOp| {
-            if side == 0 {
-                parent
-            } else if target == parent {
-                pos
-            } else {
-                neg
-            }
-        };
-        for node in self.0.root.traverse(&self.0.arena) {
-            if let NodeEdge::End(upper) = node
-                && is_targeting_opr(upper)
-                && upper.children(&self.0.arena).all(|lower| {
-                    is_targeting_opr(lower)
-                        && lower
-                            .children(&self.0.arena)
-                            .any(|lowest| self.is_number(lowest))
-                        || self.is_number(lower)
-                })
-            {
-                found.push(upper);
-            }
-        }
-        for upper in found {
-            let SyntaxNode::BinaryOp(upper_opr) = self.0.arena[upper].get() else {
-                panic!();
-            };
-            let mut symbols: [Option<(NodeId, bool)>; 2] = [None, None];
-            let mut lhs = inital_value.clone();
-            for (upper_side, lower) in upper.children(&self.0.arena).enumerate() {
-                match self.0.arena[lower].get() {
-                    SyntaxNode::BinaryOp(lower_opr) => {
-                        for (lower_side, lowest) in lower.children(&self.0.arena).enumerate() {
-                            let opr = mul_opr(
-                                *lower_opr,
-                                lower_side,
-                                if upper_side == 0 { pos } else { *upper_opr },
-                            );
-                            match self.0.arena[lowest].get() {
-                                SyntaxNode::Number(value) => {
-                                    lhs = opr.eval(lhs.asarg(), value.asarg())
-                                }
-                                _ => {
-                                    symbols[symbols[0].is_some() as usize] =
-                                        Some((lowest, opr == neg))
-                                }
-                            }
-                        }
-                    }
-                    SyntaxNode::Number(value) => {
-                        lhs =
-                            (mul_opr(*upper_opr, upper_side, pos)).eval(lhs.asarg(), value.asarg())
-                    }
-                    _ => panic!(),
-                }
-            }
-            let symb1 = symbols[0].unwrap();
-            symb1.0.detach(&mut self.0.arena);
-            if let Some((sym, _)) = symbols[1] {
-                sym.detach(&mut self.0.arena);
-            }
-            while let Some(child) = upper.children(&self.0.arena).next() {
-                child.remove_subtree(&mut self.0.arena);
-            }
-            upper.append_value(SyntaxNode::Number(lhs), &mut self.0.arena);
-            if let Some(symb2) = symbols[1] {
-                if symb1.1 == symb2.1 {
-                    *self.0.arena[upper].get_mut() =
-                        SyntaxNode::BinaryOp(if symb1.1 { neg } else { pos });
-                    let lower = upper.append_value(SyntaxNode::BinaryOp(pos), &mut self.0.arena);
-                    lower.append(symb1.0, &mut self.0.arena);
-                    lower.append(symb2.0, &mut self.0.arena);
-                } else {
-                    *self.0.arena[upper].get_mut() = SyntaxNode::BinaryOp(pos);
-                    let lower = upper.append_value(SyntaxNode::BinaryOp(neg), &mut self.0.arena);
-                    if symb2.1 {
-                        lower.append(symb1.0, &mut self.0.arena);
-                        lower.append(symb2.0, &mut self.0.arena);
-                    } else {
-                        lower.append(symb2.0, &mut self.0.arena);
-                        lower.append(symb1.0, &mut self.0.arena);
-                    }
-                }
-            } else {
-                *self.0.arena[upper].get_mut() =
-                    SyntaxNode::BinaryOp(if symb1.1 { neg } else { pos });
-                upper.append(symb1.0, &mut self.0.arena);
-            }
-        }
+        todo!()
     }
 
     #[allow(dead_code)]
     fn verify(
-        arena: &indextree::Arena<SyntaxNode<N, V, F>>,
-        root: NodeId,
+        tree: &[SyntaxNode<N, V, F>],
         cf_bounds: impl Fn(F) -> (u8, Option<u8>),
     ) -> bool {
-        macro_rules! short {
-            ($res: expr) => {
-                if !($res) {
-                    return false;
-                }
-            };
-        }
-
-        for id in root.traverse(arena).filter_map(|e| match e {
-            NodeEdge::Start(_) => None,
-            NodeEdge::End(id) => Some(id),
-        }) {
-            let child_count = id.children(arena).count();
-            match arena[id].get() {
-                SyntaxNode::Number(_) | SyntaxNode::Variable(_) => short!(child_count == 0),
-                SyntaxNode::BinaryOp(_) => short!(child_count == 2),
-                SyntaxNode::UnaryOp(_) => short!(child_count == 1),
-                SyntaxNode::NativeFunction(nf) => short!(
-                    child_count >= nf.min_args() as usize
-                        && nf.max_args().is_none_or(|m| child_count <= m as usize)
-                ),
-                SyntaxNode::CustomFunction(cf) => {
-                    let (min, max) = cf_bounds(*cf);
-                    short!(
-                        child_count >= min as usize
-                            && max.is_none_or(|m| child_count <= m as usize)
-                    )
-                }
-            }
-        }
-        true
+        todo!()
     }
 }
 
@@ -1026,112 +765,17 @@ where
     F: FunctionIdentifier + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let arena = &self.0.arena;
-        for edge in self.0.root.traverse(arena) {
-            match edge {
-                NodeEdge::Start(node) => match arena[node].get() {
-                    SyntaxNode::Number(num) => Display::fmt(num, f)?,
-                    SyntaxNode::Variable(var) => Display::fmt(&var, f)?,
-                    SyntaxNode::BinaryOp(opr) => {
-                        if matches!(
-                            node.ancestors(arena).nth(1).map(|p| arena[p].get()),
-                            Some(SyntaxNode::BinaryOp(paopr))
-                                if opr.precedence() < paopr.precedence()
-                                || !paopr.is_commutative() && opr.precedence() <= paopr.precedence()
-                        ) {
-                            f.write_str("(")?;
-                        }
-                    }
-                    SyntaxNode::UnaryOp(UnaryOp::Neg) => {
-                        // parent is BinaryOp, and Neg is the rhs
-                        if node
-                            .ancestors(arena)
-                            .nth(1)
-                            .filter(|p| matches!(arena[*p].get(), SyntaxNode::BinaryOp(_)))
-                            .map(|p| p.children(arena).nth(1))
-                            .is_some()
-                        {
-                            f.write_str("(")?;
-                        }
-                        Display::fmt(&UnaryOp::Neg, f)?;
-                    }
-                    SyntaxNode::NativeFunction(nf) => {
-                        Display::fmt(nf, f)?;
-                        f.write_str("(")?
-                    }
-                    SyntaxNode::CustomFunction(cf) => {
-                        Display::fmt(&cf, f)?;
-                        f.write_str("(")?
-                    }
-                    _ => (),
-                },
-                NodeEdge::End(node) => {
-                    match arena[node].get() {
-                        SyntaxNode::BinaryOp(opr) => {
-                            if matches!(
-                                node.ancestors(arena).nth(1).map(|p| arena[p].get()),
-                                Some(SyntaxNode::BinaryOp(paopr))
-                                    if opr.precedence() < paopr.precedence()
-                                    || !paopr.is_commutative() && opr.precedence() <= paopr.precedence()
-                            ) {
-                                f.write_str(")")?
-                            }
-                        }
-                        SyntaxNode::UnaryOp(UnaryOp::Neg) => {
-                            if node
-                                .ancestors(arena)
-                                .nth(1)
-                                .filter(|p| matches!(arena[*p].get(), SyntaxNode::BinaryOp(_)))
-                                .map(|p| p.children(arena).nth(1))
-                                .is_some()
-                            {
-                                f.write_str(")")?;
-                            }
-                        }
-                        SyntaxNode::UnaryOp(UnaryOp::Fac) => {
-                            f.write_str("!")?;
-                        }
-                        SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_) => {
-                            f.write_str(")")?
-                        }
-                        _ => (),
-                    };
-                    if node.following_siblings(arena).nth(1).is_some() {
-                        match node.ancestors(arena).nth(1).map(|p| arena[p].get()) {
-                            Some(SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_)) => {
-                                f.write_str(", ")?
-                            }
-                            Some(SyntaxNode::BinaryOp(opr))
-                                if *opr == BinaryOp::Add || *opr == BinaryOp::Sub =>
-                            {
-                                write!(f, " {} ", opr.as_char())?;
-                            }
-                            Some(SyntaxNode::BinaryOp(opr)) => Display::fmt(&opr, f)?,
-                            _ => (),
-                        }
-                    }
-                }
-            };
-        }
-        Ok(())
+        todo!()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use indextree::Arena;
     use std::f64::consts::*;
 
     use super::*;
     use crate::VariableStore;
     use crate::tokenizer::TokenStream;
-    use crate::tree_utils::VecTree::{self, Leaf};
-
-    macro_rules! branch {
-        ($node:expr, $($children:expr),+ $(,)?) => {
-            VecTree::Branch($node,vec![$($children),+])
-        };
-    }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     enum TestVar {
@@ -1335,417 +979,359 @@ mod test {
 
     #[test]
     fn test_syntaxify() {
-        fn syntaxify(
-            input: &str,
-        ) -> Result<VecTree<SyntaxNode<f64, TestVar, TestFunc>>, ParsingError> {
-            parse(input).map(|st| VecTree::new(&st.0.arena, st.0.root))
+        fn syntaxify(input: &str) -> Result<Vec<SyntaxNode<f64, TestVar, TestFunc>>, ParsingError> {
+            parse(input).map(|st| st.0)
         }
-        assert_eq!(syntaxify("0"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(syntaxify("(0)"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(syntaxify("((0))"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(syntaxify("pi"), Ok(Leaf(SyntaxNode::Number(PI))));
+        assert_eq!(syntaxify("0"), Ok(vec![SyntaxNode::Number(0.0)]));
+        assert_eq!(syntaxify("(0)"), Ok(vec![SyntaxNode::Number(0.0)]));
+        assert_eq!(syntaxify("((0))"), Ok(vec![SyntaxNode::Number(0.0)]));
+        assert_eq!(syntaxify("pi"), Ok(vec![SyntaxNode::Number(PI)]));
         assert_eq!(
             syntaxify("1+1"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(1.0),
+                SyntaxNode::Number(1.0),
                 SyntaxNode::BinaryOp(BinaryOp::Add),
-                Leaf(SyntaxNode::Number(1.0)),
-                Leaf(SyntaxNode::Number(1.0))
-            ))
+            ])
         );
-        assert_eq!(syntaxify("-0.5"), Ok(Leaf(SyntaxNode::Number(-0.5))));
+        assert_eq!(syntaxify("-0.5"), Ok(vec![SyntaxNode::Number(-0.5)]));
         assert_eq!(
             syntaxify("5-3"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(5.0),
+                SyntaxNode::Number(3.0),
                 SyntaxNode::BinaryOp(BinaryOp::Sub),
-                Leaf(SyntaxNode::Number(5.0)),
-                Leaf(SyntaxNode::Number(3.0))
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("-y!"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::Y),
+                SyntaxNode::UnaryOp(UnaryOp::Fac),
                 SyntaxNode::UnaryOp(UnaryOp::Neg),
-                branch!(
-                    SyntaxNode::UnaryOp(UnaryOp::Fac),
-                    Leaf(SyntaxNode::Variable(TestVar::Y))
-                )
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("t!!"),
-            Ok(branch!(
-                SyntaxNode::UnaryOp(UnaryOp::DoubleFac),
-                Leaf(SyntaxNode::Variable(TestVar::T))
-            ))
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::T),
+                SyntaxNode::UnaryOp(UnaryOp::DoubleFac)
+            ])
         );
         assert_eq!(
             syntaxify("8*3+1"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(8.0),
+                SyntaxNode::Number(3.0),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                SyntaxNode::Number(1.0),
                 SyntaxNode::BinaryOp(BinaryOp::Add),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Mul),
-                    Leaf(SyntaxNode::Number(8.0)),
-                    Leaf(SyntaxNode::Number(3.0))
-                ),
-                Leaf(SyntaxNode::Number(1.0))
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("12/3/2"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(12.0),
+                SyntaxNode::Number(3.0),
                 SyntaxNode::BinaryOp(BinaryOp::Div),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Div),
-                    Leaf(SyntaxNode::Number(12.0)),
-                    Leaf(SyntaxNode::Number(3.0))
-                ),
-                Leaf(SyntaxNode::Number(2.0))
-            ))
+                SyntaxNode::Number(2.0),
+                SyntaxNode::BinaryOp(BinaryOp::Div),
+            ])
         );
         assert_eq!(
             syntaxify("8*(3+1)"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(8.0),
+                SyntaxNode::Number(3.0),
+                SyntaxNode::Number(1.0),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
                 SyntaxNode::BinaryOp(BinaryOp::Mul),
-                Leaf(SyntaxNode::Number(8.0)),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Add),
-                    Leaf(SyntaxNode::Number(3.0)),
-                    Leaf(SyntaxNode::Number(1.0))
-                )
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("8*3^2-1"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(8.0),
+                SyntaxNode::Number(3.0),
+                SyntaxNode::Number(2.0),
+                SyntaxNode::BinaryOp(BinaryOp::Pow),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                SyntaxNode::Number(1.0),
                 SyntaxNode::BinaryOp(BinaryOp::Sub),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Mul),
-                    Leaf(SyntaxNode::Number(8.0)),
-                    branch!(
-                        SyntaxNode::BinaryOp(BinaryOp::Pow),
-                        Leaf(SyntaxNode::Number(3.0)),
-                        Leaf(SyntaxNode::Number(2.0))
-                    )
-                ),
-                Leaf(SyntaxNode::Number(1.0))
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("2x"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(2.0),
+                SyntaxNode::Variable(TestVar::X),
                 SyntaxNode::BinaryOp(BinaryOp::Mul),
-                Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("sin(14)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sin),
-                Leaf(SyntaxNode::Number(14.0))
-            ))
+            Ok(vec![
+                SyntaxNode::Number(14.0),
+                SyntaxNode::NativeFunction(NativeFunction::Sin, 1),
+            ])
         );
         assert_eq!(
             syntaxify("deg2rad(80)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Deg2Rad),
-                Leaf(SyntaxNode::Number(80.0))
-            ))
+            Ok(vec![
+                SyntaxNode::Number(80.0),
+                SyntaxNode::CustomFunction(TestFunc::Deg2Rad, 1),
+            ])
         );
         assert_eq!(
             syntaxify("expd(0.2, x)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::ExpD),
-                Leaf(SyntaxNode::Number(0.2)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            Ok(vec![
+                SyntaxNode::Number(0.2),
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::CustomFunction(TestFunc::ExpD, 2),
+            ])
         );
         assert_eq!(
             syntaxify("clamp(t, y, x)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Clamp),
-                Leaf(SyntaxNode::Variable(TestVar::T)),
-                Leaf(SyntaxNode::Variable(TestVar::Y)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::T),
+                SyntaxNode::Variable(TestVar::Y),
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::CustomFunction(TestFunc::Clamp, 3),
+            ])
         );
         assert_eq!(
             syntaxify("digits(3, 1, 5, 7, 2, x)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Digits),
-                Leaf(SyntaxNode::Number(3.0)),
-                Leaf(SyntaxNode::Number(1.0)),
-                Leaf(SyntaxNode::Number(5.0)),
-                Leaf(SyntaxNode::Number(7.0)),
-                Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            Ok(vec![
+                SyntaxNode::Number(3.0),
+                SyntaxNode::Number(1.0),
+                SyntaxNode::Number(5.0),
+                SyntaxNode::Number(7.0),
+                SyntaxNode::Number(2.0),
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::CustomFunction(TestFunc::Digits, 6),
+            ])
         );
         assert_eq!(
             syntaxify("lb(8)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Log2),
-                Leaf(SyntaxNode::Number(8.0))
-            ))
+            Ok(vec![
+                SyntaxNode::Number(8.0),
+                SyntaxNode::NativeFunction(NativeFunction::Log2, 1),
+            ])
         );
         assert_eq!(
             syntaxify("log(100)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Log10),
-                Leaf(SyntaxNode::Number(100.0))
-            ))
+            Ok(vec![
+                SyntaxNode::Number(100.0),
+                SyntaxNode::NativeFunction(NativeFunction::Log10, 1),
+            ])
         );
         assert_eq!(
             syntaxify("sin(cos(0))"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sin),
-                branch!(
-                    SyntaxNode::NativeFunction(NativeFunction::Cos),
-                    Leaf(SyntaxNode::Number(0.0))
-                )
-            ))
+            Ok(vec![
+                SyntaxNode::Number(0.0),
+                SyntaxNode::NativeFunction(NativeFunction::Cos, 1),
+                SyntaxNode::NativeFunction(NativeFunction::Sin, 1),
+            ])
         );
         assert_eq!(
             syntaxify("x^2 + sin(y)"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::Number(2.0),
+                SyntaxNode::BinaryOp(BinaryOp::Pow),
+                SyntaxNode::Variable(TestVar::Y),
+                SyntaxNode::NativeFunction(NativeFunction::Sin, 1),
                 SyntaxNode::BinaryOp(BinaryOp::Add),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Pow),
-                    Leaf(SyntaxNode::Variable(TestVar::X)),
-                    Leaf(SyntaxNode::Number(2.0))
-                ),
-                branch!(
-                    SyntaxNode::NativeFunction(NativeFunction::Sin),
-                    Leaf(SyntaxNode::Variable(TestVar::Y))
-                )
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("sqrt(max(4, 9))"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sqrt),
-                branch!(
-                    SyntaxNode::NativeFunction(NativeFunction::Max),
-                    Leaf(SyntaxNode::Number(4.0)),
-                    Leaf(SyntaxNode::Number(9.0))
-                )
-            ))
+            Ok(vec![
+                SyntaxNode::Number(4.0),
+                SyntaxNode::Number(9.0),
+                SyntaxNode::NativeFunction(NativeFunction::Max, 2),
+                SyntaxNode::NativeFunction(NativeFunction::Sqrt, 1),
+            ])
         );
         assert_eq!(
             syntaxify("max(2, x, 8y, x*y+1)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Max),
-                Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Variable(TestVar::X)),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Mul),
-                    Leaf(SyntaxNode::Number(8.0)),
-                    Leaf(SyntaxNode::Variable(TestVar::Y))
-                ),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Add),
-                    branch!(
-                        SyntaxNode::BinaryOp(BinaryOp::Mul),
-                        Leaf(SyntaxNode::Variable(TestVar::X)),
-                        Leaf(SyntaxNode::Variable(TestVar::Y))
-                    ),
-                    Leaf(SyntaxNode::Number(1.0))
-                )
-            ))
+            Ok(vec![
+                SyntaxNode::Number(2.0),
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::Number(8.0),
+                SyntaxNode::Variable(TestVar::Y),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::Variable(TestVar::Y),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                SyntaxNode::Number(1.0),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
+                SyntaxNode::NativeFunction(NativeFunction::Max, 4),
+            ])
         );
         assert_eq!(
             syntaxify("2*x + 3*y"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(2.0),
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                SyntaxNode::Number(3.0),
+                SyntaxNode::Variable(TestVar::Y),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
                 SyntaxNode::BinaryOp(BinaryOp::Add),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Mul),
-                    Leaf(SyntaxNode::Number(2.0)),
-                    Leaf(SyntaxNode::Variable(TestVar::X))
-                ),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Mul),
-                    Leaf(SyntaxNode::Number(3.0)),
-                    Leaf(SyntaxNode::Variable(TestVar::Y))
-                )
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("log10(1000)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Log10),
-                Leaf(SyntaxNode::Number(1000.0))
-            ))
+            Ok(vec![
+                SyntaxNode::Number(1000.0),
+                SyntaxNode::NativeFunction(NativeFunction::Log10, 1),
+            ])
         );
         assert_eq!(
             syntaxify("1/(2+3)"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(1.0),
+                SyntaxNode::Number(2.0),
+                SyntaxNode::Number(3.0),
+                SyntaxNode::BinaryOp(BinaryOp::Add),
                 SyntaxNode::BinaryOp(BinaryOp::Div),
-                Leaf(SyntaxNode::Number(1.0)),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Add),
-                    Leaf(SyntaxNode::Number(2.0)),
-                    Leaf(SyntaxNode::Number(3.0))
-                )
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("e^x"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(E),
+                SyntaxNode::Variable(TestVar::X),
                 SyntaxNode::BinaryOp(BinaryOp::Pow),
-                Leaf(SyntaxNode::Number(E)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("x * -2"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::Number(-2.0),
                 SyntaxNode::BinaryOp(BinaryOp::Mul),
-                Leaf(SyntaxNode::Variable(TestVar::X)),
-                Leaf(SyntaxNode::Number(-2.0))
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("4/-1.33"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(4.0),
+                SyntaxNode::Number(-1.33),
                 SyntaxNode::BinaryOp(BinaryOp::Div),
-                Leaf(SyntaxNode::Number(4.0)),
-                Leaf(SyntaxNode::Number(-1.33))
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("sqrt(16)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sqrt),
-                Leaf(SyntaxNode::Number(16.0))
-            ))
+            Ok(vec![
+                SyntaxNode::Number(16.0),
+                SyntaxNode::NativeFunction(NativeFunction::Sqrt, 1),
+            ])
         );
         assert_eq!(
             syntaxify("abs(-5)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Abs),
-                Leaf(SyntaxNode::Number(-5.0))
-            ))
+            Ok(vec![
+                SyntaxNode::Number(-5.0),
+                SyntaxNode::NativeFunction(NativeFunction::Abs, 1),
+            ])
         );
         assert_eq!(
             syntaxify("x^2 - y^2"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::Number(2.0),
+                SyntaxNode::BinaryOp(BinaryOp::Pow),
+                SyntaxNode::Variable(TestVar::Y),
+                SyntaxNode::Number(2.0),
+                SyntaxNode::BinaryOp(BinaryOp::Pow),
                 SyntaxNode::BinaryOp(BinaryOp::Sub),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Pow),
-                    Leaf(SyntaxNode::Variable(TestVar::X)),
-                    Leaf(SyntaxNode::Number(2.0))
-                ),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Pow),
-                    Leaf(SyntaxNode::Variable(TestVar::Y)),
-                    Leaf(SyntaxNode::Number(2.0))
-                )
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("|x|"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Abs),
-                Leaf(SyntaxNode::Variable(TestVar::X)),
-            ))
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::NativeFunction(NativeFunction::Abs, 1),
+            ])
         );
         assert_eq!(
             syntaxify("|-x|"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Abs),
-                branch!(
-                    SyntaxNode::UnaryOp(UnaryOp::Neg),
-                    Leaf(SyntaxNode::Variable(TestVar::X))
-                )
-            ))
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::UnaryOp(UnaryOp::Neg),
+                SyntaxNode::NativeFunction(NativeFunction::Abs, 1),
+            ])
         );
         assert_eq!(
             syntaxify("4*-x"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(4.0),
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::UnaryOp(UnaryOp::Neg),
                 SyntaxNode::BinaryOp(BinaryOp::Mul),
-                Leaf(SyntaxNode::Number(4.0)),
-                branch!(
-                    SyntaxNode::UnaryOp(UnaryOp::Neg),
-                    Leaf(SyntaxNode::Variable(TestVar::X))
-                )
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("8.3 + -1"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(8.3),
+                SyntaxNode::Number(-1.0),
                 SyntaxNode::BinaryOp(BinaryOp::Add),
-                Leaf(SyntaxNode::Number(8.3)),
-                Leaf(SyntaxNode::Number(-1.0))
-            ))
+            ])
         );
-        assert_eq!(syntaxify("++1"), Ok(Leaf(SyntaxNode::Number(1.0))));
-        assert_eq!(syntaxify("+-1"), Ok(Leaf(SyntaxNode::Number(-1.0))));
+        assert_eq!(syntaxify("++1"), Ok(vec![SyntaxNode::Number(1.0)]));
+        assert_eq!(syntaxify("+-1"), Ok(vec![SyntaxNode::Number(-1.0)]));
         assert_eq!(
             syntaxify("x + +1"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::Number(1.0),
                 SyntaxNode::BinaryOp(BinaryOp::Add),
-                Leaf(SyntaxNode::Variable(TestVar::X)),
-                Leaf(SyntaxNode::Number(1.0))
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("-1^2"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(1.0),
+                SyntaxNode::Number(2.0),
+                SyntaxNode::BinaryOp(BinaryOp::Pow),
                 SyntaxNode::UnaryOp(UnaryOp::Neg),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Pow),
-                    Leaf(SyntaxNode::Number(1.0)),
-                    Leaf(SyntaxNode::Number(2.0))
-                )
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("x!y"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::UnaryOp(UnaryOp::Fac),
+                SyntaxNode::Variable(TestVar::Y),
                 SyntaxNode::BinaryOp(BinaryOp::Mul),
-                branch!(
-                    SyntaxNode::UnaryOp(UnaryOp::Fac),
-                    Leaf(SyntaxNode::Variable(TestVar::X)),
-                ),
-                Leaf(SyntaxNode::Variable(TestVar::Y)),
-            ))
+            ])
         );
         assert_eq!(
             syntaxify("sin(x!-1)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sin),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Sub),
-                    branch!(
-                        SyntaxNode::UnaryOp(UnaryOp::Fac),
-                        Leaf(SyntaxNode::Variable(TestVar::X))
-                    ),
-                    Leaf(SyntaxNode::Number(1.0))
-                )
-            ))
+            Ok(vec![
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::UnaryOp(UnaryOp::Fac),
+                SyntaxNode::Number(1.0),
+                SyntaxNode::BinaryOp(BinaryOp::Sub),
+                SyntaxNode::NativeFunction(NativeFunction::Sin, 1),
+            ])
         );
         assert_eq!(
             syntaxify("3|x-1|/2 + 1"),
-            Ok(branch!(
+            Ok(vec![
+                SyntaxNode::Number(3.0),
+                SyntaxNode::Variable(TestVar::X),
+                SyntaxNode::Number(1.0),
+                SyntaxNode::BinaryOp(BinaryOp::Sub),
+                SyntaxNode::NativeFunction(NativeFunction::Abs, 1),
+                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                SyntaxNode::Number(2.0),
+                SyntaxNode::BinaryOp(BinaryOp::Div),
+                SyntaxNode::Number(1.0),
                 SyntaxNode::BinaryOp(BinaryOp::Add),
-                branch!(
-                    SyntaxNode::BinaryOp(BinaryOp::Div),
-                    branch!(
-                        SyntaxNode::BinaryOp(BinaryOp::Mul),
-                        Leaf(SyntaxNode::Number(3.0)),
-                        branch!(
-                            SyntaxNode::NativeFunction(NativeFunction::Abs),
-                            branch!(
-                                SyntaxNode::BinaryOp(BinaryOp::Sub),
-                                Leaf(SyntaxNode::Variable(TestVar::X)),
-                                Leaf(SyntaxNode::Number(1.0))
-                            )
-                        )
-                    ),
-                    Leaf(SyntaxNode::Number(2.0))
-                ),
-                Leaf(SyntaxNode::Number(1.0))
-            ))
+            ])
         );
         assert_eq!(
             syntaxify(""),
