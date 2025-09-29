@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
+use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, MathAssembly, Stack};
@@ -7,7 +8,7 @@ use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
 use crate::tokenizer::{Token, TokenStream};
 use crate::{
     BinaryOp, FunctionIdentifier, NAME_LIMIT, ParsingError, ParsingErrorKind, UnaryOp,
-    VariableIdentifier,
+    VariableIdentifier, VariableStore,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -166,11 +167,6 @@ where
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
-    pub(crate) Vec<SyntaxNode<N, V, F>>,
-);
-
 fn after_implies_neg<F>(token: Token<'_>, operator_stack: &[SYOperator<F>]) -> bool
 where
     F: FunctionIdentifier,
@@ -184,55 +180,164 @@ where
     ) || matches!(token, Token::Pipe) && inside_pipe_abs(operator_stack).is_some()
 }
 
-fn shunting_yard_pop_opr<N, V, F>(
-    operator_stack: &mut Vec<SYOperator<F>>,
-    output: &mut Vec<SyntaxNode<N, V, F>>,
-) where
+trait ShuntingYardOutput<N, V, F>
+where
     N: MathEvalNumber,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    let opr = operator_stack.pop().unwrap();
-    if let Some(SyntaxNode::Number(num)) = output.last_mut()
-        && opr == SYOperator::UnaryOp(UnaryOp::Neg)
-    {
-        *num = -num.clone();
-    } else {
-        output.push(opr.to_syn());
+    type Output;
+
+    fn pop_opr(&mut self, operator_stack: &mut Vec<SYOperator<F>>);
+    fn make(self) -> Self::Output;
+    fn push(&mut self, node: SyntaxNode<N, V, F>);
+    fn pop_arg(&mut self) -> Option<SyntaxNode<N, V, F>>;
+    fn last_num<'a>(&'a self) -> Option<N::AsArg<'a>>;
+
+    fn push_opr(&mut self, operator: SYOperator<F>, operator_stack: &mut Vec<SYOperator<F>>) {
+        while let Some(top_opr) = operator_stack.last()
+            && matches!(top_opr, SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_))
+            && (operator.precedence() < top_opr.precedence()
+                || operator.precedence() == top_opr.precedence()
+                    && !operator.is_right_associative())
+        {
+            self.pop_opr(operator_stack);
+        }
+        operator_stack.push(operator);
+    }
+    fn flush(&mut self, operator_stack: &mut Vec<SYOperator<F>>) {
+        while let Some(opr) = operator_stack.last()
+            && matches!(opr, SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_))
+        {
+            self.pop_opr(operator_stack)
+        }
     }
 }
 
-fn shunting_yard_push_opr<N, V, F>(
-    operator: SYOperator<F>,
-    operator_stack: &mut Vec<SYOperator<F>>,
-    output: &mut Vec<SyntaxNode<N, V, F>>,
-) where
+struct AstOutput<N, V, F>(Vec<SyntaxNode<N, V, F>>)
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier;
+
+impl<N, V, F> ShuntingYardOutput<N, V, F> for AstOutput<N, V, F>
+where
     N: MathEvalNumber,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    while let Some(top_opr) = operator_stack.last()
-        && matches!(top_opr, SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_))
-        && (operator.precedence() < top_opr.precedence()
-            || operator.precedence() == top_opr.precedence() && !operator.is_right_associative())
-    {
-        shunting_yard_pop_opr(operator_stack, output);
+    type Output = SyntaxTree<N, V, F>;
+
+    fn pop_opr(&mut self, operator_stack: &mut Vec<SYOperator<F>>) {
+        let opr = operator_stack.pop().unwrap();
+        if let Some(SyntaxNode::Number(num)) = self.0.last_mut()
+            && opr == SYOperator::UnaryOp(UnaryOp::Neg)
+        {
+            *num = -num.clone();
+        } else {
+            self.0.push(opr.to_syn());
+        }
     }
-    operator_stack.push(operator);
+    fn make(self) -> Self::Output {
+        SyntaxTree(self.0)
+    }
+    fn push(&mut self, arg: SyntaxNode<N, V, F>) {
+        self.0.push(arg);
+    }
+    fn pop_arg(&mut self) -> Option<SyntaxNode<N, V, F>> {
+        self.0.pop()
+    }
+    fn last_num<'a>(&'a self) -> Option<<N as MathEvalNumber>::AsArg<'a>> {
+        if let Some(SyntaxNode::Number(num)) = self.0.last() {
+            Some(num.asarg())
+        } else {
+            None
+        }
+    }
 }
 
-fn shunting_yard_flush<N, V, F>(
-    operator_stack: &mut Vec<SYOperator<F>>,
-    output: &mut Vec<SyntaxNode<N, V, F>>,
-) where
+struct NumberOutput<'a, 'b, N, V, F, S, C>
+where
     N: MathEvalNumber,
     V: VariableIdentifier,
     F: FunctionIdentifier,
+    S: VariableStore<N, V>,
+    C: Fn(F) -> CFPointer<'a, N>,
 {
-    while let Some(opr) = operator_stack.last()
-        && matches!(opr, SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_))
-    {
-        shunting_yard_pop_opr(operator_stack, output)
+    args: Vec<N>,
+    variable_store: &'b S,
+    cf2pointer: C,
+    var_ident: PhantomData<V>,
+    func_ident: PhantomData<F>,
+}
+
+impl<'a, 'b, N, V, F, S, C> ShuntingYardOutput<N, V, F> for NumberOutput<'a, 'b, N, V, F, S, C>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+    S: VariableStore<N, V>,
+    C: Fn(F) -> CFPointer<'a, N>,
+{
+    type Output = N;
+
+    fn pop_opr(&mut self, operator_stack: &mut Vec<SYOperator<F>>) {
+        let res = match operator_stack.pop().unwrap() {
+            SYOperator::BinaryOp(opr) => {
+                let rhs = self.args.pop().unwrap();
+                opr.eval(self.args.pop().unwrap().asarg(), rhs.asarg())
+            }
+            SYOperator::UnaryOp(opr) => opr.eval(self.args.pop().unwrap().asarg()),
+            _ => panic!(),
+        };
+        self.args.push(res);
+    }
+    fn make(mut self) -> Self::Output {
+        debug_assert_eq!(self.args.len(), 1);
+        self.args.pop().unwrap()
+    }
+    fn push(&mut self, node: SyntaxNode<N, V, F>) {
+        let res = match node {
+            SyntaxNode::Number(num) => num,
+            SyntaxNode::Variable(var) => self.variable_store.get(var).to_owned(),
+            SyntaxNode::NativeFunction(nf, args) => match nf.to_pointer::<N>() {
+                NFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
+                NFPointer::Dual(func) => {
+                    let rhs = self.args.pop().unwrap();
+                    func(self.args.pop().unwrap().asarg(), rhs.asarg())
+                }
+                NFPointer::Flexible(func) => {
+                    let res = func(&self.args[self.args.len() - args as usize..]);
+                    self.args.truncate(self.args.len() - args as usize);
+                    res
+                }
+            },
+            SyntaxNode::CustomFunction(cf, args) => match (self.cf2pointer)(cf) {
+                CFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
+                CFPointer::Dual(func) => {
+                    let rhs = self.args.pop().unwrap();
+                    func(self.args.pop().unwrap().asarg(), rhs.asarg())
+                }
+                CFPointer::Triple(func) => {
+                    let a3 = self.args.pop().unwrap();
+                    let a2 = self.args.pop().unwrap();
+                    func(self.args.pop().unwrap().asarg(), a2.asarg(), a3.asarg())
+                }
+                CFPointer::Flexible(func) => {
+                    let res = func(&self.args[self.args.len() - args as usize..]);
+                    self.args.truncate(self.args.len() - args as usize);
+                    res
+                }
+            },
+            SyntaxNode::BinaryOp(_) | SyntaxNode::UnaryOp(_) => panic!(),
+        };
+        self.args.push(res);
+    }
+    fn pop_arg(&mut self) -> Option<SyntaxNode<N, V, F>> {
+        self.args.pop().map(|num| SyntaxNode::Number(num))
+    }
+    fn last_num<'c>(&'c self) -> Option<N::AsArg<'c>> {
+        self.args.last().map(|num| num.asarg())
     }
 }
 
@@ -436,6 +541,270 @@ where
     }
 }
 
+fn parse_or_eval<'a, O, N, V, F>(
+    mut output_queue: O,
+    token_stream: &'a TokenStream<'a>,
+    custom_constant_parser: impl Fn(&str) -> Option<N>,
+    custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
+    custom_variable_parser: impl Fn(&str) -> Option<V>,
+) -> Result<O::Output, SyntaxError>
+where
+    O: ShuntingYardOutput<N, V, F>,
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    // Dijkstra's shunting yard algorithm
+    let mut operator_stack: Vec<SYOperator<F>> = Vec::new();
+    let mut last_tk: Option<Token<'a>> = None;
+    for (pos, &token) in token_stream.0.iter().enumerate() {
+        validate_consecutive_tokens(last_tk, Some(token), pos)?;
+        // for detecting implied multiplication
+        if matches!(
+            (last_tk, token),
+            (
+                Some(
+                    Token::Operation('!')
+                        | Token::Number(_)
+                        | Token::Variable(_)
+                        | Token::CloseParen,
+                ),
+                Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_),
+            ),
+        ) || matches!(
+            (last_tk, token),
+            (
+                Some(Token::Pipe),
+                Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_)
+            )
+        ) && inside_pipe_abs(&operator_stack).is_none()
+            || matches!(
+                (last_tk, token),
+                (
+                    Some(
+                        Token::Operation('!')
+                            | Token::Number(_)
+                            | Token::Variable(_)
+                            | Token::CloseParen,
+                    ),
+                    Token::Pipe
+                )
+            ) && inside_pipe_abs(&operator_stack).is_none()
+        {
+            output_queue.push_opr(SYOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
+        }
+        match token {
+            Token::Number(num) => output_queue.push(
+                num.parse::<N>()
+                    .map(SyntaxNode::Number)
+                    .map_err(|_| SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos))?,
+            ),
+            Token::Variable(var) => {
+                if var.len() > NAME_LIMIT as usize {
+                    return Err(SyntaxError(SyntaxErrorKind::NameTooLong, pos..=pos));
+                }
+                if let Some(node) = N::parse_constant(var)
+                    .or_else(|| custom_constant_parser(var))
+                    .map(|c| SyntaxNode::Number(c))
+                    .or_else(|| custom_variable_parser(var).map(|var| SyntaxNode::Variable(var)))
+                {
+                    output_queue.push(node)
+                } else if let Some(segments) =
+                    segment_variable(var, &custom_constant_parser, &custom_variable_parser)
+                {
+                    let mut first = true;
+                    for seg in segments {
+                        output_queue.push(match seg {
+                            Segment::Constant(c) => SyntaxNode::Number(c),
+                            Segment::Variable(v) => SyntaxNode::Variable(v),
+                        });
+                        if first {
+                            first = false;
+                        } else {
+                            output_queue
+                                .push_opr(SYOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
+                        }
+                    }
+                } else {
+                    return Err(SyntaxError(
+                        SyntaxErrorKind::UnknownVariableOrConstant,
+                        pos..=pos,
+                    ));
+                }
+            }
+            Token::Operation(opr) => {
+                let mut sy_opr: SYOperator<F> = BinaryOp::parse(opr)
+                    .map(|biopr| SYOperator::BinaryOp(biopr))
+                    .or_else(|| UnaryOp::parse(opr).map(|unopr| SYOperator::UnaryOp(unopr)))
+                    .unwrap();
+                if opr == '-' && last_tk.is_none_or(|tk| after_implies_neg(tk, &operator_stack)) {
+                    sy_opr = SYOperator::UnaryOp(UnaryOp::Neg);
+                } else if opr == '!' && last_tk.is_some_and(|tk| tk == Token::Operation('!')) {
+                    let fac = operator_stack.pop();
+                    debug_assert_eq!(fac, Some(SYOperator::UnaryOp(UnaryOp::Fac)));
+                    sy_opr = SYOperator::UnaryOp(UnaryOp::DoubleFac)
+                }
+                if opr != '+' || last_tk.is_some_and(|tk| !after_implies_neg(tk, &operator_stack)) {
+                    output_queue.push_opr(sy_opr, &mut operator_stack);
+                }
+            }
+            Token::Function(name) => {
+                if let Some(func) = NativeFunction::parse(name)
+                    .map(|nf| SYOperator::Function(SYFunction::NativeFunction(nf), 1))
+                    .or_else(|| {
+                        custom_function_parser(name).map(|(cf, min, max)| {
+                            SYOperator::Function(SYFunction::CustomFunction(cf, min, max), 1)
+                        })
+                    })
+                {
+                    operator_stack.push(func);
+                } else if let Some((segments, func)) = segment_function(
+                    name,
+                    &custom_constant_parser,
+                    &custom_variable_parser,
+                    &custom_function_parser,
+                ) {
+                    for seg in segments {
+                        output_queue.push(match seg {
+                            Segment::Constant(c) => SyntaxNode::Number(c),
+                            Segment::Variable(v) => SyntaxNode::Variable(v),
+                        });
+                        output_queue
+                            .push_opr(SYOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
+                    }
+                    operator_stack.push(SYOperator::Function(func, 1));
+                } else {
+                    return Err(SyntaxError(SyntaxErrorKind::UnknownFunction, pos..=pos));
+                }
+            }
+            Token::OpenParen => {
+                operator_stack.push(SYOperator::Parentheses);
+            }
+            Token::Comma => {
+                output_queue.flush(&mut operator_stack);
+                match operator_stack.last_mut() {
+                    Some(SYOperator::Function(_, args)) => {
+                        *args += 1;
+                    }
+                    _ => {
+                        return Err(SyntaxError(
+                            SyntaxErrorKind::CommaOutsideFunction,
+                            pos..=pos,
+                        ));
+                    }
+                }
+            }
+            Token::CloseParen => {
+                output_queue.flush(&mut operator_stack);
+                match operator_stack.pop() {
+                    Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
+                        let opening = find_opening_pipe(&token_stream.0[..pos]).unwrap();
+                        return Err(SyntaxError(
+                            SyntaxErrorKind::PipeAbsNotClosed,
+                            opening..=opening,
+                        ));
+                    }
+                    Some(SYOperator::Function(SYFunction::NativeFunction(mut nf), args)) => if args
+                        < nf.min_args()
+                        && nf != NativeFunction::Log
+                    {
+                        Err(SyntaxErrorKind::NotEnoughArguments)
+                    } else if nf.max_args().is_some_and(|m| args > m) {
+                        Err(SyntaxErrorKind::TooManyArguments)
+                    } else {
+                        if nf == NativeFunction::Log {
+                            let ten = N::from(10);
+                            let two = N::from(2);
+                            match output_queue.last_num().unwrap() {
+                                num if num == ten.asarg() => {
+                                    output_queue.pop_arg();
+                                    nf = NativeFunction::Log10;
+                                }
+                                num if num == two.asarg() => {
+                                    output_queue.pop_arg();
+                                    nf = NativeFunction::Log2;
+                                }
+                                _ if args == 1 => {
+                                    nf = NativeFunction::Log10;
+                                }
+                                _ => (),
+                            }
+                        }
+                        output_queue.push(SyntaxNode::NativeFunction(nf, args));
+                        Ok(())
+                    }
+                    .map_err(|e| {
+                        SyntaxError(e, find_opening_paren(&token_stream.0[..pos]).unwrap()..=pos)
+                    })?,
+                    Some(SYOperator::Function(
+                        SYFunction::CustomFunction(cf, min_args, max_args),
+                        args,
+                    )) => if args < min_args {
+                        Err(SyntaxErrorKind::NotEnoughArguments)
+                    } else if max_args.is_some_and(|m| args > m) {
+                        Err(SyntaxErrorKind::TooManyArguments)
+                    } else {
+                        output_queue.push(SyntaxNode::CustomFunction(cf, args));
+                        Ok(())
+                    }
+                    .map_err(|e| {
+                        SyntaxError(e, find_opening_paren(&token_stream.0[..pos]).unwrap()..=pos)
+                    })?,
+                    Some(SYOperator::Parentheses) => (),
+                    _ => {
+                        return Err(SyntaxError(
+                            SyntaxErrorKind::MissingOpeningParenthesis,
+                            pos..=pos,
+                        ));
+                    }
+                }
+            }
+            Token::Pipe => {
+                if let Some(opening_pipe) = inside_pipe_abs(&operator_stack) {
+                    output_queue.flush(&mut operator_stack);
+                    if let Some(SYOperator::Function(SYFunction::PipeAbs, args)) =
+                        operator_stack.pop()
+                        && args > 1
+                    {
+                        return Err(SyntaxError(
+                            SyntaxErrorKind::TooManyArguments,
+                            opening_pipe..=pos,
+                        ));
+                    }
+                    output_queue.push(SyntaxNode::NativeFunction(NativeFunction::Abs, 1));
+                } else {
+                    operator_stack.push(SYOperator::Function(SYFunction::PipeAbs, 0));
+                }
+            }
+        }
+        last_tk = Some(token);
+    }
+    validate_consecutive_tokens(last_tk, None, token_stream.0.len())?;
+    output_queue.flush(&mut operator_stack);
+    match operator_stack.last() {
+        Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
+            let opening = find_opening_pipe(&token_stream.0).unwrap();
+            Err(SyntaxError(
+                SyntaxErrorKind::PipeAbsNotClosed,
+                opening..=opening,
+            ))
+        }
+        Some(SYOperator::Function(_, _) | SYOperator::Parentheses) => {
+            let unclosed_paren_pos = find_opening_paren(&token_stream.0).unwrap();
+            Err(SyntaxError(
+                SyntaxErrorKind::MissingClosingParenthesis,
+                unclosed_paren_pos..=unclosed_paren_pos,
+            ))
+        }
+        _ => Ok(output_queue.make()),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+    pub(crate) Vec<SyntaxNode<N, V, F>>,
+);
+
 impl<V, N, F> SyntaxTree<N, V, F>
 where
     N: MathEvalNumber,
@@ -448,269 +817,35 @@ where
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
     ) -> Result<SyntaxTree<N, V, F>, SyntaxError> {
-        // Dijkstra's shunting yard algorithm
-        let mut output: Vec<SyntaxNode<N, V, F>> = Vec::new();
-        let mut operator_stack: Vec<SYOperator<F>> = Vec::new();
-        let mut last_tk: Option<Token<'a>> = None;
-        for (pos, &token) in token_stream.0.iter().enumerate() {
-            validate_consecutive_tokens(last_tk, Some(token), pos)?;
-            // for detecting implied multiplication
-            if matches!(
-                (last_tk, token),
-                (
-                    Some(
-                        Token::Operation('!')
-                            | Token::Number(_)
-                            | Token::Variable(_)
-                            | Token::CloseParen,
-                    ),
-                    Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_),
-                ),
-            ) || matches!(
-                (last_tk, token),
-                (
-                    Some(Token::Pipe),
-                    Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_)
-                )
-            ) && inside_pipe_abs(&operator_stack).is_none()
-                || matches!(
-                    (last_tk, token),
-                    (
-                        Some(
-                            Token::Operation('!')
-                                | Token::Number(_)
-                                | Token::Variable(_)
-                                | Token::CloseParen,
-                        ),
-                        Token::Pipe
-                    )
-                ) && inside_pipe_abs(&operator_stack).is_none()
-            {
-                shunting_yard_push_opr(
-                    SYOperator::BinaryOp(BinaryOp::Mul),
-                    &mut operator_stack,
-                    &mut output,
-                );
-            }
-            match token {
-                Token::Number(num) => output.push(
-                    num.parse::<N>()
-                        .map(SyntaxNode::Number)
-                        .map_err(|_| SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos))?,
-                ),
-                Token::Variable(var) => {
-                    if var.len() > NAME_LIMIT as usize {
-                        return Err(SyntaxError(SyntaxErrorKind::NameTooLong, pos..=pos));
-                    }
-                    if let Some(node) = N::parse_constant(var)
-                        .or_else(|| custom_constant_parser(var))
-                        .map(|c| SyntaxNode::Number(c))
-                        .or_else(|| {
-                            custom_variable_parser(var).map(|var| SyntaxNode::Variable(var))
-                        })
-                    {
-                        output.push(node)
-                    } else if let Some(segments) =
-                        segment_variable(var, &custom_constant_parser, &custom_variable_parser)
-                    {
-                        let mut first = true;
-                        for seg in segments {
-                            output.push(match seg {
-                                Segment::Constant(c) => SyntaxNode::Number(c),
-                                Segment::Variable(v) => SyntaxNode::Variable(v),
-                            });
-                            if first {
-                                first = false;
-                            } else {
-                                shunting_yard_push_opr(
-                                    SYOperator::BinaryOp(BinaryOp::Mul),
-                                    &mut operator_stack,
-                                    &mut output,
-                                );
-                            }
-                        }
-                    } else {
-                        return Err(SyntaxError(
-                            SyntaxErrorKind::UnknownVariableOrConstant,
-                            pos..=pos,
-                        ));
-                    }
-                }
-                Token::Operation(opr) => {
-                    let mut sy_opr: SYOperator<F> = BinaryOp::parse(opr)
-                        .map(|biopr| SYOperator::BinaryOp(biopr))
-                        .or_else(|| UnaryOp::parse(opr).map(|unopr| SYOperator::UnaryOp(unopr)))
-                        .unwrap();
-                    if opr == '-' && last_tk.is_none_or(|tk| after_implies_neg(tk, &operator_stack))
-                    {
-                        sy_opr = SYOperator::UnaryOp(UnaryOp::Neg);
-                    } else if opr == '!' && last_tk.is_some_and(|tk| tk == Token::Operation('!')) {
-                        let fac = operator_stack.pop();
-                        debug_assert_eq!(fac, Some(SYOperator::UnaryOp(UnaryOp::Fac)));
-                        sy_opr = SYOperator::UnaryOp(UnaryOp::DoubleFac)
-                    }
-                    if opr != '+'
-                        || last_tk.is_some_and(|tk| !after_implies_neg(tk, &operator_stack))
-                    {
-                        shunting_yard_push_opr(sy_opr, &mut operator_stack, &mut output);
-                    }
-                }
-                Token::Function(name) => {
-                    if let Some(func) = NativeFunction::parse(name)
-                        .map(|nf| SYOperator::Function(SYFunction::NativeFunction(nf), 1))
-                        .or_else(|| {
-                            custom_function_parser(name).map(|(cf, min, max)| {
-                                SYOperator::Function(SYFunction::CustomFunction(cf, min, max), 1)
-                            })
-                        })
-                    {
-                        operator_stack.push(func);
-                    } else if let Some((segments, func)) = segment_function(
-                        name,
-                        &custom_constant_parser,
-                        &custom_variable_parser,
-                        &custom_function_parser,
-                    ) {
-                        for seg in segments {
-                            output.push(match seg {
-                                Segment::Constant(c) => SyntaxNode::Number(c),
-                                Segment::Variable(v) => SyntaxNode::Variable(v),
-                            });
-                            shunting_yard_push_opr(
-                                SYOperator::BinaryOp(BinaryOp::Mul),
-                                &mut operator_stack,
-                                &mut output,
-                            );
-                        }
-                        operator_stack.push(SYOperator::Function(func, 1));
-                    } else {
-                        return Err(SyntaxError(SyntaxErrorKind::UnknownFunction, pos..=pos));
-                    }
-                }
-                Token::OpenParen => {
-                    operator_stack.push(SYOperator::Parentheses);
-                }
-                Token::Comma => {
-                    shunting_yard_flush(&mut operator_stack, &mut output);
-                    match operator_stack.last_mut() {
-                        Some(SYOperator::Function(_, args)) => {
-                            *args += 1;
-                        }
-                        _ => {
-                            return Err(SyntaxError(
-                                SyntaxErrorKind::CommaOutsideFunction,
-                                pos..=pos,
-                            ));
-                        }
-                    }
-                }
-                Token::CloseParen => {
-                    shunting_yard_flush(&mut operator_stack, &mut output);
-                    match operator_stack.pop() {
-                        Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
-                            let opening = find_opening_pipe(&token_stream.0[..pos]).unwrap();
-                            return Err(SyntaxError(
-                                SyntaxErrorKind::PipeAbsNotClosed,
-                                opening..=opening,
-                            ));
-                        }
-                        Some(SYOperator::Function(SYFunction::NativeFunction(mut nf), args)) => {
-                            if args < nf.min_args() && nf != NativeFunction::Log {
-                                Err(SyntaxErrorKind::NotEnoughArguments)
-                            } else if nf.max_args().is_some_and(|m| args > m) {
-                                Err(SyntaxErrorKind::TooManyArguments)
-                            } else {
-                                if nf == NativeFunction::Log {
-                                    match output.last().unwrap() {
-                                        SyntaxNode::Number(num) if *num == N::from(10) => {
-                                            output.pop();
-                                            nf = NativeFunction::Log10;
-                                        }
-                                        SyntaxNode::Number(num) if *num == N::from(2) => {
-                                            output.pop();
-                                            nf = NativeFunction::Log2;
-                                        }
-                                        _ if args == 1 => {
-                                            nf = NativeFunction::Log10;
-                                        }
-                                        _ => (),
-                                    }
-                                }
-                                output.push(SyntaxNode::NativeFunction(nf, args));
-                                Ok(())
-                            }
-                            .map_err(|e| {
-                                SyntaxError(
-                                    e,
-                                    find_opening_paren(&token_stream.0[..pos]).unwrap()..=pos,
-                                )
-                            })?
-                        }
-                        Some(SYOperator::Function(
-                            SYFunction::CustomFunction(cf, min_args, max_args),
-                            args,
-                        )) => if args < min_args {
-                            Err(SyntaxErrorKind::NotEnoughArguments)
-                        } else if max_args.is_some_and(|m| args > m) {
-                            Err(SyntaxErrorKind::TooManyArguments)
-                        } else {
-                            output.push(SyntaxNode::CustomFunction(cf, args));
-                            Ok(())
-                        }
-                        .map_err(|e| {
-                            SyntaxError(
-                                e,
-                                find_opening_paren(&token_stream.0[..pos]).unwrap()..=pos,
-                            )
-                        })?,
-                        Some(SYOperator::Parentheses) => (),
-                        _ => {
-                            return Err(SyntaxError(
-                                SyntaxErrorKind::MissingOpeningParenthesis,
-                                pos..=pos,
-                            ));
-                        }
-                    }
-                }
-                Token::Pipe => {
-                    if let Some(opening_pipe) = inside_pipe_abs(&operator_stack) {
-                        shunting_yard_flush(&mut operator_stack, &mut output);
-                        if let Some(SYOperator::Function(SYFunction::PipeAbs, args)) =
-                            operator_stack.pop()
-                            && args > 1
-                        {
-                            return Err(SyntaxError(
-                                SyntaxErrorKind::TooManyArguments,
-                                opening_pipe..=pos,
-                            ));
-                        }
-                        output.push(SyntaxNode::NativeFunction(NativeFunction::Abs, 1));
-                    } else {
-                        operator_stack.push(SYOperator::Function(SYFunction::PipeAbs, 0));
-                    }
-                }
-            }
-            last_tk = Some(token);
-        }
-        validate_consecutive_tokens(last_tk, None, token_stream.0.len())?;
-        shunting_yard_flush(&mut operator_stack, &mut output);
-        match operator_stack.last() {
-            Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
-                let opening = find_opening_pipe(&token_stream.0).unwrap();
-                Err(SyntaxError(
-                    SyntaxErrorKind::PipeAbsNotClosed,
-                    opening..=opening,
-                ))
-            }
-            Some(SYOperator::Function(_, _) | SYOperator::Parentheses) => {
-                let unclosed_paren_pos = find_opening_paren(&token_stream.0).unwrap();
-                Err(SyntaxError(
-                    SyntaxErrorKind::MissingClosingParenthesis,
-                    unclosed_paren_pos..=unclosed_paren_pos,
-                ))
-            }
-            _ => Ok(SyntaxTree(output)),
-        }
+        parse_or_eval(
+            AstOutput(Vec::new()),
+            token_stream,
+            custom_constant_parser,
+            custom_function_parser,
+            custom_variable_parser,
+        )
+    }
+    pub fn parse_and_eval<'a, 'b, 'c, S: VariableStore<N, V>>(
+        token_stream: &'a TokenStream<'a>,
+        custom_constant_parser: impl Fn(&str) -> Option<N>,
+        custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
+        custom_variable_parser: impl Fn(&str) -> Option<V>,
+        variable_values: &'b S,
+        function_to_pointer: impl Fn(F) -> CFPointer<'c, N>,
+    ) -> Result<N, SyntaxError> {
+        parse_or_eval(
+            NumberOutput {
+                args: Vec::new(),
+                variable_store: variable_values,
+                cf2pointer: function_to_pointer,
+                var_ident: PhantomData,
+                func_ident: PhantomData,
+            },
+            token_stream,
+            custom_constant_parser,
+            custom_function_parser,
+            custom_variable_parser,
+        )
     }
 
     pub fn eval<'a>(
@@ -750,10 +885,7 @@ where
     }
 
     #[allow(dead_code)]
-    fn verify(
-        tree: &[SyntaxNode<N, V, F>],
-        cf_bounds: impl Fn(F) -> (u8, Option<u8>),
-    ) -> bool {
+    fn verify(tree: &[SyntaxNode<N, V, F>], cf_bounds: impl Fn(F) -> (u8, Option<u8>)) -> bool {
         todo!()
     }
 }
