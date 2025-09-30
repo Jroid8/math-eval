@@ -3,9 +3,9 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 
-use crate::asm::{CFPointer, MathAssembly, Stack};
+use crate::asm::{CFPointer, MathAssembly};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
-use crate::tokenizer::{Token, TokenStream};
+use crate::tokenizer::Token;
 use crate::{
     BinaryOp, FunctionIdentifier, NAME_LIMIT, ParsingError, ParsingErrorKind, UnaryOp,
     VariableIdentifier, VariableStore,
@@ -66,14 +66,14 @@ pub enum SyntaxErrorKind {
     NameTooLong,
 }
 
-pub(crate) fn token_range_to_str_range(
+fn token_range_to_str_range(
     input: &str,
-    token_stream: &TokenStream<'_>,
+    tokens: &[Token<'_>],
     token_range: RangeInclusive<usize>,
 ) -> RangeInclusive<usize> {
     let mut start = 0;
     let mut index = 0;
-    for (tk_idx, token) in token_stream.0[..=*token_range.end()].iter().enumerate() {
+    for (tk_idx, token) in tokens[..=*token_range.end()].iter().enumerate() {
         while input.chars().nth(index).unwrap().is_whitespace() {
             index += 1
         }
@@ -89,12 +89,12 @@ pub(crate) fn token_range_to_str_range(
 pub struct SyntaxError(SyntaxErrorKind, RangeInclusive<usize>);
 
 impl SyntaxError {
-    pub fn to_general(self, input: &str, token_stream: &TokenStream<'_>) -> ParsingError {
+    pub fn to_general(self, input: &str, tokens: &[Token<'_>]) -> ParsingError {
         ParsingError {
             at: if self.0 == SyntaxErrorKind::EmptyInput {
                 0..=0
             } else {
-                token_range_to_str_range(input, token_stream, self.1)
+                token_range_to_str_range(input, tokens, self.1)
             },
             kind: match self.0 {
                 SyntaxErrorKind::NumberParsingError => ParsingErrorKind::NumberParsingError,
@@ -574,7 +574,7 @@ where
 
 fn parse_or_eval<'a, O, N, V, F>(
     mut output_queue: O,
-    token_stream: &'a TokenStream<'a>,
+    tokens: &'a [Token<'a>],
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
@@ -588,7 +588,7 @@ where
     // Dijkstra's shunting yard algorithm
     let mut operator_stack: Vec<SYOperator<F>> = Vec::new();
     let mut last_tk: Option<Token<'a>> = None;
-    for (pos, &token) in token_stream.0.iter().enumerate() {
+    for (pos, &token) in tokens.iter().enumerate() {
         validate_consecutive_tokens(last_tk, Some(token), pos)?;
         // for detecting implied multiplication
         if matches!(
@@ -729,7 +729,7 @@ where
                 output_queue.flush(&mut operator_stack);
                 match operator_stack.pop() {
                     Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
-                        let opening = find_opening_pipe(&token_stream.0[..pos]).unwrap();
+                        let opening = find_opening_pipe(&tokens[..pos]).unwrap();
                         return Err(SyntaxError(
                             SyntaxErrorKind::PipeAbsNotClosed,
                             opening..=opening,
@@ -765,7 +765,7 @@ where
                         Ok(())
                     }
                     .map_err(|e| {
-                        SyntaxError(e, find_opening_paren(&token_stream.0[..pos]).unwrap()..=pos)
+                        SyntaxError(e, find_opening_paren(&tokens[..pos]).unwrap()..=pos)
                     })?,
                     Some(SYOperator::Function(
                         SYFunction::CustomFunction(cf, min_args, max_args),
@@ -779,7 +779,7 @@ where
                         Ok(())
                     }
                     .map_err(|e| {
-                        SyntaxError(e, find_opening_paren(&token_stream.0[..pos]).unwrap()..=pos)
+                        SyntaxError(e, find_opening_paren(&tokens[..pos]).unwrap()..=pos)
                     })?,
                     Some(SYOperator::Parentheses) => (),
                     _ => {
@@ -810,18 +810,18 @@ where
         }
         last_tk = Some(token);
     }
-    validate_consecutive_tokens(last_tk, None, token_stream.0.len())?;
+    validate_consecutive_tokens(last_tk, None, tokens.len())?;
     output_queue.flush(&mut operator_stack);
     match operator_stack.last() {
         Some(SYOperator::Function(SYFunction::PipeAbs, _)) => {
-            let opening = find_opening_pipe(&token_stream.0).unwrap();
+            let opening = find_opening_pipe(tokens).unwrap();
             Err(SyntaxError(
                 SyntaxErrorKind::PipeAbsNotClosed,
                 opening..=opening,
             ))
         }
         Some(SYOperator::Function(_, _) | SYOperator::Parentheses) => {
-            let unclosed_paren_pos = find_opening_paren(&token_stream.0).unwrap();
+            let unclosed_paren_pos = find_opening_paren(tokens).unwrap();
             Err(SyntaxError(
                 SyntaxErrorKind::MissingClosingParenthesis,
                 unclosed_paren_pos..=unclosed_paren_pos,
@@ -843,21 +843,21 @@ where
     F: FunctionIdentifier,
 {
     pub fn new<'a>(
-        token_stream: &'a TokenStream<'a>,
+        tokens: &'a [Token<'a>],
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
     ) -> Result<PostfixMathAst<N, V, F>, SyntaxError> {
         parse_or_eval(
             SyAstOutput(Vec::new()),
-            token_stream,
+            tokens,
             custom_constant_parser,
             custom_function_parser,
             custom_variable_parser,
         )
     }
     pub fn parse_and_eval<'a, 'b, 'c, S: VariableStore<N, V>>(
-        token_stream: &'a TokenStream<'a>,
+        tokens: &'a [Token<'a>],
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
@@ -872,7 +872,7 @@ where
                 var_ident: PhantomData,
                 func_ident: PhantomData,
             },
-            token_stream,
+            tokens,
             custom_constant_parser,
             custom_function_parser,
             custom_variable_parser,
@@ -1116,9 +1116,9 @@ mod test {
     }
 
     fn parse(input: &str) -> Result<PostfixMathAst<f64, TestVar, TestFunc>, ParsingError> {
-        let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
+        let tokens = TokenStream::new(input).map_err(|e| e.to_general())?.0;
         PostfixMathAst::new(
-            &token_stream,
+            &tokens,
             |inp| match inp {
                 "c" => Some(299792458.0),
                 _ => None,
@@ -1137,7 +1137,7 @@ mod test {
                 _ => None,
             },
         )
-        .map_err(|e| e.to_general(input, &token_stream))
+        .map_err(|e| e.to_general(input, &tokens))
     }
 
     #[test]
@@ -1707,7 +1707,10 @@ mod test {
         test!("sin(cos(1))", vec![0, 1, 2]);
         test!("x^2 + sin(y)", vec![0, 0, 2, 0, 1, 5]);
         test!("sqrt(max(x, 9))", vec![0, 0, 2, 3]);
-        test!("1+max(2, x, 8y, xy+1)", vec![0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 4, 10, 12])
+        test!(
+            "1+max(2, x, 8y, xy+1)",
+            vec![0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 4, 10, 12]
+        )
     }
 
     #[test]
@@ -1828,7 +1831,7 @@ mod test {
     #[test]
     fn test_token2range() {
         let input = " max(pi, 1, -4)*3";
-        let ts = TokenStream::new(input).unwrap();
+        let ts = TokenStream::new(input).unwrap().0;
         assert_eq!(token_range_to_str_range(input, &ts, 0..=0), 1..=4);
         assert_eq!(token_range_to_str_range(input, &ts, 1..=1), 5..=6);
         assert_eq!(token_range_to_str_range(input, &ts, 2..=2), 7..=7);

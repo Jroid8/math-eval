@@ -243,12 +243,12 @@ pub fn compile<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifi
 ) -> Result<MathAssembly<'a, N, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let mut syntax_tree = PostfixMathAst::new(
-        &token_stream,
+        &token_stream.0,
         custom_constant_parser,
         custom_function_parser,
         custom_variable_parser,
     )
-    .map_err(|e| e.to_general(input, &token_stream))?;
+    .map_err(|e| e.to_general(input, &token_stream.0))?;
     syntax_tree.aot_evaluation(&function_to_pointer);
     syntax_tree.displacing_simplification();
     todo!()
@@ -264,13 +264,13 @@ pub fn evaluate<'a, 'b, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIde
 ) -> Result<N, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     match PostfixMathAst::new(
-        &token_stream,
+        &token_stream.0,
         custom_constant_parser,
         custom_function_parser,
         custom_variable_parser,
     ) {
         Ok(s) => Ok(s.eval(function_to_pointer, variable_values)),
-        Err(e) => Err(e.to_general(input, &token_stream)),
+        Err(e) => Err(e.to_general(input, &token_stream.0)),
     }
 }
 
