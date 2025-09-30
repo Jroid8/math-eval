@@ -906,7 +906,7 @@ where
             function_to_pointer,
             variable_values,
             Stack::with_capacity(Self::eval_stack_capacity(&self.0)),
-        )
+        ).unwrap()
     }
 
     fn _eval<'a>(
@@ -914,21 +914,22 @@ where
         functibn_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_values: &impl crate::VariableStore<N, V>,
         mut stack: Stack<N>,
-    ) -> N {
-        for node in tree {
+    ) -> Result<N, usize> {
+        for (idx, node) in tree.iter().enumerate() {
+            let mut pop = || stack.pop().ok_or(idx);
             let result: N = match &node.kind {
                 AstNodeKind::Number(num) => num.clone(),
                 AstNodeKind::Variable(var) => variable_values.get(*var).to_owned(),
                 AstNodeKind::BinaryOp(opr) => {
-                    let rhs = stack.pop().unwrap();
-                    opr.eval(stack.pop().unwrap().asarg(), rhs.asarg())
+                    let rhs = pop()?;
+                    opr.eval(pop()?.asarg(), rhs.asarg())
                 }
-                AstNodeKind::UnaryOp(opr) => opr.eval(stack.pop().unwrap().asarg()),
+                AstNodeKind::UnaryOp(opr) => opr.eval(pop()?.asarg()),
                 AstNodeKind::NativeFunction(nf, argc) => match nf.to_pointer() {
-                    NFPointer::Single(func) => func(stack.pop().unwrap().asarg()),
+                    NFPointer::Single(func) => func(pop()?.asarg()),
                     NFPointer::Dual(func) => {
-                        let arg2 = stack.pop().unwrap();
-                        func(stack.pop().unwrap().asarg(), arg2.asarg())
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg())
                     }
                     NFPointer::Flexible(func) => {
                         let new_len = stack.len() - *argc as usize;
@@ -938,15 +939,15 @@ where
                     }
                 },
                 AstNodeKind::CustomFunction(cf, argc) => match functibn_to_pointer(*cf) {
-                    CFPointer::Single(func) => func(stack.pop().unwrap().asarg()),
+                    CFPointer::Single(func) => func(pop()?.asarg()),
                     CFPointer::Dual(func) => {
-                        let arg2 = stack.pop().unwrap();
-                        func(stack.pop().unwrap().asarg(), arg2.asarg())
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg())
                     }
                     CFPointer::Triple(func) => {
-                        let arg3 = stack.pop().unwrap();
-                        let arg2 = stack.pop().unwrap();
-                        func(stack.pop().unwrap().asarg(), arg2.asarg(), arg3.asarg())
+                        let arg3 = pop()?;
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg(), arg3.asarg())
                     }
                     CFPointer::Flexible(func) => {
                         let new_len = stack.len() - *argc as usize;
@@ -958,7 +959,8 @@ where
             };
             stack.push(result);
         }
-        stack.pop().unwrap()
+        stack.pop().ok_or(0)
+    }
     }
 
     pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(F) -> CFPointer<'a, N>) {
