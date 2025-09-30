@@ -9,7 +9,7 @@ use std::{
 use asm::{CFPointer, MathAssembly, Stack};
 use number::MathEvalNumber;
 use seq_macro::seq;
-use syntax::SyntaxTree;
+use syntax::PostfixMathAst;
 use tokenizer::TokenStream;
 
 pub mod asm;
@@ -242,7 +242,7 @@ pub fn compile<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifi
     function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
 ) -> Result<MathAssembly<'a, N, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-    let mut syntax_tree = SyntaxTree::new(
+    let mut syntax_tree = PostfixMathAst::new(
         &token_stream,
         custom_constant_parser,
         custom_function_parser,
@@ -263,7 +263,7 @@ pub fn evaluate<'a, 'b, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIde
     variable_values: &impl VariableStore<N, V>,
 ) -> Result<N, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-    match SyntaxTree::new(
+    match PostfixMathAst::new(
         &token_stream,
         custom_constant_parser,
         custom_function_parser,

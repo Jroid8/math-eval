@@ -4,7 +4,7 @@ use std::{fmt::Debug, hash::Hash};
 use crate::{
     BinaryOp, FunctionIdentifier, UnaryOp, VariableIdentifier,
     number::{MathEvalNumber, NativeFunction, Reborrow},
-    syntax::SyntaxNode,
+    syntax::AstNodeKind,
 };
 
 pub type Stack<N> = SmallVec<[N; 16]>;
@@ -184,7 +184,7 @@ where
     F: FunctionIdentifier,
 {
     pub fn new<V: VariableIdentifier>(
-        tree: Vec<SyntaxNode<N, V, F>>,
+        tree: Vec<AstNodeKind<N, V, F>>,
         function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_order: &[V],
     ) -> Self {
@@ -320,10 +320,8 @@ where
 mod test {
     use crate::{
         BinaryOp, ParsingError, UnaryOp,
-        asm::{CFPointer, Input, Instruction, MathAssembly},
+        asm::{Input, Instruction, MathAssembly},
         number::{MathEvalNumber, NativeFunction},
-        syntax::SyntaxTree,
-        tokenizer::TokenStream,
     };
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

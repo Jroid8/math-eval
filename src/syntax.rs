@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum SyntaxNode<N, V, F>
+pub enum AstNodeKind<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -24,6 +24,28 @@ where
     UnaryOp(UnaryOp),
     NativeFunction(NativeFunction, u8),
     CustomFunction(F, u8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AstNode<N, V, F>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    pub kind: AstNodeKind<N, V, F>,
+    pub child_count: usize,
+}
+
+impl<N, V, F> AstNode<N, V, F>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    fn new(kind: AstNodeKind<N, V, F>, child_count: usize) -> Self {
+        AstNode { kind, child_count }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -110,7 +132,6 @@ where
     PipeAbs,
 }
 
-// FIX: check size_of and reduce size if it's too large
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SYOperator<F>
 where
@@ -145,22 +166,22 @@ where
     fn is_right_associative(&self) -> bool {
         matches!(self, SYOperator::BinaryOp(BinaryOp::Pow))
     }
-    fn to_syn<N, V>(self) -> SyntaxNode<N, V, F>
+    fn to_syn<N, V>(self) -> AstNodeKind<N, V, F>
     where
         N: MathEvalNumber,
         V: VariableIdentifier,
     {
         match self {
-            SYOperator::BinaryOp(opr) => SyntaxNode::BinaryOp(opr),
-            SYOperator::UnaryOp(opr) => SyntaxNode::UnaryOp(opr),
+            SYOperator::BinaryOp(opr) => AstNodeKind::BinaryOp(opr),
+            SYOperator::UnaryOp(opr) => AstNodeKind::UnaryOp(opr),
             SYOperator::Function(SYFunction::NativeFunction(nf), args) => {
-                SyntaxNode::NativeFunction(nf, args)
+                AstNodeKind::NativeFunction(nf, args)
             }
             SYOperator::Function(SYFunction::CustomFunction(cf, _, _), args) => {
-                SyntaxNode::CustomFunction(cf, args)
+                AstNodeKind::CustomFunction(cf, args)
             }
             SYOperator::Function(SYFunction::PipeAbs, _) => {
-                SyntaxNode::NativeFunction(NativeFunction::Abs, 1)
+                AstNodeKind::NativeFunction(NativeFunction::Abs, 1)
             }
             SYOperator::Parentheses => unreachable!(),
         }
@@ -190,8 +211,8 @@ where
 
     fn pop_opr(&mut self, operator_stack: &mut Vec<SYOperator<F>>);
     fn make(self) -> Self::Output;
-    fn push(&mut self, node: SyntaxNode<N, V, F>);
-    fn pop_arg(&mut self) -> Option<SyntaxNode<N, V, F>>;
+    fn push(&mut self, node: AstNodeKind<N, V, F>);
+    fn pop_arg(&mut self) -> Option<AstNodeKind<N, V, F>>;
     fn last_num<'a>(&'a self) -> Option<N::AsArg<'a>>;
 
     fn push_opr(&mut self, operator: SYOperator<F>, operator_stack: &mut Vec<SYOperator<F>>) {
@@ -214,41 +235,51 @@ where
     }
 }
 
-struct AstOutput<N, V, F>(Vec<SyntaxNode<N, V, F>>)
+struct SyAstOutput<N, V, F>(Vec<AstNode<N, V, F>>)
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
     F: FunctionIdentifier;
 
-impl<N, V, F> ShuntingYardOutput<N, V, F> for AstOutput<N, V, F>
+impl<N, V, F> ShuntingYardOutput<N, V, F> for SyAstOutput<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    type Output = SyntaxTree<N, V, F>;
+    type Output = PostfixMathAst<N, V, F>;
 
     fn pop_opr(&mut self, operator_stack: &mut Vec<SYOperator<F>>) {
         let opr = operator_stack.pop().unwrap();
-        if let Some(SyntaxNode::Number(num)) = self.0.last_mut()
+        if let Some(AstNodeKind::Number(num)) = self.0.last_mut().map(|n| &mut n.kind)
             && opr == SYOperator::UnaryOp(UnaryOp::Neg)
         {
             *num = -num.clone();
         } else {
-            self.0.push(opr.to_syn());
+            self.push(opr.to_syn());
         }
     }
     fn make(self) -> Self::Output {
-        SyntaxTree(self.0)
+        PostfixMathAst(self.0)
     }
-    fn push(&mut self, arg: SyntaxNode<N, V, F>) {
-        self.0.push(arg);
+    fn push(&mut self, kind: AstNodeKind<N, V, F>) {
+        let arg_cons = match kind {
+            AstNodeKind::Number(_) | AstNodeKind::Variable(_) => 0,
+            AstNodeKind::UnaryOp(_) => 1,
+            AstNodeKind::BinaryOp(_) => 2,
+            AstNodeKind::NativeFunction(_, a) | AstNodeKind::CustomFunction(_, a) => a,
+        };
+        let mut child_count = 0;
+        for ac in 0..arg_cons {
+            child_count += self.0[self.0.len() - child_count - 1].child_count + 1;
+        }
+        self.0.push(AstNode::new(kind, child_count))
     }
-    fn pop_arg(&mut self) -> Option<SyntaxNode<N, V, F>> {
-        self.0.pop()
+    fn pop_arg(&mut self) -> Option<AstNodeKind<N, V, F>> {
+        self.0.pop().map(|n| n.kind)
     }
     fn last_num<'a>(&'a self) -> Option<<N as MathEvalNumber>::AsArg<'a>> {
-        if let Some(SyntaxNode::Number(num)) = self.0.last() {
+        if let Some(AstNodeKind::Number(num)) = self.0.last().map(|n| &n.kind) {
             Some(num.asarg())
         } else {
             None
@@ -256,7 +287,7 @@ where
     }
 }
 
-struct NumberOutput<'a, 'b, N, V, F, S, C>
+struct SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -271,7 +302,7 @@ where
     func_ident: PhantomData<F>,
 }
 
-impl<'a, 'b, N, V, F, S, C> ShuntingYardOutput<N, V, F> for NumberOutput<'a, 'b, N, V, F, S, C>
+impl<'a, 'b, N, V, F, S, C> ShuntingYardOutput<N, V, F> for SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -296,11 +327,11 @@ where
         debug_assert_eq!(self.args.len(), 1);
         self.args.pop().unwrap()
     }
-    fn push(&mut self, node: SyntaxNode<N, V, F>) {
+    fn push(&mut self, node: AstNodeKind<N, V, F>) {
         let res = match node {
-            SyntaxNode::Number(num) => num,
-            SyntaxNode::Variable(var) => self.variable_store.get(var).to_owned(),
-            SyntaxNode::NativeFunction(nf, args) => match nf.to_pointer::<N>() {
+            AstNodeKind::Number(num) => num,
+            AstNodeKind::Variable(var) => self.variable_store.get(var).to_owned(),
+            AstNodeKind::NativeFunction(nf, args) => match nf.to_pointer::<N>() {
                 NFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
                 NFPointer::Dual(func) => {
                     let rhs = self.args.pop().unwrap();
@@ -312,7 +343,7 @@ where
                     res
                 }
             },
-            SyntaxNode::CustomFunction(cf, args) => match (self.cf2pointer)(cf) {
+            AstNodeKind::CustomFunction(cf, args) => match (self.cf2pointer)(cf) {
                 CFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
                 CFPointer::Dual(func) => {
                     let rhs = self.args.pop().unwrap();
@@ -329,12 +360,12 @@ where
                     res
                 }
             },
-            SyntaxNode::BinaryOp(_) | SyntaxNode::UnaryOp(_) => panic!(),
+            AstNodeKind::BinaryOp(_) | AstNodeKind::UnaryOp(_) => panic!(),
         };
         self.args.push(res);
     }
-    fn pop_arg(&mut self) -> Option<SyntaxNode<N, V, F>> {
-        self.args.pop().map(|num| SyntaxNode::Number(num))
+    fn pop_arg(&mut self) -> Option<AstNodeKind<N, V, F>> {
+        self.args.pop().map(|num| AstNodeKind::Number(num))
     }
     fn last_num<'c>(&'c self) -> Option<N::AsArg<'c>> {
         self.args.last().map(|num| num.asarg())
@@ -596,7 +627,7 @@ where
         match token {
             Token::Number(num) => output_queue.push(
                 num.parse::<N>()
-                    .map(SyntaxNode::Number)
+                    .map(AstNodeKind::Number)
                     .map_err(|_| SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos))?,
             ),
             Token::Variable(var) => {
@@ -605,8 +636,8 @@ where
                 }
                 if let Some(node) = N::parse_constant(var)
                     .or_else(|| custom_constant_parser(var))
-                    .map(|c| SyntaxNode::Number(c))
-                    .or_else(|| custom_variable_parser(var).map(|var| SyntaxNode::Variable(var)))
+                    .map(|c| AstNodeKind::Number(c))
+                    .or_else(|| custom_variable_parser(var).map(|var| AstNodeKind::Variable(var)))
                 {
                     output_queue.push(node)
                 } else if let Some(segments) =
@@ -615,8 +646,8 @@ where
                     let mut first = true;
                     for seg in segments {
                         output_queue.push(match seg {
-                            Segment::Constant(c) => SyntaxNode::Number(c),
-                            Segment::Variable(v) => SyntaxNode::Variable(v),
+                            Segment::Constant(c) => AstNodeKind::Number(c),
+                            Segment::Variable(v) => AstNodeKind::Variable(v),
                         });
                         if first {
                             first = false;
@@ -666,8 +697,8 @@ where
                 ) {
                     for seg in segments {
                         output_queue.push(match seg {
-                            Segment::Constant(c) => SyntaxNode::Number(c),
-                            Segment::Variable(v) => SyntaxNode::Variable(v),
+                            Segment::Constant(c) => AstNodeKind::Number(c),
+                            Segment::Variable(v) => AstNodeKind::Variable(v),
                         });
                         output_queue
                             .push_opr(SYOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
@@ -730,7 +761,7 @@ where
                                 _ => (),
                             }
                         }
-                        output_queue.push(SyntaxNode::NativeFunction(nf, args));
+                        output_queue.push(AstNodeKind::NativeFunction(nf, args));
                         Ok(())
                     }
                     .map_err(|e| {
@@ -744,7 +775,7 @@ where
                     } else if max_args.is_some_and(|m| args > m) {
                         Err(SyntaxErrorKind::TooManyArguments)
                     } else {
-                        output_queue.push(SyntaxNode::CustomFunction(cf, args));
+                        output_queue.push(AstNodeKind::CustomFunction(cf, args));
                         Ok(())
                     }
                     .map_err(|e| {
@@ -771,7 +802,7 @@ where
                             opening_pipe..=pos,
                         ));
                     }
-                    output_queue.push(SyntaxNode::NativeFunction(NativeFunction::Abs, 1));
+                    output_queue.push(AstNodeKind::NativeFunction(NativeFunction::Abs, 1));
                 } else {
                     operator_stack.push(SYOperator::Function(SYFunction::PipeAbs, 0));
                 }
@@ -801,11 +832,11 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
-    pub(crate) Vec<SyntaxNode<N, V, F>>,
+pub struct PostfixMathAst<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+    pub(crate) Vec<AstNode<N, V, F>>,
 );
 
-impl<V, N, F> SyntaxTree<N, V, F>
+impl<V, N, F> PostfixMathAst<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -816,9 +847,9 @@ where
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
-    ) -> Result<SyntaxTree<N, V, F>, SyntaxError> {
+    ) -> Result<PostfixMathAst<N, V, F>, SyntaxError> {
         parse_or_eval(
-            AstOutput(Vec::new()),
+            SyAstOutput(Vec::new()),
             token_stream,
             custom_constant_parser,
             custom_function_parser,
@@ -834,7 +865,7 @@ where
         function_to_pointer: impl Fn(F) -> CFPointer<'c, N>,
     ) -> Result<N, SyntaxError> {
         parse_or_eval(
-            NumberOutput {
+            SyNumberOutput {
                 args: Vec::new(),
                 variable_store: variable_values,
                 cf2pointer: function_to_pointer,
@@ -856,7 +887,7 @@ where
         Self::_eval(&self.0, function_to_pointer, variable_values)
     }
     fn _eval<'a>(
-        tree: &[SyntaxNode<N, V, F>],
+        tree: &[AstNode<N, V, F>],
         function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_values: &impl crate::VariableStore<N, V>,
     ) -> N {
@@ -885,12 +916,12 @@ where
     }
 
     #[allow(dead_code)]
-    fn verify(tree: &[SyntaxNode<N, V, F>], cf_bounds: impl Fn(F) -> (u8, Option<u8>)) -> bool {
+    fn verify(tree: &[AstNodeKind<N, V, F>], cf_bounds: impl Fn(F) -> (u8, Option<u8>)) -> bool {
         todo!()
     }
 }
 
-impl<V, N, F> Display for SyntaxTree<N, V, F>
+impl<V, N, F> Display for PostfixMathAst<N, V, F>
 where
     N: MathEvalNumber + Display,
     V: VariableIdentifier + Display,
@@ -1084,9 +1115,9 @@ mod test {
         );
     }
 
-    fn parse(input: &str) -> Result<SyntaxTree<f64, TestVar, TestFunc>, ParsingError> {
+    fn parse(input: &str) -> Result<PostfixMathAst<f64, TestVar, TestFunc>, ParsingError> {
         let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-        SyntaxTree::new(
+        PostfixMathAst::new(
             &token_stream,
             |inp| match inp {
                 "c" => Some(299792458.0),
@@ -1111,358 +1142,360 @@ mod test {
 
     #[test]
     fn test_syntaxify() {
-        fn syntaxify(input: &str) -> Result<Vec<SyntaxNode<f64, TestVar, TestFunc>>, ParsingError> {
-            parse(input).map(|st| st.0)
+        fn syntaxify(
+            input: &str,
+        ) -> Result<Vec<AstNodeKind<f64, TestVar, TestFunc>>, ParsingError> {
+            parse(input).map(|st| st.0.into_iter().map(|n| n.kind).collect())
         }
-        assert_eq!(syntaxify("0"), Ok(vec![SyntaxNode::Number(0.0)]));
-        assert_eq!(syntaxify("(0)"), Ok(vec![SyntaxNode::Number(0.0)]));
-        assert_eq!(syntaxify("((0))"), Ok(vec![SyntaxNode::Number(0.0)]));
-        assert_eq!(syntaxify("pi"), Ok(vec![SyntaxNode::Number(PI)]));
+        assert_eq!(syntaxify("0"), Ok(vec![AstNodeKind::Number(0.0)]));
+        assert_eq!(syntaxify("(0)"), Ok(vec![AstNodeKind::Number(0.0)]));
+        assert_eq!(syntaxify("((0))"), Ok(vec![AstNodeKind::Number(0.0)]));
+        assert_eq!(syntaxify("pi"), Ok(vec![AstNodeKind::Number(PI)]));
         assert_eq!(
             syntaxify("1+1"),
             Ok(vec![
-                SyntaxNode::Number(1.0),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
             ])
         );
-        assert_eq!(syntaxify("-0.5"), Ok(vec![SyntaxNode::Number(-0.5)]));
+        assert_eq!(syntaxify("-0.5"), Ok(vec![AstNodeKind::Number(-0.5)]));
         assert_eq!(
             syntaxify("5-3"),
             Ok(vec![
-                SyntaxNode::Number(5.0),
-                SyntaxNode::Number(3.0),
-                SyntaxNode::BinaryOp(BinaryOp::Sub),
+                AstNodeKind::Number(5.0),
+                AstNodeKind::Number(3.0),
+                AstNodeKind::BinaryOp(BinaryOp::Sub),
             ])
         );
         assert_eq!(
             syntaxify("-y!"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::Y),
-                SyntaxNode::UnaryOp(UnaryOp::Fac),
-                SyntaxNode::UnaryOp(UnaryOp::Neg),
+                AstNodeKind::Variable(TestVar::Y),
+                AstNodeKind::UnaryOp(UnaryOp::Fac),
+                AstNodeKind::UnaryOp(UnaryOp::Neg),
             ])
         );
         assert_eq!(
             syntaxify("t!!"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::T),
-                SyntaxNode::UnaryOp(UnaryOp::DoubleFac)
+                AstNodeKind::Variable(TestVar::T),
+                AstNodeKind::UnaryOp(UnaryOp::DoubleFac)
             ])
         );
         assert_eq!(
             syntaxify("8*3+1"),
             Ok(vec![
-                SyntaxNode::Number(8.0),
-                SyntaxNode::Number(3.0),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
+                AstNodeKind::Number(8.0),
+                AstNodeKind::Number(3.0),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
             syntaxify("12/3/2"),
             Ok(vec![
-                SyntaxNode::Number(12.0),
-                SyntaxNode::Number(3.0),
-                SyntaxNode::BinaryOp(BinaryOp::Div),
-                SyntaxNode::Number(2.0),
-                SyntaxNode::BinaryOp(BinaryOp::Div),
+                AstNodeKind::Number(12.0),
+                AstNodeKind::Number(3.0),
+                AstNodeKind::BinaryOp(BinaryOp::Div),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Div),
             ])
         );
         assert_eq!(
             syntaxify("8*(3+1)"),
             Ok(vec![
-                SyntaxNode::Number(8.0),
-                SyntaxNode::Number(3.0),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Number(8.0),
+                AstNodeKind::Number(3.0),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("8*3^2-1"),
             Ok(vec![
-                SyntaxNode::Number(8.0),
-                SyntaxNode::Number(3.0),
-                SyntaxNode::Number(2.0),
-                SyntaxNode::BinaryOp(BinaryOp::Pow),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Sub),
+                AstNodeKind::Number(8.0),
+                AstNodeKind::Number(3.0),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Pow),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Sub),
             ])
         );
         assert_eq!(
             syntaxify("2x"),
             Ok(vec![
-                SyntaxNode::Number(2.0),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("sin(14)"),
             Ok(vec![
-                SyntaxNode::Number(14.0),
-                SyntaxNode::NativeFunction(NativeFunction::Sin, 1),
+                AstNodeKind::Number(14.0),
+                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
             ])
         );
         assert_eq!(
             syntaxify("deg2rad(80)"),
             Ok(vec![
-                SyntaxNode::Number(80.0),
-                SyntaxNode::CustomFunction(TestFunc::Deg2Rad, 1),
+                AstNodeKind::Number(80.0),
+                AstNodeKind::CustomFunction(TestFunc::Deg2Rad, 1),
             ])
         );
         assert_eq!(
             syntaxify("expd(0.2, x)"),
             Ok(vec![
-                SyntaxNode::Number(0.2),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::CustomFunction(TestFunc::ExpD, 2),
+                AstNodeKind::Number(0.2),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::CustomFunction(TestFunc::ExpD, 2),
             ])
         );
         assert_eq!(
             syntaxify("clamp(t, y, x)"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::T),
-                SyntaxNode::Variable(TestVar::Y),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::CustomFunction(TestFunc::Clamp, 3),
+                AstNodeKind::Variable(TestVar::T),
+                AstNodeKind::Variable(TestVar::Y),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::CustomFunction(TestFunc::Clamp, 3),
             ])
         );
         assert_eq!(
             syntaxify("digits(3, 1, 5, 7, 2, x)"),
             Ok(vec![
-                SyntaxNode::Number(3.0),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::Number(5.0),
-                SyntaxNode::Number(7.0),
-                SyntaxNode::Number(2.0),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::CustomFunction(TestFunc::Digits, 6),
+                AstNodeKind::Number(3.0),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::Number(5.0),
+                AstNodeKind::Number(7.0),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::CustomFunction(TestFunc::Digits, 6),
             ])
         );
         assert_eq!(
             syntaxify("lb(8)"),
             Ok(vec![
-                SyntaxNode::Number(8.0),
-                SyntaxNode::NativeFunction(NativeFunction::Log2, 1),
+                AstNodeKind::Number(8.0),
+                AstNodeKind::NativeFunction(NativeFunction::Log2, 1),
             ])
         );
         assert_eq!(
             syntaxify("log(100)"),
             Ok(vec![
-                SyntaxNode::Number(100.0),
-                SyntaxNode::NativeFunction(NativeFunction::Log10, 1),
+                AstNodeKind::Number(100.0),
+                AstNodeKind::NativeFunction(NativeFunction::Log10, 1),
             ])
         );
         assert_eq!(
             syntaxify("sin(cos(0))"),
             Ok(vec![
-                SyntaxNode::Number(0.0),
-                SyntaxNode::NativeFunction(NativeFunction::Cos, 1),
-                SyntaxNode::NativeFunction(NativeFunction::Sin, 1),
+                AstNodeKind::Number(0.0),
+                AstNodeKind::NativeFunction(NativeFunction::Cos, 1),
+                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
             ])
         );
         assert_eq!(
             syntaxify("x^2 + sin(y)"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::Number(2.0),
-                SyntaxNode::BinaryOp(BinaryOp::Pow),
-                SyntaxNode::Variable(TestVar::Y),
-                SyntaxNode::NativeFunction(NativeFunction::Sin, 1),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Pow),
+                AstNodeKind::Variable(TestVar::Y),
+                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
             syntaxify("sqrt(max(4, 9))"),
             Ok(vec![
-                SyntaxNode::Number(4.0),
-                SyntaxNode::Number(9.0),
-                SyntaxNode::NativeFunction(NativeFunction::Max, 2),
-                SyntaxNode::NativeFunction(NativeFunction::Sqrt, 1),
+                AstNodeKind::Number(4.0),
+                AstNodeKind::Number(9.0),
+                AstNodeKind::NativeFunction(NativeFunction::Max, 2),
+                AstNodeKind::NativeFunction(NativeFunction::Sqrt, 1),
             ])
         );
         assert_eq!(
-            syntaxify("max(2, x, 8y, x*y+1)"),
+            syntaxify("max(2, x, 8y, xy+1)"),
             Ok(vec![
-                SyntaxNode::Number(2.0),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::Number(8.0),
-                SyntaxNode::Variable(TestVar::Y),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::Variable(TestVar::Y),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
-                SyntaxNode::NativeFunction(NativeFunction::Max, 4),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::Number(8.0),
+                AstNodeKind::Variable(TestVar::Y),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::Variable(TestVar::Y),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNodeKind::NativeFunction(NativeFunction::Max, 4),
             ])
         );
         assert_eq!(
             syntaxify("2*x + 3*y"),
             Ok(vec![
-                SyntaxNode::Number(2.0),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
-                SyntaxNode::Number(3.0),
-                SyntaxNode::Variable(TestVar::Y),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Number(3.0),
+                AstNodeKind::Variable(TestVar::Y),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
             syntaxify("log10(1000)"),
             Ok(vec![
-                SyntaxNode::Number(1000.0),
-                SyntaxNode::NativeFunction(NativeFunction::Log10, 1),
+                AstNodeKind::Number(1000.0),
+                AstNodeKind::NativeFunction(NativeFunction::Log10, 1),
             ])
         );
         assert_eq!(
             syntaxify("1/(2+3)"),
             Ok(vec![
-                SyntaxNode::Number(1.0),
-                SyntaxNode::Number(2.0),
-                SyntaxNode::Number(3.0),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
-                SyntaxNode::BinaryOp(BinaryOp::Div),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::Number(3.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNodeKind::BinaryOp(BinaryOp::Div),
             ])
         );
         assert_eq!(
             syntaxify("e^x"),
             Ok(vec![
-                SyntaxNode::Number(E),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::BinaryOp(BinaryOp::Pow),
+                AstNodeKind::Number(E),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::BinaryOp(BinaryOp::Pow),
             ])
         );
         assert_eq!(
             syntaxify("x * -2"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::Number(-2.0),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::Number(-2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("4/-1.33"),
             Ok(vec![
-                SyntaxNode::Number(4.0),
-                SyntaxNode::Number(-1.33),
-                SyntaxNode::BinaryOp(BinaryOp::Div),
+                AstNodeKind::Number(4.0),
+                AstNodeKind::Number(-1.33),
+                AstNodeKind::BinaryOp(BinaryOp::Div),
             ])
         );
         assert_eq!(
             syntaxify("sqrt(16)"),
             Ok(vec![
-                SyntaxNode::Number(16.0),
-                SyntaxNode::NativeFunction(NativeFunction::Sqrt, 1),
+                AstNodeKind::Number(16.0),
+                AstNodeKind::NativeFunction(NativeFunction::Sqrt, 1),
             ])
         );
         assert_eq!(
             syntaxify("abs(-5)"),
             Ok(vec![
-                SyntaxNode::Number(-5.0),
-                SyntaxNode::NativeFunction(NativeFunction::Abs, 1),
+                AstNodeKind::Number(-5.0),
+                AstNodeKind::NativeFunction(NativeFunction::Abs, 1),
             ])
         );
         assert_eq!(
             syntaxify("x^2 - y^2"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::Number(2.0),
-                SyntaxNode::BinaryOp(BinaryOp::Pow),
-                SyntaxNode::Variable(TestVar::Y),
-                SyntaxNode::Number(2.0),
-                SyntaxNode::BinaryOp(BinaryOp::Pow),
-                SyntaxNode::BinaryOp(BinaryOp::Sub),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Pow),
+                AstNodeKind::Variable(TestVar::Y),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Pow),
+                AstNodeKind::BinaryOp(BinaryOp::Sub),
             ])
         );
         assert_eq!(
             syntaxify("|x|"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::NativeFunction(NativeFunction::Abs, 1),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::NativeFunction(NativeFunction::Abs, 1),
             ])
         );
         assert_eq!(
             syntaxify("|-x|"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::UnaryOp(UnaryOp::Neg),
-                SyntaxNode::NativeFunction(NativeFunction::Abs, 1),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::UnaryOp(UnaryOp::Neg),
+                AstNodeKind::NativeFunction(NativeFunction::Abs, 1),
             ])
         );
         assert_eq!(
             syntaxify("4*-x"),
             Ok(vec![
-                SyntaxNode::Number(4.0),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::UnaryOp(UnaryOp::Neg),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Number(4.0),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::UnaryOp(UnaryOp::Neg),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("8.3 + -1"),
             Ok(vec![
-                SyntaxNode::Number(8.3),
-                SyntaxNode::Number(-1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
+                AstNodeKind::Number(8.3),
+                AstNodeKind::Number(-1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
             ])
         );
-        assert_eq!(syntaxify("++1"), Ok(vec![SyntaxNode::Number(1.0)]));
-        assert_eq!(syntaxify("+-1"), Ok(vec![SyntaxNode::Number(-1.0)]));
+        assert_eq!(syntaxify("++1"), Ok(vec![AstNodeKind::Number(1.0)]));
+        assert_eq!(syntaxify("+-1"), Ok(vec![AstNodeKind::Number(-1.0)]));
         assert_eq!(
             syntaxify("x + +1"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
             syntaxify("-1^2"),
             Ok(vec![
-                SyntaxNode::Number(1.0),
-                SyntaxNode::Number(2.0),
-                SyntaxNode::BinaryOp(BinaryOp::Pow),
-                SyntaxNode::UnaryOp(UnaryOp::Neg),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Pow),
+                AstNodeKind::UnaryOp(UnaryOp::Neg),
             ])
         );
         assert_eq!(
             syntaxify("x!y"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::UnaryOp(UnaryOp::Fac),
-                SyntaxNode::Variable(TestVar::Y),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::UnaryOp(UnaryOp::Fac),
+                AstNodeKind::Variable(TestVar::Y),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("sin(x!-1)"),
             Ok(vec![
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::UnaryOp(UnaryOp::Fac),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Sub),
-                SyntaxNode::NativeFunction(NativeFunction::Sin, 1),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::UnaryOp(UnaryOp::Fac),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Sub),
+                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
             ])
         );
         assert_eq!(
             syntaxify("3|x-1|/2 + 1"),
             Ok(vec![
-                SyntaxNode::Number(3.0),
-                SyntaxNode::Variable(TestVar::X),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Sub),
-                SyntaxNode::NativeFunction(NativeFunction::Abs, 1),
-                SyntaxNode::BinaryOp(BinaryOp::Mul),
-                SyntaxNode::Number(2.0),
-                SyntaxNode::BinaryOp(BinaryOp::Div),
-                SyntaxNode::Number(1.0),
-                SyntaxNode::BinaryOp(BinaryOp::Add),
+                AstNodeKind::Number(3.0),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Sub),
+                AstNodeKind::NativeFunction(NativeFunction::Abs, 1),
+                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Div),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
@@ -1647,6 +1680,34 @@ mod test {
                 at: 5..=5
             })
         );
+    }
+
+    #[test]
+    fn test_child_count() {
+        macro_rules! test {
+            ($input: expr, $cc: expr) => {{
+                let ast = parse($input).unwrap();
+                assert_eq!(
+                    ast.0.iter().map(|n| n.child_count).collect::<Vec<_>>(),
+                    $cc,
+                    "{ast:?}"
+                );
+            }};
+        }
+        test!("1", vec![0]);
+        test!("1+2", vec![0, 0, 2]);
+        test!("3*5+5", vec![0, 0, 2, 0, 4]);
+        test!("-x!", vec![0, 1, 2]);
+        test!("8*3^2-1", vec![0, 0, 0, 2, 4, 0, 6]);
+        test!("sin(x)", vec![0, 1]);
+        test!("deg2rad(170)", vec![0, 1]);
+        test!("expd(0.05, x)", vec![0, 0, 2]);
+        test!("clamp(t, x, y)", vec![0, 0, 0, 3]);
+        test!("digits(3, 3, 4, 4, 5)", vec![0, 0, 0, 0, 0, 5]);
+        test!("sin(cos(1))", vec![0, 1, 2]);
+        test!("x^2 + sin(y)", vec![0, 0, 2, 0, 1, 5]);
+        test!("sqrt(max(x, 9))", vec![0, 0, 2, 3]);
+        test!("1+max(2, x, 8y, xy+1)", vec![0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 4, 10, 12])
     }
 
     #[test]
