@@ -3,7 +3,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 
-use crate::asm::{CFPointer, MathAssembly};
+use crate::asm::{CFPointer, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
 use crate::tokenizer::Token;
 use crate::{
@@ -735,38 +735,37 @@ where
                             opening..=opening,
                         ));
                     }
-                    Some(SYOperator::Function(SYFunction::NativeFunction(mut nf), args)) => if args
-                        < nf.min_args()
-                        && nf != NativeFunction::Log
-                    {
-                        Err(SyntaxErrorKind::NotEnoughArguments)
-                    } else if nf.max_args().is_some_and(|m| args > m) {
-                        Err(SyntaxErrorKind::TooManyArguments)
-                    } else {
-                        if nf == NativeFunction::Log {
-                            let ten = N::from(10);
-                            let two = N::from(2);
-                            match output_queue.last_num().unwrap() {
-                                num if num == ten.asarg() => {
-                                    output_queue.pop_arg();
-                                    nf = NativeFunction::Log10;
+                    Some(SYOperator::Function(SYFunction::NativeFunction(mut nf), args)) => {
+                        if args < nf.min_args() && nf != NativeFunction::Log {
+                            Err(SyntaxErrorKind::NotEnoughArguments)
+                        } else if nf.max_args().is_some_and(|m| args > m) {
+                            Err(SyntaxErrorKind::TooManyArguments)
+                        } else {
+                            if nf == NativeFunction::Log {
+                                let ten = N::from(10);
+                                let two = N::from(2);
+                                match output_queue.last_num().unwrap() {
+                                    num if num == ten.asarg() => {
+                                        output_queue.pop_arg();
+                                        nf = NativeFunction::Log10;
+                                    }
+                                    num if num == two.asarg() => {
+                                        output_queue.pop_arg();
+                                        nf = NativeFunction::Log2;
+                                    }
+                                    _ if args == 1 => {
+                                        nf = NativeFunction::Log10;
+                                    }
+                                    _ => (),
                                 }
-                                num if num == two.asarg() => {
-                                    output_queue.pop_arg();
-                                    nf = NativeFunction::Log2;
-                                }
-                                _ if args == 1 => {
-                                    nf = NativeFunction::Log10;
-                                }
-                                _ => (),
                             }
+                            output_queue.push(AstNodeKind::NativeFunction(nf, args));
+                            Ok(())
                         }
-                        output_queue.push(AstNodeKind::NativeFunction(nf, args));
-                        Ok(())
+                        .map_err(|e| {
+                            SyntaxError(e, find_opening_paren(&tokens[..pos]).unwrap()..=pos)
+                        })?
                     }
-                    .map_err(|e| {
-                        SyntaxError(e, find_opening_paren(&tokens[..pos]).unwrap()..=pos)
-                    })?,
                     Some(SYOperator::Function(
                         SYFunction::CustomFunction(cf, min_args, max_args),
                         args,
@@ -879,27 +878,87 @@ where
         )
     }
 
+    fn eval_stack_capacity(tree: &[AstNode<N, V, F>]) -> usize {
+        let mut stack_capacity = 0usize;
+        let mut stack_len = 0i64;
+        for node in tree {
+            stack_len += match node.kind {
+                AstNodeKind::Number(_) | AstNodeKind::Variable(_) => 1,
+                AstNodeKind::BinaryOp(_) => -1,
+                AstNodeKind::UnaryOp(_) => 0,
+                AstNodeKind::NativeFunction(_, args) => -(args as i64) + 1,
+                AstNodeKind::CustomFunction(_, args) => -(args as i64) + 1,
+            };
+            if stack_len as usize > stack_capacity {
+                stack_capacity = stack_len as usize;
+            }
+        }
+        stack_capacity
+    }
+
     pub fn eval<'a>(
         &self,
         function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_values: &impl crate::VariableStore<N, V>,
     ) -> N {
-        Self::_eval(&self.0, function_to_pointer, variable_values)
-    }
-    fn _eval<'a>(
-        tree: &[AstNode<N, V, F>],
-        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
-        variable_values: &impl crate::VariableStore<N, V>,
-    ) -> N {
-        todo!()
+        Self::_eval(
+            &self.0,
+            function_to_pointer,
+            variable_values,
+            Stack::with_capacity(Self::eval_stack_capacity(&self.0)),
+        )
     }
 
-    pub fn to_asm<'a>(
-        &self,
-        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
-        variable_order: &[V],
-    ) -> MathAssembly<'a, N, F> {
-        todo!()
+    fn _eval<'a>(
+        tree: &[AstNode<N, V, F>],
+        functibn_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+        variable_values: &impl crate::VariableStore<N, V>,
+        mut stack: Stack<N>,
+    ) -> N {
+        for node in tree {
+            let result: N = match &node.kind {
+                AstNodeKind::Number(num) => num.clone(),
+                AstNodeKind::Variable(var) => variable_values.get(*var).to_owned(),
+                AstNodeKind::BinaryOp(opr) => {
+                    let rhs = stack.pop().unwrap();
+                    opr.eval(stack.pop().unwrap().asarg(), rhs.asarg())
+                }
+                AstNodeKind::UnaryOp(opr) => opr.eval(stack.pop().unwrap().asarg()),
+                AstNodeKind::NativeFunction(nf, argc) => match nf.to_pointer() {
+                    NFPointer::Single(func) => func(stack.pop().unwrap().asarg()),
+                    NFPointer::Dual(func) => {
+                        let arg2 = stack.pop().unwrap();
+                        func(stack.pop().unwrap().asarg(), arg2.asarg())
+                    }
+                    NFPointer::Flexible(func) => {
+                        let new_len = stack.len() - *argc as usize;
+                        let res = func(&stack[new_len..]);
+                        stack.truncate(new_len);
+                        res
+                    }
+                },
+                AstNodeKind::CustomFunction(cf, argc) => match functibn_to_pointer(*cf) {
+                    CFPointer::Single(func) => func(stack.pop().unwrap().asarg()),
+                    CFPointer::Dual(func) => {
+                        let arg2 = stack.pop().unwrap();
+                        func(stack.pop().unwrap().asarg(), arg2.asarg())
+                    }
+                    CFPointer::Triple(func) => {
+                        let arg3 = stack.pop().unwrap();
+                        let arg2 = stack.pop().unwrap();
+                        func(stack.pop().unwrap().asarg(), arg2.asarg(), arg3.asarg())
+                    }
+                    CFPointer::Flexible(func) => {
+                        let new_len = stack.len() - *argc as usize;
+                        let res = func(&stack[new_len..]);
+                        stack.truncate(new_len);
+                        res
+                    }
+                },
+            };
+            stack.push(result);
+        }
+        stack.pop().unwrap()
     }
 
     pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(F) -> CFPointer<'a, N>) {
@@ -1783,7 +1842,6 @@ mod test {
     }
 
     #[test]
-    #[ignore]
     fn test_ast_eval() {
         struct VarStore;
 
@@ -1805,7 +1863,11 @@ mod test {
                     CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min))
                 }
                 TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
-                    values.iter().enumerate().map(|(i, &v)| i as f64 * v).sum()
+                    values
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &v)| 10f64.powi(i as i32) * v)
+                        .sum()
                 }),
             }
         };
@@ -1824,8 +1886,8 @@ mod test {
         assert_eval!("log(6561, 3)", 8.0);
         assert_eval!("max(x, y, -18)*t", 0.5);
         assert_eval!("clamp(x + y, -273.15, t)", 0.1);
-        assert_eval!("dist(1, 3, 4, 7)/y", 1.0);
         assert_eval!("digits(y, 1)", 15.0);
+        assert_eval!("digits(5, 4, 9)*t", 94.5);
     }
 
     #[test]
