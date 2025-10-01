@@ -949,15 +949,16 @@ where
             &self.0,
             function_to_pointer,
             variable_values,
-            Stack::with_capacity(Self::eval_stack_capacity(&self.0)),
-        ).unwrap()
+            &mut Stack::with_capacity(Self::eval_stack_capacity(&self.0)),
+        )
+        .unwrap()
     }
 
     fn _eval<'a>(
         tree: &[AstNode<N, V, F>],
         functibn_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
         variable_values: &impl crate::VariableStore<N, V>,
-        mut stack: Stack<N>,
+        stack: &mut Stack<N>,
     ) -> Result<N, usize> {
         for (idx, node) in tree.iter().enumerate() {
             let mut pop = || stack.pop().ok_or(idx);
@@ -1021,7 +1022,44 @@ where
     }
 
     pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(F) -> CFPointer<'a, N>) {
-        todo!()
+        let mut varless: Vec<bool> = Vec::with_capacity(self.0.len());
+        for (idx, node) in self.0.iter().enumerate() {
+            let res = match node.kind {
+                AstNodeKind::Number(_) => true,
+                AstNodeKind::Variable(_) => false,
+                _ => self.iter_children(idx).all(|(_, i)| varless[i]),
+            };
+            varless.push(res);
+        }
+        let mut idx = self.0.len() - 1;
+        let mut stack: Stack<N> = Stack::with_capacity(0);
+        loop {
+            if varless[idx] && !matches!(self.0[idx].kind, AstNodeKind::Number(_)) {
+                let dc = self.0[idx].descendants_count;
+                let start = idx - dc;
+                let required_capacity = Self::eval_stack_capacity(&self.0[start..=idx]);
+                if required_capacity > stack.capacity() {
+                    stack.reserve(required_capacity - stack.capacity());
+                }
+                self.0[start] = AstNode::new(
+                    AstNodeKind::Number(
+                        Self::_eval(&self.0[start..=idx], &function_to_pointer, &(), &mut stack)
+                            .unwrap(),
+                    ),
+                    0,
+                );
+                self.0.drain(start + 1..=idx);
+                if idx > dc {
+                    idx -= dc + 1;
+                } else {
+                    break;
+                }
+            } else if idx > 0 {
+                idx -= 1;
+            } else {
+                break;
+            }
+        }
     }
 
     pub fn displacing_simplification(&mut self) {
@@ -1890,22 +1928,101 @@ mod test {
             ]
         );
     }
+
+    fn ka2na<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+        kinds: impl Iterator<Item = AstNodeKind<N, V, F>>,
+    ) -> Vec<AstNode<N, V, F>> {
+        let mut res = Vec::new();
+        for k in kinds {
+            res.push(calc_child_count(&res, k));
+        }
+        res
+    }
+
+    fn testfunc2pointer(cf: TestFunc) -> CFPointer<'static, f64> {
+        match cf {
+            TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
+            TestFunc::ExpD => CFPointer::Dual(&|l: f64, x: f64| l * (-l * x).exp()),
+            TestFunc::Clamp => CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min)),
+            TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| 10f64.powi(i as i32) * v)
+                    .sum()
+            }),
+        }
+    }
+
     #[test]
     fn test_aot_evaluation() {
-        macro_rules! compare {
-            ($i1:literal, $i2:literal) => {
-                let mut syn1 = parse($i1).unwrap();
-                syn1.aot_evaluation(|_| CFPointer::Single(&|_| 0.0));
-                let syn2 = parse($i2).unwrap();
-                assert_eq!(format!("{}", syn1), format!("{}", syn2));
+        macro_rules! test {
+            ($pre: expr, $post: expr) => {
+                let mut ast = PostfixMathAst::<f64, TestVar, TestFunc>(ka2na($pre.into_iter()));
+                ast.aot_evaluation(testfunc2pointer);
+                assert_eq!(ast.0.into_iter().map(|n| n.kind).collect::<Vec<_>>(), $post);
             };
         }
-        compare!("16/8+11", "13");
-        compare!("sqrt(0)", "0");
-        compare!("sin(1/8+t)", "sin(0.125+t)");
-        compare!(
-            "max(80/5, x^2, min(1,sin(0)))+sqrt(121)",
-            "max(16, x^2, 0)+11"
+        test!(
+            [
+                AstNodeKind::Number(16.0),
+                AstNodeKind::Number(8.0),
+                AstNodeKind::BinaryOp(BinaryOp::Div),
+                AstNodeKind::Number(11.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
+            ],
+            vec![AstNodeKind::Number(13.0)]
+        );
+        test!(
+            [
+                AstNodeKind::Number(9.0),
+                AstNodeKind::NativeFunction(NativeFunction::Sqrt, 1),
+            ],
+            vec![AstNodeKind::Number(3.0)]
+        );
+        test!(
+            [
+                AstNodeKind::Number(1.0),
+                AstNodeKind::Number(8.0),
+                AstNodeKind::BinaryOp(BinaryOp::Div),
+                AstNodeKind::Variable(TestVar::T),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
+            ],
+            vec![
+                AstNodeKind::Number(0.125),
+                AstNodeKind::Variable(TestVar::T),
+                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
+            ]
+        );
+        test!(
+            [
+                AstNodeKind::Number(80.0),
+                AstNodeKind::Number(5.0),
+                AstNodeKind::BinaryOp(BinaryOp::Div),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Pow),
+                AstNodeKind::Number(1.0),
+                AstNodeKind::Number(0.0),
+                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
+                AstNodeKind::NativeFunction(NativeFunction::Min, 2),
+                AstNodeKind::NativeFunction(NativeFunction::Max, 3),
+                AstNodeKind::Number(121.0),
+                AstNodeKind::NativeFunction(NativeFunction::Sqrt, 1),
+                AstNodeKind::BinaryOp(BinaryOp::Add)
+            ],
+            vec![
+                AstNodeKind::Number(16.0),
+                AstNodeKind::Variable(TestVar::X),
+                AstNodeKind::Number(2.0),
+                AstNodeKind::BinaryOp(BinaryOp::Pow),
+                AstNodeKind::Number(0.0),
+                AstNodeKind::NativeFunction(NativeFunction::Max, 3),
+                AstNodeKind::Number(11.0),
+                AstNodeKind::BinaryOp(BinaryOp::Add)
+            ]
         );
     }
 
@@ -1973,25 +2090,12 @@ mod test {
             }
         }
 
-        let cf2p = |cf: TestFunc| -> CFPointer<'_, f64> {
-            match cf {
-                TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
-                TestFunc::ExpD => CFPointer::Dual(&|l: f64, x: f64| l * (-l * x).exp()),
-                TestFunc::Clamp => {
-                    CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min))
-                }
-                TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
-                    values
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &v)| 10f64.powi(i as i32) * v)
-                        .sum()
-                }),
-            }
-        };
         macro_rules! assert_eval {
             ($expr: literal, $res: literal) => {
-                assert_eq!(parse($expr).unwrap().eval(cf2p, &VarStore), $res);
+                assert_eq!(
+                    parse($expr).unwrap().eval(testfunc2pointer, &VarStore),
+                    $res
+                );
             };
         }
 
