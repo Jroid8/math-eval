@@ -842,6 +842,38 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ChildNodeIter<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
+    tree: &'a PostfixMathAst<N, V, F>,
+    pos: usize,
+    count: u8,
+}
+
+impl<'a, N, V, F> Iterator for ChildNodeIter<'a, N, V, F>
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    type Item = (&'a AstNode<N, V, F>, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count == 0 {
+            return None;
+        }
+        self.count -= 1;
+        let idx = self.pos;
+        let cur = &self.tree.0[self.pos];
+        if cur.descendants_count < self.pos {
+            self.pos -= cur.descendants_count + 1;
+        } else {
+            debug_assert_eq!(cur.descendants_count, self.pos);
+            debug_assert_eq!(self.count, 0);
+        }
+        Some((cur, idx))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PostfixMathAst<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
     pub(crate) Vec<AstNode<N, V, F>>,
@@ -973,6 +1005,19 @@ where
         }
         stack.pop().ok_or(0)
     }
+
+    pub fn iter_children<'a>(&'a self, target: usize) -> ChildNodeIter<'a, N, V, F> {
+        let cc = match self.0[target].kind {
+            AstNodeKind::Number(_) | AstNodeKind::Variable(_) => 0,
+            AstNodeKind::BinaryOp(_) => 2,
+            AstNodeKind::UnaryOp(_) => 1,
+            AstNodeKind::NativeFunction(_, argc) | AstNodeKind::CustomFunction(_, argc) => argc,
+        };
+        ChildNodeIter {
+            tree: self,
+            pos: target.wrapping_sub(1),
+            count: cc,
+        }
     }
 
     pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(F) -> CFPointer<'a, N>) {
@@ -1789,6 +1834,62 @@ mod test {
         )
     }
 
+    #[test]
+    fn test_child_node_iter() {
+        let ast = PostfixMathAst::<f64, TestVar, TestFunc>(
+            [
+                (AstNodeKind::Variable(TestVar::T), 0),
+                (AstNodeKind::Number(100.0), 0),
+                (AstNodeKind::BinaryOp(BinaryOp::Mul), 2),
+                (AstNodeKind::Number(2.0), 0),
+                (AstNodeKind::Variable(TestVar::X), 0),
+                (AstNodeKind::BinaryOp(BinaryOp::Mul), 2),
+                (AstNodeKind::Variable(TestVar::Y), 0),
+                (AstNodeKind::Number(7.1), 0),
+                (AstNodeKind::BinaryOp(BinaryOp::Mul), 2),
+                (AstNodeKind::BinaryOp(BinaryOp::Sub), 6),
+                (AstNodeKind::Number(0.0), 0),
+                (AstNodeKind::NativeFunction(NativeFunction::Max, 3), 11),
+            ]
+            .into_iter()
+            .map(|(k, cc)| AstNode::new(k, cc))
+            .collect(),
+        );
+        let iter_children = |idx| {
+            ast.iter_children(idx)
+                .map(|(n, i)| (n.kind, i))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            iter_children(2),
+            vec![
+                (AstNodeKind::Number(100.0), 1),
+                (AstNodeKind::Variable(TestVar::T), 0),
+            ]
+        );
+        assert_eq!(
+            iter_children(5),
+            vec![
+                (AstNodeKind::Variable(TestVar::X), 4),
+                (AstNodeKind::Number(2.0), 3),
+            ]
+        );
+        assert_eq!(
+            iter_children(9),
+            vec![
+                (AstNodeKind::BinaryOp(BinaryOp::Mul), 8),
+                (AstNodeKind::BinaryOp(BinaryOp::Mul), 5),
+            ]
+        );
+        assert_eq!(
+            iter_children(11),
+            vec![
+                (AstNodeKind::Number(0.0), 10),
+                (AstNodeKind::BinaryOp(BinaryOp::Sub), 9),
+                (AstNodeKind::BinaryOp(BinaryOp::Mul), 2)
+            ]
+        );
+    }
     #[test]
     fn test_aot_evaluation() {
         macro_rules! compare {
