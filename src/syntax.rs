@@ -34,7 +34,7 @@ where
     F: FunctionIdentifier,
 {
     pub kind: AstNodeKind<N, V, F>,
-    pub child_count: usize,
+    pub descendants_count: usize,
 }
 
 impl<N, V, F> AstNode<N, V, F>
@@ -43,8 +43,11 @@ where
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    fn new(kind: AstNodeKind<N, V, F>, child_count: usize) -> Self {
-        AstNode { kind, child_count }
+    fn new(kind: AstNodeKind<N, V, F>, descendants_count: usize) -> Self {
+        AstNode {
+            kind,
+            descendants_count,
+        }
     }
 }
 
@@ -235,6 +238,25 @@ where
     }
 }
 
+fn calc_child_count<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+    nodes: &[AstNode<N, V, F>],
+    kind: AstNodeKind<N, V, F>,
+) -> AstNode<N, V, F>
+where
+{
+    let arg_cons = match kind {
+        AstNodeKind::Number(_) | AstNodeKind::Variable(_) => 0,
+        AstNodeKind::UnaryOp(_) => 1,
+        AstNodeKind::BinaryOp(_) => 2,
+        AstNodeKind::NativeFunction(_, a) | AstNodeKind::CustomFunction(_, a) => a,
+    };
+    let mut dc = 0;
+    for ac in 0..arg_cons {
+        dc += nodes[nodes.len() - dc - 1].descendants_count + 1;
+    }
+    AstNode::new(kind, dc)
+}
+
 struct SyAstOutput<N, V, F>(Vec<AstNode<N, V, F>>)
 where
     N: MathEvalNumber,
@@ -263,17 +285,7 @@ where
         PostfixMathAst(self.0)
     }
     fn push(&mut self, kind: AstNodeKind<N, V, F>) {
-        let arg_cons = match kind {
-            AstNodeKind::Number(_) | AstNodeKind::Variable(_) => 0,
-            AstNodeKind::UnaryOp(_) => 1,
-            AstNodeKind::BinaryOp(_) => 2,
-            AstNodeKind::NativeFunction(_, a) | AstNodeKind::CustomFunction(_, a) => a,
-        };
-        let mut child_count = 0;
-        for ac in 0..arg_cons {
-            child_count += self.0[self.0.len() - child_count - 1].child_count + 1;
-        }
-        self.0.push(AstNode::new(kind, child_count))
+        self.0.push(calc_child_count(&self.0, kind))
     }
     fn pop_arg(&mut self) -> Option<AstNodeKind<N, V, F>> {
         self.0.pop().map(|n| n.kind)
@@ -1744,12 +1756,15 @@ mod test {
     }
 
     #[test]
-    fn test_child_count() {
+    fn test_descendants_count() {
         macro_rules! test {
             ($input: expr, $cc: expr) => {{
                 let ast = parse($input).unwrap();
                 assert_eq!(
-                    ast.0.iter().map(|n| n.child_count).collect::<Vec<_>>(),
+                    ast.0
+                        .iter()
+                        .map(|n| n.descendants_count)
+                        .collect::<Vec<_>>(),
                     $cc,
                     "{ast:?}"
                 );
