@@ -5,6 +5,7 @@ use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
+use crate::postfix_tree::{Arity, IterativeTreeBuilder, PostfixTree};
 use crate::tokenizer::Token;
 use crate::{
     BinaryOp, FunctionIdentifier, NAME_LIMIT, ParsingError, ParsingErrorKind, UnaryOp,
@@ -12,7 +13,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum AstNodeKind<N, V, F>
+pub enum AstNode<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -26,27 +27,18 @@ where
     CustomFunction(F, u8),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AstNode<N, V, F>
+impl<N, V, F> Arity for AstNode<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    pub kind: AstNodeKind<N, V, F>,
-    pub descendants_count: usize,
-}
-
-impl<N, V, F> AstNode<N, V, F>
-where
-    N: MathEvalNumber,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
-    fn new(kind: AstNodeKind<N, V, F>, descendants_count: usize) -> Self {
-        AstNode {
-            kind,
-            descendants_count,
+    fn arity(&self) -> u8 {
+        match self {
+            AstNode::Number(_) | AstNode::Variable(_) => 0,
+            AstNode::BinaryOp(_) => 2,
+            AstNode::UnaryOp(_) => 1,
+            AstNode::NativeFunction(_, argc) | AstNode::CustomFunction(_, argc) => *argc,
         }
     }
 }
@@ -169,22 +161,22 @@ where
     fn is_right_associative(&self) -> bool {
         matches!(self, SYOperator::BinaryOp(BinaryOp::Pow))
     }
-    fn to_syn<N, V>(self) -> AstNodeKind<N, V, F>
+    fn to_syn<N, V>(self) -> AstNode<N, V, F>
     where
         N: MathEvalNumber,
         V: VariableIdentifier,
     {
         match self {
-            SYOperator::BinaryOp(opr) => AstNodeKind::BinaryOp(opr),
-            SYOperator::UnaryOp(opr) => AstNodeKind::UnaryOp(opr),
+            SYOperator::BinaryOp(opr) => AstNode::BinaryOp(opr),
+            SYOperator::UnaryOp(opr) => AstNode::UnaryOp(opr),
             SYOperator::Function(SYFunction::NativeFunction(nf), args) => {
-                AstNodeKind::NativeFunction(nf, args)
+                AstNode::NativeFunction(nf, args)
             }
             SYOperator::Function(SYFunction::CustomFunction(cf, _, _), args) => {
-                AstNodeKind::CustomFunction(cf, args)
+                AstNode::CustomFunction(cf, args)
             }
             SYOperator::Function(SYFunction::PipeAbs, _) => {
-                AstNodeKind::NativeFunction(NativeFunction::Abs, 1)
+                AstNode::NativeFunction(NativeFunction::Abs, 1)
             }
             SYOperator::Parentheses => unreachable!(),
         }
@@ -214,8 +206,8 @@ where
 
     fn pop_opr(&mut self, operator_stack: &mut Vec<SYOperator<F>>);
     fn make(self) -> Self::Output;
-    fn push(&mut self, node: AstNodeKind<N, V, F>);
-    fn pop_arg(&mut self) -> Option<AstNodeKind<N, V, F>>;
+    fn push(&mut self, node: AstNode<N, V, F>);
+    fn pop_arg(&mut self) -> Option<AstNode<N, V, F>>;
     fn last_num<'a>(&'a self) -> Option<N::AsArg<'a>>;
 
     fn push_opr(&mut self, operator: SYOperator<F>, operator_stack: &mut Vec<SYOperator<F>>) {
@@ -238,26 +230,7 @@ where
     }
 }
 
-fn calc_child_count<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
-    nodes: &[AstNode<N, V, F>],
-    kind: AstNodeKind<N, V, F>,
-) -> AstNode<N, V, F>
-where
-{
-    let arg_cons = match kind {
-        AstNodeKind::Number(_) | AstNodeKind::Variable(_) => 0,
-        AstNodeKind::UnaryOp(_) => 1,
-        AstNodeKind::BinaryOp(_) => 2,
-        AstNodeKind::NativeFunction(_, a) | AstNodeKind::CustomFunction(_, a) => a,
-    };
-    let mut dc = 0;
-    for ac in 0..arg_cons {
-        dc += nodes[nodes.len() - dc - 1].descendants_count + 1;
-    }
-    AstNode::new(kind, dc)
-}
-
-struct SyAstOutput<N, V, F>(Vec<AstNode<N, V, F>>)
+struct SyAstOutput<N, V, F>(IterativeTreeBuilder<AstNode<N, V, F>>)
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -269,11 +242,11 @@ where
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    type Output = PostfixMathAst<N, V, F>;
+    type Output = MathAst<N, V, F>;
 
     fn pop_opr(&mut self, operator_stack: &mut Vec<SYOperator<F>>) {
         let opr = operator_stack.pop().unwrap();
-        if let Some(AstNodeKind::Number(num)) = self.0.last_mut().map(|n| &mut n.kind)
+        if let Some(AstNode::Number(num)) = self.0.last_mut()
             && opr == SYOperator::UnaryOp(UnaryOp::Neg)
         {
             *num = -num.clone();
@@ -282,16 +255,16 @@ where
         }
     }
     fn make(self) -> Self::Output {
-        PostfixMathAst(self.0)
+        MathAst(self.0.build())
     }
-    fn push(&mut self, kind: AstNodeKind<N, V, F>) {
-        self.0.push(calc_child_count(&self.0, kind))
+    fn push(&mut self, kind: AstNode<N, V, F>) {
+        self.0.push(kind)
     }
-    fn pop_arg(&mut self) -> Option<AstNodeKind<N, V, F>> {
-        self.0.pop().map(|n| n.kind)
+    fn pop_arg(&mut self) -> Option<AstNode<N, V, F>> {
+        self.0.pop()
     }
     fn last_num<'a>(&'a self) -> Option<<N as MathEvalNumber>::AsArg<'a>> {
-        if let Some(AstNodeKind::Number(num)) = self.0.last().map(|n| &n.kind) {
+        if let Some(AstNode::Number(num)) = self.0.last() {
             Some(num.asarg())
         } else {
             None
@@ -339,11 +312,11 @@ where
         debug_assert_eq!(self.args.len(), 1);
         self.args.pop().unwrap()
     }
-    fn push(&mut self, node: AstNodeKind<N, V, F>) {
+    fn push(&mut self, node: AstNode<N, V, F>) {
         let res = match node {
-            AstNodeKind::Number(num) => num,
-            AstNodeKind::Variable(var) => self.variable_store.get(var).to_owned(),
-            AstNodeKind::NativeFunction(nf, args) => match nf.to_pointer::<N>() {
+            AstNode::Number(num) => num,
+            AstNode::Variable(var) => self.variable_store.get(var).to_owned(),
+            AstNode::NativeFunction(nf, args) => match nf.to_pointer::<N>() {
                 NFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
                 NFPointer::Dual(func) => {
                     let rhs = self.args.pop().unwrap();
@@ -355,7 +328,7 @@ where
                     res
                 }
             },
-            AstNodeKind::CustomFunction(cf, args) => match (self.cf2pointer)(cf) {
+            AstNode::CustomFunction(cf, args) => match (self.cf2pointer)(cf) {
                 CFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
                 CFPointer::Dual(func) => {
                     let rhs = self.args.pop().unwrap();
@@ -372,12 +345,12 @@ where
                     res
                 }
             },
-            AstNodeKind::BinaryOp(_) | AstNodeKind::UnaryOp(_) => panic!(),
+            AstNode::BinaryOp(_) | AstNode::UnaryOp(_) => panic!(),
         };
         self.args.push(res);
     }
-    fn pop_arg(&mut self) -> Option<AstNodeKind<N, V, F>> {
-        self.args.pop().map(|num| AstNodeKind::Number(num))
+    fn pop_arg(&mut self) -> Option<AstNode<N, V, F>> {
+        self.args.pop().map(|num| AstNode::Number(num))
     }
     fn last_num<'c>(&'c self) -> Option<N::AsArg<'c>> {
         self.args.last().map(|num| num.asarg())
@@ -639,7 +612,7 @@ where
         match token {
             Token::Number(num) => output_queue.push(
                 num.parse::<N>()
-                    .map(AstNodeKind::Number)
+                    .map(AstNode::Number)
                     .map_err(|_| SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos))?,
             ),
             Token::Variable(var) => {
@@ -648,8 +621,8 @@ where
                 }
                 if let Some(node) = N::parse_constant(var)
                     .or_else(|| custom_constant_parser(var))
-                    .map(|c| AstNodeKind::Number(c))
-                    .or_else(|| custom_variable_parser(var).map(|var| AstNodeKind::Variable(var)))
+                    .map(|c| AstNode::Number(c))
+                    .or_else(|| custom_variable_parser(var).map(|var| AstNode::Variable(var)))
                 {
                     output_queue.push(node)
                 } else if let Some(segments) =
@@ -658,8 +631,8 @@ where
                     let mut first = true;
                     for seg in segments {
                         output_queue.push(match seg {
-                            Segment::Constant(c) => AstNodeKind::Number(c),
-                            Segment::Variable(v) => AstNodeKind::Variable(v),
+                            Segment::Constant(c) => AstNode::Number(c),
+                            Segment::Variable(v) => AstNode::Variable(v),
                         });
                         if first {
                             first = false;
@@ -709,8 +682,8 @@ where
                 ) {
                     for seg in segments {
                         output_queue.push(match seg {
-                            Segment::Constant(c) => AstNodeKind::Number(c),
-                            Segment::Variable(v) => AstNodeKind::Variable(v),
+                            Segment::Constant(c) => AstNode::Number(c),
+                            Segment::Variable(v) => AstNode::Variable(v),
                         });
                         output_queue
                             .push_opr(SYOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
@@ -771,7 +744,7 @@ where
                                     _ => (),
                                 }
                             }
-                            output_queue.push(AstNodeKind::NativeFunction(nf, args));
+                            output_queue.push(AstNode::NativeFunction(nf, args));
                             Ok(())
                         }
                         .map_err(|e| {
@@ -786,7 +759,7 @@ where
                     } else if max_args.is_some_and(|m| args > m) {
                         Err(SyntaxErrorKind::TooManyArguments)
                     } else {
-                        output_queue.push(AstNodeKind::CustomFunction(cf, args));
+                        output_queue.push(AstNode::CustomFunction(cf, args));
                         Ok(())
                     }
                     .map_err(|e| {
@@ -813,7 +786,7 @@ where
                             opening_pipe..=pos,
                         ));
                     }
-                    output_queue.push(AstNodeKind::NativeFunction(NativeFunction::Abs, 1));
+                    output_queue.push(AstNode::NativeFunction(NativeFunction::Abs, 1));
                 } else {
                     operator_stack.push(SYOperator::Function(SYFunction::PipeAbs, 0));
                 }
@@ -842,44 +815,12 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ChildNodeIter<'a, N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier> {
-    tree: &'a PostfixMathAst<N, V, F>,
-    pos: usize,
-    count: u8,
-}
-
-impl<'a, N, V, F> Iterator for ChildNodeIter<'a, N, V, F>
-where
-    N: MathEvalNumber,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
-    type Item = (&'a AstNode<N, V, F>, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.count == 0 {
-            return None;
-        }
-        self.count -= 1;
-        let idx = self.pos;
-        let cur = &self.tree.0[self.pos];
-        if cur.descendants_count < self.pos {
-            self.pos -= cur.descendants_count + 1;
-        } else {
-            debug_assert_eq!(cur.descendants_count, self.pos);
-            debug_assert_eq!(self.count, 0);
-        }
-        Some((cur, idx))
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PostfixMathAst<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
-    pub(crate) Vec<AstNode<N, V, F>>,
+pub struct MathAst<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+    PostfixTree<AstNode<N, V, F>>,
 );
 
-impl<V, N, F> PostfixMathAst<N, V, F>
+impl<V, N, F> MathAst<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -890,15 +831,16 @@ where
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
-    ) -> Result<PostfixMathAst<N, V, F>, SyntaxError> {
+    ) -> Result<MathAst<N, V, F>, SyntaxError> {
         parse_or_eval(
-            SyAstOutput(Vec::new()),
+            SyAstOutput(IterativeTreeBuilder::new()),
             tokens,
             custom_constant_parser,
             custom_function_parser,
             custom_variable_parser,
         )
     }
+
     pub fn parse_and_eval<'a, 'b, 'c, S: VariableStore<N, V>>(
         tokens: &'a [Token<'a>],
         custom_constant_parser: impl Fn(&str) -> Option<N>,
@@ -922,16 +864,20 @@ where
         )
     }
 
-    fn eval_stack_capacity(tree: &[AstNode<N, V, F>]) -> usize {
+    pub fn from_nodes(nodes: impl IntoIterator<Item = AstNode<N, V, F>>) -> Self {
+        MathAst(PostfixTree::from_items(nodes))
+    }
+
+    fn eval_stack_capacity<'a>(tree: impl IntoIterator<Item = &'a AstNode<N, V, F>>) -> usize {
         let mut stack_capacity = 0usize;
         let mut stack_len = 0i64;
         for node in tree {
-            stack_len += match node.kind {
-                AstNodeKind::Number(_) | AstNodeKind::Variable(_) => 1,
-                AstNodeKind::BinaryOp(_) => -1,
-                AstNodeKind::UnaryOp(_) => 0,
-                AstNodeKind::NativeFunction(_, args) => -(args as i64) + 1,
-                AstNodeKind::CustomFunction(_, args) => -(args as i64) + 1,
+            stack_len += match node {
+                AstNode::Number(_) | AstNode::Variable(_) => 1,
+                AstNode::BinaryOp(_) => -1,
+                AstNode::UnaryOp(_) => 0,
+                AstNode::NativeFunction(_, args) => -(*args as i64) + 1,
+                AstNode::CustomFunction(_, args) => -(*args as i64) + 1,
             };
             if stack_len as usize > stack_capacity {
                 stack_capacity = stack_len as usize;
@@ -946,31 +892,31 @@ where
         variable_values: &impl crate::VariableStore<N, V>,
     ) -> N {
         Self::_eval(
-            &self.0,
+            self.0.postorder_iter(),
             function_to_pointer,
             variable_values,
-            &mut Stack::with_capacity(Self::eval_stack_capacity(&self.0)),
+            &mut Stack::with_capacity(Self::eval_stack_capacity(self.0.postorder_iter())),
         )
         .unwrap()
     }
 
-    fn _eval<'a>(
-        tree: &[AstNode<N, V, F>],
-        functibn_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+    fn _eval<'a, 'b>(
+        tree: impl IntoIterator<Item = &'a AstNode<N, V, F>>,
+        functibn_to_pointer: impl Fn(F) -> CFPointer<'b, N>,
         variable_values: &impl crate::VariableStore<N, V>,
         stack: &mut Stack<N>,
     ) -> Result<N, usize> {
-        for (idx, node) in tree.iter().enumerate() {
+        for (idx, node) in tree.into_iter().enumerate() {
             let mut pop = || stack.pop().ok_or(idx);
-            let result: N = match &node.kind {
-                AstNodeKind::Number(num) => num.clone(),
-                AstNodeKind::Variable(var) => variable_values.get(*var).to_owned(),
-                AstNodeKind::BinaryOp(opr) => {
+            let result: N = match node {
+                AstNode::Number(num) => num.clone(),
+                AstNode::Variable(var) => variable_values.get(*var).to_owned(),
+                AstNode::BinaryOp(opr) => {
                     let rhs = pop()?;
                     opr.eval(pop()?.asarg(), rhs.asarg())
                 }
-                AstNodeKind::UnaryOp(opr) => opr.eval(pop()?.asarg()),
-                AstNodeKind::NativeFunction(nf, argc) => match nf.to_pointer() {
+                AstNode::UnaryOp(opr) => opr.eval(pop()?.asarg()),
+                AstNode::NativeFunction(nf, argc) => match nf.to_pointer() {
                     NFPointer::Single(func) => func(pop()?.asarg()),
                     NFPointer::Dual(func) => {
                         let arg2 = pop()?;
@@ -983,7 +929,7 @@ where
                         res
                     }
                 },
-                AstNodeKind::CustomFunction(cf, argc) => match functibn_to_pointer(*cf) {
+                AstNode::CustomFunction(cf, argc) => match functibn_to_pointer(*cf) {
                     CFPointer::Single(func) => func(pop()?.asarg()),
                     CFPointer::Dual(func) => {
                         let arg2 = pop()?;
@@ -1007,50 +953,39 @@ where
         stack.pop().ok_or(0)
     }
 
-    pub fn iter_children<'a>(&'a self, target: usize) -> ChildNodeIter<'a, N, V, F> {
-        let cc = match self.0[target].kind {
-            AstNodeKind::Number(_) | AstNodeKind::Variable(_) => 0,
-            AstNodeKind::BinaryOp(_) => 2,
-            AstNodeKind::UnaryOp(_) => 1,
-            AstNodeKind::NativeFunction(_, argc) | AstNodeKind::CustomFunction(_, argc) => argc,
-        };
-        ChildNodeIter {
-            tree: self,
-            pos: target.wrapping_sub(1),
-            count: cc,
-        }
-    }
-
     pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(F) -> CFPointer<'a, N>) {
         let mut varless: Vec<bool> = Vec::with_capacity(self.0.len());
-        for (idx, node) in self.0.iter().enumerate() {
-            let res = match node.kind {
-                AstNodeKind::Number(_) => true,
-                AstNodeKind::Variable(_) => false,
-                _ => self.iter_children(idx).all(|(_, i)| varless[i]),
+        for (idx, node) in self.0.postorder_iter().enumerate() {
+            let res = match node {
+                AstNode::Number(_) => true,
+                AstNode::Variable(_) => false,
+                _ => self.0.iter_children(idx).all(|(_, i)| varless[i]),
             };
             varless.push(res);
         }
         let mut idx = self.0.len() - 1;
         let mut stack: Stack<N> = Stack::with_capacity(0);
         loop {
-            if varless[idx] && !matches!(self.0[idx].kind, AstNodeKind::Number(_)) {
-                let dc = self.0[idx].descendants_count;
-                let start = idx - dc;
-                let required_capacity = Self::eval_stack_capacity(&self.0[start..=idx]);
+            if varless[idx] && !matches!(self.0[idx], AstNode::Number(_)) {
+                let required_capacity =
+                    Self::eval_stack_capacity(self.0.postorder_subtree_iter(idx));
                 if required_capacity > stack.capacity() {
                     stack.reserve(required_capacity - stack.capacity());
                 }
-                self.0[start] = AstNode::new(
-                    AstNodeKind::Number(
-                        Self::_eval(&self.0[start..=idx], &function_to_pointer, &(), &mut stack)
-                            .unwrap(),
+                self.0.replace_with_unit(
+                    AstNode::Number(
+                        Self::_eval(
+                            self.0.postorder_subtree_iter(idx),
+                            &function_to_pointer,
+                            &(),
+                            &mut stack,
+                        )
+                        .unwrap(),
                     ),
-                    0,
+                    idx,
                 );
-                self.0.drain(start + 1..=idx);
-                if idx > dc {
-                    idx -= dc + 1;
+                if let Some(i) = self.0.subtree_start(idx).checked_sub(1) {
+                    idx = i;
                 } else {
                     break;
                 }
@@ -1072,12 +1007,12 @@ where
     }
 
     #[allow(dead_code)]
-    fn verify(tree: &[AstNodeKind<N, V, F>], cf_bounds: impl Fn(F) -> (u8, Option<u8>)) -> bool {
+    fn verify(tree: &[AstNode<N, V, F>], cf_bounds: impl Fn(F) -> (u8, Option<u8>)) -> bool {
         todo!()
     }
 }
 
-impl<V, N, F> Display for PostfixMathAst<N, V, F>
+impl<V, N, F> Display for MathAst<N, V, F>
 where
     N: MathEvalNumber + Display,
     V: VariableIdentifier + Display,
@@ -1089,7 +1024,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::f64::consts::*;
 
     use super::*;
@@ -1271,9 +1206,9 @@ mod test {
         );
     }
 
-    fn parse(input: &str) -> Result<PostfixMathAst<f64, TestVar, TestFunc>, ParsingError> {
+    fn parse(input: &str) -> Result<MathAst<f64, TestVar, TestFunc>, ParsingError> {
         let tokens = TokenStream::new(input).map_err(|e| e.to_general())?.0;
-        PostfixMathAst::new(
+        MathAst::new(
             &tokens,
             |inp| match inp {
                 "c" => Some(299792458.0),
@@ -1298,360 +1233,358 @@ mod test {
 
     #[test]
     fn test_syntaxify() {
-        fn syntaxify(
-            input: &str,
-        ) -> Result<Vec<AstNodeKind<f64, TestVar, TestFunc>>, ParsingError> {
-            parse(input).map(|st| st.0.into_iter().map(|n| n.kind).collect())
+        fn syntaxify(input: &str) -> Result<Vec<AstNode<f64, TestVar, TestFunc>>, ParsingError> {
+            parse(input).map(|st| st.0.postorder_iter().cloned().collect::<Vec<_>>())
         }
-        assert_eq!(syntaxify("0"), Ok(vec![AstNodeKind::Number(0.0)]));
-        assert_eq!(syntaxify("(0)"), Ok(vec![AstNodeKind::Number(0.0)]));
-        assert_eq!(syntaxify("((0))"), Ok(vec![AstNodeKind::Number(0.0)]));
-        assert_eq!(syntaxify("pi"), Ok(vec![AstNodeKind::Number(PI)]));
+        assert_eq!(syntaxify("0"), Ok(vec![AstNode::Number(0.0)]));
+        assert_eq!(syntaxify("(0)"), Ok(vec![AstNode::Number(0.0)]));
+        assert_eq!(syntaxify("((0))"), Ok(vec![AstNode::Number(0.0)]));
+        assert_eq!(syntaxify("pi"), Ok(vec![AstNode::Number(PI)]));
         assert_eq!(
             syntaxify("1+1"),
             Ok(vec![
-                AstNodeKind::Number(1.0),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNode::Number(1.0),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
             ])
         );
-        assert_eq!(syntaxify("-0.5"), Ok(vec![AstNodeKind::Number(-0.5)]));
+        assert_eq!(syntaxify("-0.5"), Ok(vec![AstNode::Number(-0.5)]));
         assert_eq!(
             syntaxify("5-3"),
             Ok(vec![
-                AstNodeKind::Number(5.0),
-                AstNodeKind::Number(3.0),
-                AstNodeKind::BinaryOp(BinaryOp::Sub),
+                AstNode::Number(5.0),
+                AstNode::Number(3.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
             ])
         );
         assert_eq!(
             syntaxify("-y!"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::Y),
-                AstNodeKind::UnaryOp(UnaryOp::Fac),
-                AstNodeKind::UnaryOp(UnaryOp::Neg),
+                AstNode::Variable(TestVar::Y),
+                AstNode::UnaryOp(UnaryOp::Fac),
+                AstNode::UnaryOp(UnaryOp::Neg),
             ])
         );
         assert_eq!(
             syntaxify("t!!"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::T),
-                AstNodeKind::UnaryOp(UnaryOp::DoubleFac)
+                AstNode::Variable(TestVar::T),
+                AstNode::UnaryOp(UnaryOp::DoubleFac)
             ])
         );
         assert_eq!(
             syntaxify("8*3+1"),
             Ok(vec![
-                AstNodeKind::Number(8.0),
-                AstNodeKind::Number(3.0),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNode::Number(8.0),
+                AstNode::Number(3.0),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
             syntaxify("12/3/2"),
             Ok(vec![
-                AstNodeKind::Number(12.0),
-                AstNodeKind::Number(3.0),
-                AstNodeKind::BinaryOp(BinaryOp::Div),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Div),
+                AstNode::Number(12.0),
+                AstNode::Number(3.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Div),
             ])
         );
         assert_eq!(
             syntaxify("8*(3+1)"),
             Ok(vec![
-                AstNodeKind::Number(8.0),
-                AstNodeKind::Number(3.0),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(8.0),
+                AstNode::Number(3.0),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("8*3^2-1"),
             Ok(vec![
-                AstNodeKind::Number(8.0),
-                AstNodeKind::Number(3.0),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Pow),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Sub),
+                AstNode::Number(8.0),
+                AstNode::Number(3.0),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
             ])
         );
         assert_eq!(
             syntaxify("2x"),
             Ok(vec![
-                AstNodeKind::Number(2.0),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("sin(14)"),
             Ok(vec![
-                AstNodeKind::Number(14.0),
-                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
+                AstNode::Number(14.0),
+                AstNode::NativeFunction(NativeFunction::Sin, 1),
             ])
         );
         assert_eq!(
             syntaxify("deg2rad(80)"),
             Ok(vec![
-                AstNodeKind::Number(80.0),
-                AstNodeKind::CustomFunction(TestFunc::Deg2Rad, 1),
+                AstNode::Number(80.0),
+                AstNode::CustomFunction(TestFunc::Deg2Rad, 1),
             ])
         );
         assert_eq!(
             syntaxify("expd(0.2, x)"),
             Ok(vec![
-                AstNodeKind::Number(0.2),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::CustomFunction(TestFunc::ExpD, 2),
+                AstNode::Number(0.2),
+                AstNode::Variable(TestVar::X),
+                AstNode::CustomFunction(TestFunc::ExpD, 2),
             ])
         );
         assert_eq!(
             syntaxify("clamp(t, y, x)"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::T),
-                AstNodeKind::Variable(TestVar::Y),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::CustomFunction(TestFunc::Clamp, 3),
+                AstNode::Variable(TestVar::T),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Variable(TestVar::X),
+                AstNode::CustomFunction(TestFunc::Clamp, 3),
             ])
         );
         assert_eq!(
             syntaxify("digits(3, 1, 5, 7, 2, x)"),
             Ok(vec![
-                AstNodeKind::Number(3.0),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::Number(5.0),
-                AstNodeKind::Number(7.0),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::CustomFunction(TestFunc::Digits, 6),
+                AstNode::Number(3.0),
+                AstNode::Number(1.0),
+                AstNode::Number(5.0),
+                AstNode::Number(7.0),
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::CustomFunction(TestFunc::Digits, 6),
             ])
         );
         assert_eq!(
             syntaxify("lb(8)"),
             Ok(vec![
-                AstNodeKind::Number(8.0),
-                AstNodeKind::NativeFunction(NativeFunction::Log2, 1),
+                AstNode::Number(8.0),
+                AstNode::NativeFunction(NativeFunction::Log2, 1),
             ])
         );
         assert_eq!(
             syntaxify("log(100)"),
             Ok(vec![
-                AstNodeKind::Number(100.0),
-                AstNodeKind::NativeFunction(NativeFunction::Log10, 1),
+                AstNode::Number(100.0),
+                AstNode::NativeFunction(NativeFunction::Log10, 1),
             ])
         );
         assert_eq!(
             syntaxify("sin(cos(0))"),
             Ok(vec![
-                AstNodeKind::Number(0.0),
-                AstNodeKind::NativeFunction(NativeFunction::Cos, 1),
-                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
+                AstNode::Number(0.0),
+                AstNode::NativeFunction(NativeFunction::Cos, 1),
+                AstNode::NativeFunction(NativeFunction::Sin, 1),
             ])
         );
         assert_eq!(
             syntaxify("x^2 + sin(y)"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Pow),
-                AstNodeKind::Variable(TestVar::Y),
-                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::Variable(TestVar::Y),
+                AstNode::NativeFunction(NativeFunction::Sin, 1),
+                AstNode::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
             syntaxify("sqrt(max(4, 9))"),
             Ok(vec![
-                AstNodeKind::Number(4.0),
-                AstNodeKind::Number(9.0),
-                AstNodeKind::NativeFunction(NativeFunction::Max, 2),
-                AstNodeKind::NativeFunction(NativeFunction::Sqrt, 1),
+                AstNode::Number(4.0),
+                AstNode::Number(9.0),
+                AstNode::NativeFunction(NativeFunction::Max, 2),
+                AstNode::NativeFunction(NativeFunction::Sqrt, 1),
             ])
         );
         assert_eq!(
             syntaxify("max(2, x, 8y, xy+1)"),
             Ok(vec![
-                AstNodeKind::Number(2.0),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::Number(8.0),
-                AstNodeKind::Variable(TestVar::Y),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::Variable(TestVar::Y),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
-                AstNodeKind::NativeFunction(NativeFunction::Max, 4),
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(8.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Variable(TestVar::X),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::NativeFunction(NativeFunction::Max, 4),
             ])
         );
         assert_eq!(
             syntaxify("2*x + 3*y"),
             Ok(vec![
-                AstNodeKind::Number(2.0),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
-                AstNodeKind::Number(3.0),
-                AstNodeKind::Variable(TestVar::Y),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(3.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
             syntaxify("log10(1000)"),
             Ok(vec![
-                AstNodeKind::Number(1000.0),
-                AstNodeKind::NativeFunction(NativeFunction::Log10, 1),
+                AstNode::Number(1000.0),
+                AstNode::NativeFunction(NativeFunction::Log10, 1),
             ])
         );
         assert_eq!(
             syntaxify("1/(2+3)"),
             Ok(vec![
-                AstNodeKind::Number(1.0),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::Number(3.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
-                AstNodeKind::BinaryOp(BinaryOp::Div),
+                AstNode::Number(1.0),
+                AstNode::Number(2.0),
+                AstNode::Number(3.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Div),
             ])
         );
         assert_eq!(
             syntaxify("e^x"),
             Ok(vec![
-                AstNodeKind::Number(E),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::BinaryOp(BinaryOp::Pow),
+                AstNode::Number(E),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Pow),
             ])
         );
         assert_eq!(
             syntaxify("x * -2"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::Number(-2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(-2.0),
+                AstNode::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("4/-1.33"),
             Ok(vec![
-                AstNodeKind::Number(4.0),
-                AstNodeKind::Number(-1.33),
-                AstNodeKind::BinaryOp(BinaryOp::Div),
+                AstNode::Number(4.0),
+                AstNode::Number(-1.33),
+                AstNode::BinaryOp(BinaryOp::Div),
             ])
         );
         assert_eq!(
             syntaxify("sqrt(16)"),
             Ok(vec![
-                AstNodeKind::Number(16.0),
-                AstNodeKind::NativeFunction(NativeFunction::Sqrt, 1),
+                AstNode::Number(16.0),
+                AstNode::NativeFunction(NativeFunction::Sqrt, 1),
             ])
         );
         assert_eq!(
             syntaxify("abs(-5)"),
             Ok(vec![
-                AstNodeKind::Number(-5.0),
-                AstNodeKind::NativeFunction(NativeFunction::Abs, 1),
+                AstNode::Number(-5.0),
+                AstNode::NativeFunction(NativeFunction::Abs, 1),
             ])
         );
         assert_eq!(
             syntaxify("x^2 - y^2"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Pow),
-                AstNodeKind::Variable(TestVar::Y),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Pow),
-                AstNodeKind::BinaryOp(BinaryOp::Sub),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::BinaryOp(BinaryOp::Sub),
             ])
         );
         assert_eq!(
             syntaxify("|x|"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::NativeFunction(NativeFunction::Abs, 1),
+                AstNode::Variable(TestVar::X),
+                AstNode::NativeFunction(NativeFunction::Abs, 1),
             ])
         );
         assert_eq!(
             syntaxify("|-x|"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::UnaryOp(UnaryOp::Neg),
-                AstNodeKind::NativeFunction(NativeFunction::Abs, 1),
+                AstNode::Variable(TestVar::X),
+                AstNode::UnaryOp(UnaryOp::Neg),
+                AstNode::NativeFunction(NativeFunction::Abs, 1),
             ])
         );
         assert_eq!(
             syntaxify("4*-x"),
             Ok(vec![
-                AstNodeKind::Number(4.0),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::UnaryOp(UnaryOp::Neg),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(4.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::UnaryOp(UnaryOp::Neg),
+                AstNode::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("8.3 + -1"),
             Ok(vec![
-                AstNodeKind::Number(8.3),
-                AstNodeKind::Number(-1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNode::Number(8.3),
+                AstNode::Number(-1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
             ])
         );
-        assert_eq!(syntaxify("++1"), Ok(vec![AstNodeKind::Number(1.0)]));
-        assert_eq!(syntaxify("+-1"), Ok(vec![AstNodeKind::Number(-1.0)]));
+        assert_eq!(syntaxify("++1"), Ok(vec![AstNode::Number(1.0)]));
+        assert_eq!(syntaxify("+-1"), Ok(vec![AstNode::Number(-1.0)]));
         assert_eq!(
             syntaxify("x + +1"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
             syntaxify("-1^2"),
             Ok(vec![
-                AstNodeKind::Number(1.0),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Pow),
-                AstNodeKind::UnaryOp(UnaryOp::Neg),
+                AstNode::Number(1.0),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::UnaryOp(UnaryOp::Neg),
             ])
         );
         assert_eq!(
             syntaxify("x!y"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::UnaryOp(UnaryOp::Fac),
-                AstNodeKind::Variable(TestVar::Y),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
+                AstNode::Variable(TestVar::X),
+                AstNode::UnaryOp(UnaryOp::Fac),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Mul),
             ])
         );
         assert_eq!(
             syntaxify("sin(x!-1)"),
             Ok(vec![
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::UnaryOp(UnaryOp::Fac),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Sub),
-                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
+                AstNode::Variable(TestVar::X),
+                AstNode::UnaryOp(UnaryOp::Fac),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::NativeFunction(NativeFunction::Sin, 1),
             ])
         );
         assert_eq!(
             syntaxify("3|x-1|/2 + 1"),
             Ok(vec![
-                AstNodeKind::Number(3.0),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Sub),
-                AstNodeKind::NativeFunction(NativeFunction::Abs, 1),
-                AstNodeKind::BinaryOp(BinaryOp::Mul),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Div),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNode::Number(3.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::NativeFunction(NativeFunction::Abs, 1),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
             ])
         );
         assert_eq!(
@@ -1838,107 +1771,6 @@ mod test {
         );
     }
 
-    #[test]
-    fn test_descendants_count() {
-        macro_rules! test {
-            ($input: expr, $cc: expr) => {{
-                let ast = parse($input).unwrap();
-                assert_eq!(
-                    ast.0
-                        .iter()
-                        .map(|n| n.descendants_count)
-                        .collect::<Vec<_>>(),
-                    $cc,
-                    "{ast:?}"
-                );
-            }};
-        }
-        test!("1", vec![0]);
-        test!("1+2", vec![0, 0, 2]);
-        test!("3*5+5", vec![0, 0, 2, 0, 4]);
-        test!("-x!", vec![0, 1, 2]);
-        test!("8*3^2-1", vec![0, 0, 0, 2, 4, 0, 6]);
-        test!("sin(x)", vec![0, 1]);
-        test!("deg2rad(170)", vec![0, 1]);
-        test!("expd(0.05, x)", vec![0, 0, 2]);
-        test!("clamp(t, x, y)", vec![0, 0, 0, 3]);
-        test!("digits(3, 3, 4, 4, 5)", vec![0, 0, 0, 0, 0, 5]);
-        test!("sin(cos(1))", vec![0, 1, 2]);
-        test!("x^2 + sin(y)", vec![0, 0, 2, 0, 1, 5]);
-        test!("sqrt(max(x, 9))", vec![0, 0, 2, 3]);
-        test!(
-            "1+max(2, x, 8y, xy+1)",
-            vec![0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 4, 10, 12]
-        )
-    }
-
-    #[test]
-    fn test_child_node_iter() {
-        let ast = PostfixMathAst::<f64, TestVar, TestFunc>(
-            [
-                (AstNodeKind::Variable(TestVar::T), 0),
-                (AstNodeKind::Number(100.0), 0),
-                (AstNodeKind::BinaryOp(BinaryOp::Mul), 2),
-                (AstNodeKind::Number(2.0), 0),
-                (AstNodeKind::Variable(TestVar::X), 0),
-                (AstNodeKind::BinaryOp(BinaryOp::Mul), 2),
-                (AstNodeKind::Variable(TestVar::Y), 0),
-                (AstNodeKind::Number(7.1), 0),
-                (AstNodeKind::BinaryOp(BinaryOp::Mul), 2),
-                (AstNodeKind::BinaryOp(BinaryOp::Sub), 6),
-                (AstNodeKind::Number(0.0), 0),
-                (AstNodeKind::NativeFunction(NativeFunction::Max, 3), 11),
-            ]
-            .into_iter()
-            .map(|(k, cc)| AstNode::new(k, cc))
-            .collect(),
-        );
-        let iter_children = |idx| {
-            ast.iter_children(idx)
-                .map(|(n, i)| (n.kind, i))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            iter_children(2),
-            vec![
-                (AstNodeKind::Number(100.0), 1),
-                (AstNodeKind::Variable(TestVar::T), 0),
-            ]
-        );
-        assert_eq!(
-            iter_children(5),
-            vec![
-                (AstNodeKind::Variable(TestVar::X), 4),
-                (AstNodeKind::Number(2.0), 3),
-            ]
-        );
-        assert_eq!(
-            iter_children(9),
-            vec![
-                (AstNodeKind::BinaryOp(BinaryOp::Mul), 8),
-                (AstNodeKind::BinaryOp(BinaryOp::Mul), 5),
-            ]
-        );
-        assert_eq!(
-            iter_children(11),
-            vec![
-                (AstNodeKind::Number(0.0), 10),
-                (AstNodeKind::BinaryOp(BinaryOp::Sub), 9),
-                (AstNodeKind::BinaryOp(BinaryOp::Mul), 2)
-            ]
-        );
-    }
-
-    fn ka2na<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
-        kinds: impl Iterator<Item = AstNodeKind<N, V, F>>,
-    ) -> Vec<AstNode<N, V, F>> {
-        let mut res = Vec::new();
-        for k in kinds {
-            res.push(calc_child_count(&res, k));
-        }
-        res
-    }
-
     fn testfunc2pointer(cf: TestFunc) -> CFPointer<'static, f64> {
         match cf {
             TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
@@ -1958,70 +1790,70 @@ mod test {
     fn test_aot_evaluation() {
         macro_rules! test {
             ($pre: expr, $post: expr) => {
-                let mut ast = PostfixMathAst::<f64, TestVar, TestFunc>(ka2na($pre.into_iter()));
+                let mut ast = MathAst::<f64, TestVar, TestFunc>::from_nodes($pre.into_iter());
                 ast.aot_evaluation(testfunc2pointer);
-                assert_eq!(ast.0.into_iter().map(|n| n.kind).collect::<Vec<_>>(), $post);
+                assert_eq!(ast.0.postorder_iter().cloned().collect::<Vec<_>>(), $post);
             };
         }
         test!(
             [
-                AstNodeKind::Number(16.0),
-                AstNodeKind::Number(8.0),
-                AstNodeKind::BinaryOp(BinaryOp::Div),
-                AstNodeKind::Number(11.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
+                AstNode::Number(16.0),
+                AstNode::Number(8.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(11.0),
+                AstNode::BinaryOp(BinaryOp::Add),
             ],
-            vec![AstNodeKind::Number(13.0)]
+            vec![AstNode::Number(13.0)]
         );
         test!(
             [
-                AstNodeKind::Number(9.0),
-                AstNodeKind::NativeFunction(NativeFunction::Sqrt, 1),
+                AstNode::Number(9.0),
+                AstNode::NativeFunction(NativeFunction::Sqrt, 1),
             ],
-            vec![AstNodeKind::Number(3.0)]
+            vec![AstNode::Number(3.0)]
         );
         test!(
             [
-                AstNodeKind::Number(1.0),
-                AstNodeKind::Number(8.0),
-                AstNodeKind::BinaryOp(BinaryOp::Div),
-                AstNodeKind::Variable(TestVar::T),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
-                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
+                AstNode::Number(1.0),
+                AstNode::Number(8.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Variable(TestVar::T),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::NativeFunction(NativeFunction::Sin, 1),
             ],
             vec![
-                AstNodeKind::Number(0.125),
-                AstNodeKind::Variable(TestVar::T),
-                AstNodeKind::BinaryOp(BinaryOp::Add),
-                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
+                AstNode::Number(0.125),
+                AstNode::Variable(TestVar::T),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::NativeFunction(NativeFunction::Sin, 1),
             ]
         );
         test!(
             [
-                AstNodeKind::Number(80.0),
-                AstNodeKind::Number(5.0),
-                AstNodeKind::BinaryOp(BinaryOp::Div),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Pow),
-                AstNodeKind::Number(1.0),
-                AstNodeKind::Number(0.0),
-                AstNodeKind::NativeFunction(NativeFunction::Sin, 1),
-                AstNodeKind::NativeFunction(NativeFunction::Min, 2),
-                AstNodeKind::NativeFunction(NativeFunction::Max, 3),
-                AstNodeKind::Number(121.0),
-                AstNodeKind::NativeFunction(NativeFunction::Sqrt, 1),
-                AstNodeKind::BinaryOp(BinaryOp::Add)
+                AstNode::Number(80.0),
+                AstNode::Number(5.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::Number(1.0),
+                AstNode::Number(0.0),
+                AstNode::NativeFunction(NativeFunction::Sin, 1),
+                AstNode::NativeFunction(NativeFunction::Min, 2),
+                AstNode::NativeFunction(NativeFunction::Max, 3),
+                AstNode::Number(121.0),
+                AstNode::NativeFunction(NativeFunction::Sqrt, 1),
+                AstNode::BinaryOp(BinaryOp::Add)
             ],
             vec![
-                AstNodeKind::Number(16.0),
-                AstNodeKind::Variable(TestVar::X),
-                AstNodeKind::Number(2.0),
-                AstNodeKind::BinaryOp(BinaryOp::Pow),
-                AstNodeKind::Number(0.0),
-                AstNodeKind::NativeFunction(NativeFunction::Max, 3),
-                AstNodeKind::Number(11.0),
-                AstNodeKind::BinaryOp(BinaryOp::Add)
+                AstNode::Number(16.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::Number(0.0),
+                AstNode::NativeFunction(NativeFunction::Max, 3),
+                AstNode::Number(11.0),
+                AstNode::BinaryOp(BinaryOp::Add)
             ]
         );
     }
