@@ -165,7 +165,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tokenizer() {
+    fn tokenizer() {
         assert_eq!(TokenStream::new("1"), Ok(TokenStream(vec![Number("1")])));
         assert_eq!(
             TokenStream::new("2291"),

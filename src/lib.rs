@@ -752,7 +752,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::collections::HashMap;
 
     use super::*;
@@ -830,7 +830,7 @@ mod test {
     }
 
     #[test]
-    fn test_eval_builder() {
+    fn eval_builder() {
         macro_rules! test {
             ($cmp: expr) => {
                 if let Some(ubfv) = $cmp {

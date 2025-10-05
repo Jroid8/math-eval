@@ -1068,10 +1068,10 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_variable() {
+    fn segment_variable() {
         macro_rules! seg_var {
             ($input: expr) => {
-                segment_variable(
+                super::segment_variable(
                     $input,
                     &|input| match input {
                         "c" => Some(299792458.0),
@@ -1137,10 +1137,10 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_function() {
+    fn segment_function() {
         macro_rules! seg_func {
             ($input: expr) => {
-                segment_function(
+                super::segment_function(
                     $input,
                     &|input| match input {
                         "c" => Some(299792458.0),
@@ -1232,7 +1232,7 @@ mod tests {
     }
 
     #[test]
-    fn test_syntaxify() {
+    fn parse_to_ast() {
         fn syntaxify(input: &str) -> Result<Vec<AstNode<f64, TestVar, TestFunc>>, ParsingError> {
             parse(input).map(|st| st.0.postorder_iter().cloned().collect::<Vec<_>>())
         }
@@ -1771,6 +1771,11 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_to_number() {
+        todo!()
+    }
+
     fn testfunc2pointer(cf: TestFunc) -> CFPointer<'static, f64> {
         match cf {
             TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
@@ -1787,7 +1792,7 @@ mod tests {
     }
 
     #[test]
-    fn test_aot_evaluation() {
+    fn aot_evaluation() {
         macro_rules! test {
             ($pre: expr, $post: expr) => {
                 let mut ast = MathAst::<f64, TestVar, TestFunc>::from_nodes($pre.into_iter());
@@ -1859,7 +1864,7 @@ mod tests {
     }
 
     #[test]
-    fn test_displacing_simplification() {
+    fn displacing_simplification() {
         macro_rules! compare {
             ($i1:literal, $i2:literal) => {
                 let mut syn1 = parse($i1).unwrap();
@@ -1876,7 +1881,7 @@ mod tests {
     }
 
     #[test]
-    fn test_syntax_display() {
+    fn syntax_display() {
         let cases = [
             "x",
             "-y!",
@@ -1909,7 +1914,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ast_eval() {
+    fn ast_eval() {
         struct VarStore;
 
         impl VariableStore<f64, TestVar> for VarStore {
@@ -1945,7 +1950,7 @@ mod tests {
     }
 
     #[test]
-    fn test_token2range() {
+    fn token2range() {
         let input = " max(pi, 1, -4)*3";
         let ts = TokenStream::new(input).unwrap().0;
         assert_eq!(token_range_to_str_range(input, &ts, 0..=0), 1..=4);

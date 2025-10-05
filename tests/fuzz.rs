@@ -72,7 +72,7 @@ fn generate_infallible_expr(target_size: usize) -> String {
 }
 
 #[test]
-fn test_operator() {
+fn operator() {
     for _ in 1..1000 {
         let opr = fastrand::choice(['+', '-', '*', '/']).unwrap();
         let x = gen_random_f64();
@@ -112,7 +112,7 @@ fn test_operator() {
 }
 
 #[test]
-fn test_all_valid() {
+fn all_valid() {
     let parser = math_eval::EvalBuilder::new()
         .add_fn_flex("mean", 2, None, &|inputs: &[f64]| {
             inputs.iter().sum::<f64>() / inputs.len() as f64
@@ -156,7 +156,7 @@ enum MyFuncs {
 }
 
 #[test]
-fn test_fuzz_symbols() {
+fn fuzz_symbols() {
     let mut symbols: Vec<String> = "1234567890+-*/^!qwertyuiopasdfghjklzxcvbnm()[]{},"
         .chars()
         .map(String::from)
@@ -204,7 +204,7 @@ fn test_fuzz_symbols() {
 }
 
 #[test]
-fn test_fuzz_all() {
+fn fuzz_all() {
     for _ in 1..100 {
         let noise: String = (0..100)
             .map(|_| fastrand::char('\x00'..char::MAX))

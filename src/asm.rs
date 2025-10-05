@@ -317,7 +317,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{
         BinaryOp, ParsingError, UnaryOp,
         asm::{Input, Instruction, MathAssembly},
@@ -360,7 +360,7 @@ mod test {
     }
 
     #[test]
-    fn test_new_mathasm() {
+    fn new_mathasm() {
         assert_eq!(
             parse("1"),
             Ok(vec![Instruction::Source(Input::Literal(1.0))])
@@ -478,7 +478,7 @@ mod test {
 
     #[test]
     #[ignore]
-    fn test_mathasm_eval() {
+    fn mathasm_eval() {
         macro_rules! assert_eval {
             ([$($x:expr),+], $res: expr) => {
                 assert_eq!(

@@ -241,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_child_node_iter() {
+    fn child_node_iter() {
         let tree = PostfixTree(Node::from_items([0, 0, 0, 2, 0, 1, 0, 0, 2, 0, 4, 2]));
         let collect_children = |idx| {
             tree.iter_children(idx)
