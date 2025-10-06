@@ -999,17 +999,116 @@ where
     }
 
     pub fn displacing_simplification(&mut self) {
-        self._displacing_simplification(BinaryOp::Add, BinaryOp::Sub, 0.into());
-        self._displacing_simplification(BinaryOp::Mul, BinaryOp::Div, 1.into());
+        fn can_simplify(head: BinaryOp, arm: BinaryOp) -> bool {
+            matches!(
+                (head, arm),
+                (BinaryOp::Add | BinaryOp::Sub, BinaryOp::Add | BinaryOp::Sub)
+                    | (BinaryOp::Mul | BinaryOp::Div, BinaryOp::Mul | BinaryOp::Div)
+            )
+        }
+        let mut symbol_space: SubtreeCollection<AstNode<N, V, F>> =
+            SubtreeCollection::from_alloc(Vec::with_capacity(0));
+        for idx in 4..self.0.len() {
+            if let AstNode::BinaryOp(head) = self.0[idx]
+                && self
+                    .0
+                    .children_iter(idx)
+                    .any(|(arm, _)| matches!(arm, AstNode::BinaryOp(_)))
+                && self
+                    .0
+                    .children_iter(idx)
+                    .map(|(node, idx)| match node {
+                        AstNode::Number(_) => 1,
+                        AstNode::BinaryOp(_) => self
+                            .0
+                            .children_iter(idx)
+                            .map(|(n, _)| matches!(n, AstNode::Number(_)) as u8)
+                            .sum(),
+                        _ => 0,
+                    })
+                    .sum::<u8>()
+                    >= 2
+                && !self.0.children_iter(idx).any(
+                    |(arm, _)| matches!(arm, AstNode::BinaryOp(arm) if !can_simplify(head, *arm)),
+                )
+            {
+                self._displacing_simplification(idx, head, &mut symbol_space);
+            }
+        }
     }
 
-    fn _displacing_simplification(&mut self, pos: BinaryOp, neg: BinaryOp, inital_value: N) {
-        todo!()
-    }
-
-    #[allow(dead_code)]
-    fn verify(tree: &[AstNode<N, V, F>], cf_bounds: impl Fn(F) -> (u8, Option<u8>)) -> bool {
-        todo!()
+    fn _displacing_simplification(
+        &mut self,
+        head_idx: usize,
+        head_opr: BinaryOp,
+        symbol_space: &mut SubtreeCollection<AstNode<N, V, F>>,
+    ) {
+        let (positive, negative, mut lhs) = match head_opr {
+            BinaryOp::Add | BinaryOp::Sub => (BinaryOp::Add, BinaryOp::Sub, N::from(0)),
+            BinaryOp::Mul | BinaryOp::Div => (BinaryOp::Mul, BinaryOp::Div, N::from(1)),
+            _ => return,
+        };
+        let apply_pos = |parent: BinaryOp, pos: usize| -> BinaryOp {
+            if pos == 0 && parent == negative {
+                negative
+            } else {
+                positive
+            }
+        };
+        let multiply_oprs = |head: BinaryOp, arm: BinaryOp| -> BinaryOp {
+            if head == arm { positive } else { negative }
+        };
+        let mut symbols: [Option<(usize, BinaryOp)>; 2] = [None, None];
+        for (arm_pos, (arm, arm_idx)) in self.0.children_iter(head_idx).enumerate() {
+            let sign = apply_pos(head_opr, arm_pos);
+            match arm {
+                AstNode::Number(num) => lhs = sign.eval(lhs.asarg(), num.asarg()),
+                AstNode::BinaryOp(arm_opr) => {
+                    for (tail_pos, (tail, tail_idx)) in self.0.children_iter(arm_idx).enumerate() {
+                        let sign = multiply_oprs(
+                            apply_pos(head_opr, arm_pos),
+                            apply_pos(*arm_opr, tail_pos),
+                        );
+                        match tail {
+                            AstNode::Number(num) => {
+                                lhs = sign.eval(lhs.asarg(), num.asarg());
+                            }
+                            _ => symbols[symbols[0].is_some() as usize] = Some((tail_idx, sign)),
+                        }
+                    }
+                }
+                _ => symbols[symbols[0].is_some() as usize] = Some((arm_idx, sign)),
+            }
+        }
+        let (s0_idx, s0_sign) = symbols[0].unwrap();
+        debug_assert!(symbol_space.is_empty());
+        symbol_space.push(AstNode::Number(lhs));
+        if let Some((s1_idx, s1_sign)) = symbols[1] {
+            let mut symbol_indices = [s0_idx, s1_idx];
+            if s0_sign == negative && s1_sign == positive {
+                symbol_indices.reverse();
+            }
+            for idx in symbol_indices {
+                symbol_space.extend_from_tree(&self.0, idx);
+            }
+            symbol_space.push(AstNode::BinaryOp(if s0_sign == s1_sign {
+                positive
+            } else {
+                negative
+            }));
+            symbol_space.push(AstNode::BinaryOp(
+                if s0_sign == negative && s1_sign == negative {
+                    negative
+                } else {
+                    positive
+                },
+            ));
+        } else {
+            symbol_space.extend_from_tree(&self.0, s0_idx);
+            symbol_space.push(AstNode::BinaryOp(s0_sign));
+        }
+        self.0
+            .replace_from_sc_move(head_idx, symbol_space, symbol_space.len() - 1);
     }
 }
 
@@ -1794,39 +1893,37 @@ mod tests {
 
     #[test]
     fn aot_evaluation() {
-        macro_rules! test {
-            ($pre: expr, $post: expr) => {
-                let mut ast = MathAst::<f64, TestVar, TestFunc>::from_nodes($pre.into_iter());
-                ast.aot_evaluation(testfunc2pointer);
-                assert_eq!(ast.0.postorder_iter().cloned().collect::<Vec<_>>(), $post);
-            };
-        }
-        test!(
-            [
+        let simplify = |nodes: &[AstNode<f64, TestVar, TestFunc>]| {
+            let mut ast = MathAst::from_nodes(nodes.iter().copied());
+            ast.aot_evaluation(testfunc2pointer);
+            ast.0.postorder_iter().cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(
+            simplify(&[
                 AstNode::Number(16.0),
                 AstNode::Number(8.0),
                 AstNode::BinaryOp(BinaryOp::Div),
                 AstNode::Number(11.0),
                 AstNode::BinaryOp(BinaryOp::Add),
-            ],
+            ]),
             vec![AstNode::Number(13.0)]
         );
-        test!(
-            [
+        assert_eq!(
+            simplify(&[
                 AstNode::Number(9.0),
                 AstNode::NativeFunction(NativeFunction::Sqrt, 1),
-            ],
+            ]),
             vec![AstNode::Number(3.0)]
         );
-        test!(
-            [
+        assert_eq!(
+            simplify(&[
                 AstNode::Number(1.0),
                 AstNode::Number(8.0),
                 AstNode::BinaryOp(BinaryOp::Div),
                 AstNode::Variable(TestVar::T),
                 AstNode::BinaryOp(BinaryOp::Add),
                 AstNode::NativeFunction(NativeFunction::Sin, 1),
-            ],
+            ]),
             vec![
                 AstNode::Number(0.125),
                 AstNode::Variable(TestVar::T),
@@ -1834,8 +1931,8 @@ mod tests {
                 AstNode::NativeFunction(NativeFunction::Sin, 1),
             ]
         );
-        test!(
-            [
+        assert_eq!(
+            simplify(&[
                 AstNode::Number(80.0),
                 AstNode::Number(5.0),
                 AstNode::BinaryOp(BinaryOp::Div),
@@ -1850,7 +1947,7 @@ mod tests {
                 AstNode::Number(121.0),
                 AstNode::NativeFunction(NativeFunction::Sqrt, 1),
                 AstNode::BinaryOp(BinaryOp::Add)
-            ],
+            ]),
             vec![
                 AstNode::Number(16.0),
                 AstNode::Variable(TestVar::X),
@@ -1866,19 +1963,173 @@ mod tests {
 
     #[test]
     fn displacing_simplification() {
-        macro_rules! compare {
-            ($i1:literal, $i2:literal) => {
-                let mut syn1 = parse($i1).unwrap();
-                syn1.displacing_simplification();
-                assert_eq!(format!("{}", syn1), $i2);
-            };
-        }
-        compare!("x/1/8", "0.125*x");
-        compare!("(x/16)/(y*4)", "0.015625*x/y");
-        compare!("(7/x)/(y/2)", "14/(x*y)");
-        compare!("(x/4)/(4/y)", "0.0625*x*y");
-        compare!("10-x+12", "22 - x");
-        compare!("x*pi*2", "6.283185307179586*x");
+        let simplify = |nodes: &[AstNode<f64, TestVar, TestFunc>]| {
+            let mut ast = MathAst::from_nodes(nodes.iter().copied());
+            ast.displacing_simplification();
+            ast.0.postorder_iter().cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(
+            simplify(&[
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(1.0),
+                AstNode::Number(8.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]),
+            vec![
+                AstNode::Number(8.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(16.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(8.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]),
+            vec![
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(-2.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Number(17.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ]),
+            vec![
+                AstNode::Number(15.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(1.0),
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]),
+            vec![
+                AstNode::Number(0.5),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(125.0),
+                AstNode::Variable(TestVar::T),
+                AstNode::Number(5.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Sub)
+            ]),
+            vec![
+                AstNode::Number(120.0),
+                AstNode::Variable(TestVar::T),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(17.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::NativeFunction(NativeFunction::Log, 1),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Number(10.0),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]),
+            vec![
+                AstNode::Number(8.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::NativeFunction(NativeFunction::Log, 1),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(7.0),
+                AstNode::Variable(TestVar::T),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::NativeFunction(NativeFunction::Sin, 1),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]),
+            vec![
+                AstNode::Number(3.5),
+                AstNode::Variable(TestVar::T),
+                AstNode::Variable(TestVar::X),
+                AstNode::NativeFunction(NativeFunction::Sin, 1),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(5.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(7.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ]),
+            vec![
+                AstNode::Number(35.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(81.0),
+                AstNode::Number(3.0),
+                AstNode::NativeFunction(NativeFunction::Log, 2),
+                AstNode::Number(8.9),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Number(1.4),
+                AstNode::Number(5.993),
+                AstNode::Variable(TestVar::X),
+                AstNode::NativeFunction(NativeFunction::Max, 3),
+                AstNode::Number(3.9),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]),
+            vec![
+                AstNode::Number(-5.0),
+                AstNode::Number(81.0),
+                AstNode::Number(3.0),
+                AstNode::NativeFunction(NativeFunction::Log, 2),
+                AstNode::Number(1.4),
+                AstNode::Number(5.993),
+                AstNode::Variable(TestVar::X),
+                AstNode::NativeFunction(NativeFunction::Max, 3),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ]
+        )
     }
 
     #[test]
