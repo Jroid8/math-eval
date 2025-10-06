@@ -5,7 +5,7 @@ use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
-use crate::postfix_tree::{Arity, IterativeTreeBuilder, PostfixTree};
+use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
 use crate::tokenizer::Token;
 use crate::{
     BinaryOp, FunctionIdentifier, NAME_LIMIT, ParsingError, ParsingErrorKind, UnaryOp,
@@ -27,19 +27,20 @@ where
     CustomFunction(F, u8),
 }
 
-impl<N, V, F> Arity for AstNode<N, V, F>
+impl<N, V, F> Node for AstNode<N, V, F>
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    fn arity(&self) -> u8 {
+    fn children(&self) -> usize {
         match self {
             AstNode::Number(_) | AstNode::Variable(_) => 0,
             AstNode::BinaryOp(_) => 2,
             AstNode::UnaryOp(_) => 1,
             AstNode::NativeFunction(_, argc) | AstNode::CustomFunction(_, argc) => *argc,
         }
+        .into()
     }
 }
 
@@ -230,7 +231,7 @@ where
     }
 }
 
-struct SyAstOutput<N, V, F>(IterativeTreeBuilder<AstNode<N, V, F>>)
+struct SyAstOutput<N, V, F>(SubtreeCollection<AstNode<N, V, F>>)
 where
     N: MathEvalNumber,
     V: VariableIdentifier,
@@ -255,7 +256,7 @@ where
         }
     }
     fn make(self) -> Self::Output {
-        MathAst(self.0.build())
+        MathAst(self.0.into_tree())
     }
     fn push(&mut self, kind: AstNode<N, V, F>) {
         self.0.push(kind)
@@ -833,7 +834,7 @@ where
         custom_variable_parser: impl Fn(&str) -> Option<V>,
     ) -> Result<MathAst<N, V, F>, SyntaxError> {
         parse_or_eval(
-            SyAstOutput(IterativeTreeBuilder::new()),
+            SyAstOutput(SubtreeCollection::new()),
             tokens,
             custom_constant_parser,
             custom_function_parser,
@@ -865,7 +866,7 @@ where
     }
 
     pub fn from_nodes(nodes: impl IntoIterator<Item = AstNode<N, V, F>>) -> Self {
-        MathAst(PostfixTree::from_items(nodes))
+        MathAst(PostfixTree::from_nodes(nodes))
     }
 
     fn eval_stack_capacity<'a>(tree: impl IntoIterator<Item = &'a AstNode<N, V, F>>) -> usize {
@@ -959,7 +960,7 @@ where
             let res = match node {
                 AstNode::Number(_) => true,
                 AstNode::Variable(_) => false,
-                _ => self.0.iter_children(idx).all(|(_, i)| varless[i]),
+                _ => self.0.children_iter(idx).all(|(_, i)| varless[i]),
             };
             varless.push(res);
         }
@@ -972,8 +973,9 @@ where
                 if required_capacity > stack.capacity() {
                     stack.reserve(required_capacity - stack.capacity());
                 }
-                self.0.replace_with_unit(
-                    AstNode::Number(
+                self.0.replace(
+                    idx,
+                    [AstNode::Number(
                         Self::_eval(
                             self.0.postorder_subtree_iter(idx),
                             &function_to_pointer,
@@ -981,8 +983,7 @@ where
                             &mut stack,
                         )
                         .unwrap(),
-                    ),
-                    idx,
+                    )],
                 );
                 if let Some(i) = self.0.subtree_start(idx).checked_sub(1) {
                     idx = i;
