@@ -187,6 +187,7 @@ pub trait MathEvalNumber:
         + for<'b> Sub<Self::AsArg<'b>, Output = Self>
         + for<'b> Mul<Self::AsArg<'b>, Output = Self>
         + for<'b> Div<Self::AsArg<'b>, Output = Self>
+        + for<'b> Neg<Output = Self>
         + for<'b> Reborrow<This<'b> = Self::AsArg<'b>>
         + PartialEq
         + Neg<Output = Self>

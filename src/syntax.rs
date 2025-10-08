@@ -250,7 +250,7 @@ where
         if let Some(AstNode::Number(num)) = self.0.last_mut()
             && opr == SYOperator::UnaryOp(UnaryOp::Neg)
         {
-            *num = -num.clone();
+            *num = -num.asarg();
         } else {
             self.push(opr.to_syn());
         }
