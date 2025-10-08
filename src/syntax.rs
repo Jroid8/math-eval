@@ -478,6 +478,7 @@ where
             if j == 0 || can_segment[j - 1].is_some() {
                 let prev = (j != 0).then(|| j as u8 - 1);
                 let seg = constant_parser(&input[j..i])
+                    .or_else(|| N::parse_constant(&input[j..i]))
                     .map(Segment::Constant)
                     .or_else(|| variable_parser(&input[j..i]).map(Segment::Variable))
                     .or_else(|| input[j..i].parse().ok().map(Segment::Constant));
@@ -524,6 +525,7 @@ where
             if j == 0 || can_segment[j - 1].is_some() {
                 let prev = (j != 0).then(|| j as u8 - 1);
                 let seg = constant_parser(&input[j..i])
+                    .or_else(|| N::parse_constant(&input[j..i]))
                     .map(Segment::Constant)
                     .or_else(|| variable_parser(&input[j..i]).map(Segment::Variable))
                     .or_else(|| input[j..i].parse().ok().map(Segment::Constant));
@@ -1176,35 +1178,37 @@ mod tests {
 
     #[test]
     fn segment_variable() {
-        macro_rules! seg_var {
-            ($input: expr) => {
-                super::segment_variable(
-                    $input,
-                    &|input| match input {
-                        "c" => Some(299792458.0),
-                        "pi2" => Some(FRAC_2_PI),
-                        _ => None,
-                    },
-                    &|input| match input {
-                        "x" => Some(0),
-                        "y" => Some(1),
-                        "var5" => Some(2),
-                        "shallnotbenamed" => Some(3),
-                        _ => None,
-                    },
-                )
-            };
-        }
+        let seg_var = |input: &str| {
+            super::segment_variable(
+                input,
+                &|input| match input {
+                    "c" => Some(299792458.0),
+                    "pi2" => Some(FRAC_2_PI),
+                    _ => None,
+                },
+                &|input| match input {
+                    "x" => Some(0),
+                    "y" => Some(1),
+                    "var5" => Some(2),
+                    "shallnotbenamed" => Some(3),
+                    _ => None,
+                },
+            )
+        };
         assert_eq!(
-            seg_var!("xy"),
+            seg_var("xy"),
             Some(vec![Segment::Variable(0), Segment::Variable(1)])
         );
         assert_eq!(
-            seg_var!("cx"),
+            seg_var("cx"),
             Some(vec![Segment::Constant(299792458.0), Segment::Variable(0)])
         );
         assert_eq!(
-            seg_var!("x2var5"),
+            seg_var("pix"),
+            Some(vec![Segment::Constant(PI), Segment::Variable(0)])
+        );
+        assert_eq!(
+            seg_var("x2var5"),
             Some(vec![
                 Segment::Variable(0),
                 Segment::Constant(2.0),
@@ -1212,7 +1216,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            seg_var!("x2yy"),
+            seg_var("x2yy"),
             Some(vec![
                 Segment::Variable(0),
                 Segment::Constant(2.0),
@@ -1221,11 +1225,11 @@ mod tests {
             ])
         );
         assert_eq!(
-            seg_var!("pi2x"),
+            seg_var("pi2x"),
             Some(vec![Segment::Constant(FRAC_2_PI), Segment::Variable(0)])
         );
         assert_eq!(
-            seg_var!("x8759y"),
+            seg_var("x8759y"),
             Some(vec![
                 Segment::Variable(0),
                 Segment::Constant(8759.0),
@@ -1233,7 +1237,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            seg_var!("x9shallnotbenamedy"),
+            seg_var("x9shallnotbenamedy"),
             Some(vec![
                 Segment::Variable(0),
                 Segment::Constant(9.0),
@@ -1245,10 +1249,9 @@ mod tests {
 
     #[test]
     fn segment_function() {
-        macro_rules! seg_func {
-            ($input: expr) => {
+        let seg_func = |input: &str| {
                 super::segment_function(
-                    $input,
+                    input,
                     &|input| match input {
                         "c" => Some(299792458.0),
                         "pi4" => Some(FRAC_PI_2),
@@ -1268,38 +1271,37 @@ mod tests {
                         _ => None,
                     },
                 )
-            };
-        }
+        };
         assert_eq!(
-            seg_func!("cmin"),
+            seg_func("cmin"),
             Some((
                 vec![Segment::Constant(299792458.0)],
                 SYFunction::NativeFunction(NativeFunction::Min)
             ))
         );
         assert_eq!(
-            seg_func!("x55sin"),
+            seg_func("x55sin"),
             Some((
                 vec![Segment::Variable(0), Segment::Constant(55.0)],
                 SYFunction::NativeFunction(NativeFunction::Sin)
             ))
         );
         assert_eq!(
-            seg_func!("xyf2"),
+            seg_func("xyf2"),
             Some((
                 vec![Segment::Variable(0), Segment::Variable(1)],
                 SYFunction::CustomFunction(1, 0, None)
             ))
         );
         assert_eq!(
-            seg_func!("xvar5func1"),
+            seg_func("xvar5func1"),
             Some((
                 vec![Segment::Variable(0), Segment::Variable(2)],
                 SYFunction::CustomFunction(0, 0, None)
             ))
         );
         assert_eq!(
-            seg_func!("xxxxvar5verylongfunction"),
+            seg_func("xxxxvar5verylongfunction"),
             Some((
                 vec![
                     Segment::Variable(0),
