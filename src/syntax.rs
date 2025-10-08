@@ -218,8 +218,7 @@ where
         while let Some(top_opr) = operator_stack.last()
             && matches!(top_opr, SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_))
             && (operator.precedence() < top_opr.precedence()
-                || operator.precedence() == top_opr.precedence()
-                    && !operator.is_right_binding())
+                || operator.precedence() == top_opr.precedence() && !operator.is_right_binding())
         {
             self.pop_opr(operator_stack);
         }
@@ -1147,6 +1146,17 @@ mod tests {
         T,
     }
 
+    impl TestVar {
+        fn parse(input: &str) -> Option<Self> {
+            match input {
+                "x" => Some(TestVar::X),
+                "y" => Some(TestVar::Y),
+                "t" => Some(TestVar::T),
+                _ => None,
+            }
+        }
+    }
+
     impl Display for TestVar {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
@@ -1157,12 +1167,59 @@ mod tests {
         }
     }
 
+    struct TestVarStore;
+
+    impl VariableStore<f64, TestVar> for TestVarStore {
+        fn get(&self, var: TestVar) -> f64 {
+            match var {
+                TestVar::X => 1.0,
+                TestVar::Y => 5.0,
+                TestVar::T => 0.1,
+            }
+        }
+    }
+
+    fn parse_constant(input: &str) -> Option<f64> {
+        match input {
+            "c" => Some(299792458.0),
+            _ => None,
+        }
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum TestFunc {
         Deg2Rad,
         ExpD,
         Clamp,
         Digits,
+    }
+
+    impl TestFunc {
+        fn parse(input: &str) -> Option<(Self, u8, Option<u8>)> {
+            match input {
+                "deg2rad" => Some((TestFunc::Deg2Rad, 1, Some(1))),
+                "expd" => Some((TestFunc::ExpD, 2, Some(2))),
+                "clamp" => Some((TestFunc::Clamp, 3, Some(3))),
+                "digits" => Some((TestFunc::Digits, 1, None)),
+                _ => None,
+            }
+        }
+        fn to_pointer(self) -> CFPointer<'static, f64> {
+            match self {
+                TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
+                TestFunc::ExpD => CFPointer::Dual(&|l: f64, x: f64| l.powf(-l * x)),
+                TestFunc::Clamp => {
+                    CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min))
+                }
+                TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
+                    values
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &v)| 10f64.powi(i as i32) * v)
+                        .sum()
+                }),
+            }
+        }
     }
 
     impl Display for TestFunc {
@@ -1250,27 +1307,27 @@ mod tests {
     #[test]
     fn segment_function() {
         let seg_func = |input: &str| {
-                super::segment_function(
-                    input,
-                    &|input| match input {
-                        "c" => Some(299792458.0),
-                        "pi4" => Some(FRAC_PI_2),
-                        _ => None,
-                    },
-                    &|input| match input {
-                        "x" => Some(0),
-                        "y" => Some(1),
-                        "var5" => Some(2),
-                        "shallnotbenamed" => Some(3),
-                        _ => None,
-                    },
-                    &|input| match input {
-                        "func1" => Some((0, 0, None)),
-                        "f2" => Some((1, 0, None)),
-                        "verylongfunction" => Some((2, 0, None)),
-                        _ => None,
-                    },
-                )
+            super::segment_function(
+                input,
+                &|input| match input {
+                    "c" => Some(299792458.0),
+                    "pi4" => Some(FRAC_PI_2),
+                    _ => None,
+                },
+                &|input| match input {
+                    "x" => Some(0),
+                    "y" => Some(1),
+                    "var5" => Some(2),
+                    "shallnotbenamed" => Some(3),
+                    _ => None,
+                },
+                &|input| match input {
+                    "func1" => Some((0, 0, None)),
+                    "f2" => Some((1, 0, None)),
+                    "verylongfunction" => Some((2, 0, None)),
+                    _ => None,
+                },
+            )
         };
         assert_eq!(
             seg_func("cmin"),
@@ -1317,33 +1374,19 @@ mod tests {
 
     fn parse(input: &str) -> Result<MathAst<f64, TestVar, TestFunc>, ParsingError> {
         let tokens = TokenStream::new(input).map_err(|e| e.to_general())?.0;
-        MathAst::new(
-            &tokens,
-            |inp| match inp {
-                "c" => Some(299792458.0),
-                _ => None,
-            },
-            |input| match input {
-                "deg2rad" => Some((TestFunc::Deg2Rad, 1, Some(1))),
-                "expd" => Some((TestFunc::ExpD, 2, Some(2))),
-                "clamp" => Some((TestFunc::Clamp, 3, Some(3))),
-                "digits" => Some((TestFunc::Digits, 1, None)),
-                _ => None,
-            },
-            |input| match input {
-                "x" => Some(TestVar::X),
-                "y" => Some(TestVar::Y),
-                "t" => Some(TestVar::T),
-                _ => None,
-            },
-        )
-        .map_err(|e| e.to_general(input, &tokens))
+        MathAst::new(&tokens, parse_constant, TestFunc::parse, TestVar::parse)
+            .map_err(|e| e.to_general(input, &tokens))
     }
 
     #[test]
     fn parse_to_ast() {
         fn syntaxify(input: &str) -> Result<Vec<AstNode<f64, TestVar, TestFunc>>, ParsingError> {
-            parse(input).map(|st| st.0.postorder_iter().cloned().collect::<Vec<_>>())
+            parse(input).map(|st| {
+                st.0.into_inner()
+                    .into_iter()
+                    .map(|e| e.into_inner())
+                    .collect::<Vec<_>>()
+            })
         }
         assert_eq!(syntaxify("0"), Ok(vec![AstNode::Number(0.0)]));
         assert_eq!(syntaxify("(0)"), Ok(vec![AstNode::Number(0.0)]));
@@ -1885,29 +1928,56 @@ mod tests {
 
     #[test]
     fn parse_to_number() {
-        todo!()
-    }
-
-    fn testfunc2pointer(cf: TestFunc) -> CFPointer<'static, f64> {
-        match cf {
-            TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
-            TestFunc::ExpD => CFPointer::Dual(&|l: f64, x: f64| l * (-l * x).exp()),
-            TestFunc::Clamp => CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min)),
-            TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
-                values
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &v)| 10f64.powi(i as i32) * v)
-                    .sum()
-            }),
+        fn evaluate(input: &str) -> f64 {
+            MathAst::parse_and_eval(
+                &TokenStream::new(input).unwrap().0,
+                parse_constant,
+                TestFunc::parse,
+                TestVar::parse,
+                &TestVarStore,
+                TestFunc::to_pointer,
+            )
+            .unwrap()
         }
+        assert_eq!(evaluate("1"), 1.0);
+        assert_eq!(evaluate("-0.5"), -0.5);
+        assert_eq!(evaluate("857-999"), -142.0);
+        assert_eq!(evaluate("8*19"), 152.0);
+        assert_eq!(evaluate("-4!"), -24.0);
+        assert_eq!(evaluate("y!!"), 15.0);
+        assert_eq!(evaluate("1-27/9"), -2.0);
+        assert_eq!(evaluate("121/11/t"), 110.0);
+        assert_eq!(evaluate("y*(x+11)"), 60.0);
+        assert_eq!(evaluate("8*2^y-t"), 255.9);
+        assert_eq!(evaluate("18x"), 18.0);
+        assert_eq!(evaluate("sin(pi/2)"), 1.0);
+        assert_eq!(evaluate("log(243, 3)"), 5.0 - 1e-15);
+        assert_eq!(evaluate("min(-13,x,y,0)"), -13.0);
+        assert_eq!(evaluate("deg2rad(90)"), FRAC_PI_2);
+        assert_eq!(evaluate("expd(0.5, 2)"), 2.0);
+        assert_eq!(evaluate("clamp(x, 0, 2)"), 1.0);
+        assert_eq!(evaluate("digits(x, y, t, 9)/1000"), 9.061);
+        assert_eq!(evaluate("lb(2048)"), 11.0);
+        assert_eq!(evaluate("log(1000000)"), 6.0);
+        assert_eq!(evaluate("lg(0.0001)"), -4.0);
+        assert_eq!(evaluate("ln(e^23)"), 23.0);
+        assert_eq!(evaluate("ln(cos(0))"), 0.0);
+        assert_eq!(evaluate("y * -2"), -10.0);
+        assert_eq!(evaluate("sin(pi/-2)"), -1.0);
+        assert_eq!(evaluate("+-+75"), -75.0);
+        assert_eq!(evaluate("----7"), 7.0);
+        assert_eq!(evaluate("|x|"), 1.0);
+        assert_eq!(evaluate("|-x|"), 1.0);
+        assert_eq!(evaluate("x^2 + y^2"), 26.0);
+        assert_eq!(evaluate("y*-0.5"), -2.5);
+        assert_eq!(evaluate("sin(pix/2)*t+cos(pix)*t"), 0.2);
     }
 
     #[test]
     fn aot_evaluation() {
         let simplify = |nodes: &[AstNode<f64, TestVar, TestFunc>]| {
             let mut ast = MathAst::from_nodes(nodes.iter().copied());
-            ast.aot_evaluation(testfunc2pointer);
+            ast.aot_evaluation(TestFunc::to_pointer);
             ast.0.postorder_iter().cloned().collect::<Vec<_>>()
         };
         assert_eq!(
@@ -2179,22 +2249,12 @@ mod tests {
 
     #[test]
     fn ast_eval() {
-        struct VarStore;
-
-        impl VariableStore<f64, TestVar> for VarStore {
-            fn get(&self, var: TestVar) -> f64 {
-                match var {
-                    TestVar::X => 1.0,
-                    TestVar::Y => 5.0,
-                    TestVar::T => 0.1,
-                }
-            }
-        }
-
         macro_rules! assert_eval {
             ($expr: literal, $res: literal) => {
                 assert_eq!(
-                    parse($expr).unwrap().eval(testfunc2pointer, &VarStore),
+                    parse($expr)
+                        .unwrap()
+                        .eval(TestFunc::to_pointer, &TestVarStore),
                     $res
                 );
             };
