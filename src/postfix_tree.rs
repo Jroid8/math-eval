@@ -276,6 +276,10 @@ impl<T: Node> PostfixTree<T> {
         PostfixTree(entries)
     }
 
+    pub fn into_inner(self) -> Vec<Entry<T>> {
+        self.0
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
