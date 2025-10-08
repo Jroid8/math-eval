@@ -289,7 +289,7 @@ impl MathEvalNumber for f64 {
     }
 
     fn log10(value: Self) -> Self {
-        value.log2()
+        value.log10()
     }
 
     fn ln(value: Self) -> Self {

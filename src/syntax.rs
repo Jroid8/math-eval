@@ -722,29 +722,31 @@ where
                         ));
                     }
                     Some(SYOperator::Function(SYFunction::NativeFunction(mut nf), args)) => {
-                        if args < nf.min_args() && nf != NativeFunction::Log {
+                        if nf == NativeFunction::Log {
+                            // FIX: recieve 10 and 2 from MathEvalNumber so it can be const
+                            let ten = N::from(10);
+                            let two = N::from(2);
+                            match output_queue.last_num().unwrap() {
+                                num if num == ten.asarg() => {
+                                    output_queue.pop_arg();
+                                    nf = NativeFunction::Log10;
+                                }
+                                num if num == two.asarg() => {
+                                    output_queue.pop_arg();
+                                    nf = NativeFunction::Log2;
+                                }
+                                _ if args == 1 => {
+                                    nf = NativeFunction::Log10;
+                                }
+                                _ => (),
+                            }
+                            output_queue.push(AstNode::NativeFunction(nf, args));
+                            Ok(())
+                        } else if args < nf.min_args() {
                             Err(SyntaxErrorKind::NotEnoughArguments)
                         } else if nf.max_args().is_some_and(|m| args > m) {
                             Err(SyntaxErrorKind::TooManyArguments)
                         } else {
-                            if nf == NativeFunction::Log {
-                                let ten = N::from(10);
-                                let two = N::from(2);
-                                match output_queue.last_num().unwrap() {
-                                    num if num == ten.asarg() => {
-                                        output_queue.pop_arg();
-                                        nf = NativeFunction::Log10;
-                                    }
-                                    num if num == two.asarg() => {
-                                        output_queue.pop_arg();
-                                        nf = NativeFunction::Log2;
-                                    }
-                                    _ if args == 1 => {
-                                        nf = NativeFunction::Log10;
-                                    }
-                                    _ => (),
-                                }
-                            }
                             output_queue.push(AstNode::NativeFunction(nf, args));
                             Ok(())
                         }
