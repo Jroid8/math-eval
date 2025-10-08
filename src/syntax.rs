@@ -159,8 +159,11 @@ where
             }
         }
     }
-    fn is_right_associative(&self) -> bool {
-        matches!(self, SYOperator::BinaryOp(BinaryOp::Pow))
+    fn is_right_binding(&self) -> bool {
+        matches!(
+            self,
+            SYOperator::BinaryOp(BinaryOp::Pow) | SYOperator::UnaryOp(UnaryOp::Neg)
+        )
     }
     fn to_syn<N, V>(self) -> AstNode<N, V, F>
     where
@@ -216,7 +219,7 @@ where
             && matches!(top_opr, SYOperator::BinaryOp(_) | SYOperator::UnaryOp(_))
             && (operator.precedence() < top_opr.precedence()
                 || operator.precedence() == top_opr.precedence()
-                    && !operator.is_right_associative())
+                    && !operator.is_right_binding())
         {
             self.pop_opr(operator_stack);
         }
@@ -231,6 +234,7 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
 struct SyAstOutput<N, V, F>(SubtreeCollection<AstNode<N, V, F>>)
 where
     N: MathEvalNumber,
@@ -273,6 +277,7 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
 struct SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
     N: MathEvalNumber,
@@ -1638,6 +1643,9 @@ mod tests {
         );
         assert_eq!(syntaxify("++1"), Ok(vec![AstNode::Number(1.0)]));
         assert_eq!(syntaxify("+-1"), Ok(vec![AstNode::Number(-1.0)]));
+        assert_eq!(syntaxify("--1"), Ok(vec![AstNode::Number(1.0)]));
+        assert_eq!(syntaxify("---1"), Ok(vec![AstNode::Number(-1.0)]));
+        assert_eq!(syntaxify("----1"), Ok(vec![AstNode::Number(1.0)]));
         assert_eq!(
             syntaxify("x + +1"),
             Ok(vec![
