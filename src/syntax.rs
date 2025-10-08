@@ -2249,28 +2249,23 @@ mod tests {
 
     #[test]
     fn ast_eval() {
-        macro_rules! assert_eval {
-            ($expr: literal, $res: literal) => {
-                assert_eq!(
-                    parse($expr)
-                        .unwrap()
-                        .eval(TestFunc::to_pointer, &TestVarStore),
-                    $res
-                );
-            };
+        fn eval(input: &str) -> f64 {
+            parse(input)
+                .unwrap()
+                .eval(TestFunc::to_pointer, &TestVarStore)
         }
 
-        assert_eval!("1", 1.0);
-        assert_eval!("x*3", 3.0);
-        assert_eval!("3!", 6.0);
-        assert_eval!("-t", -0.1);
-        assert_eval!("y+100*t", 15.0);
-        assert_eval!("sin(pi*t)", 0.3090169943749474);
-        assert_eval!("log(6561, 3)", 8.0);
-        assert_eval!("max(x, y, -18)*t", 0.5);
-        assert_eval!("clamp(x + y, -273.15, t)", 0.1);
-        assert_eval!("digits(y, 1)", 15.0);
-        assert_eval!("digits(5, 4, 9)*t", 94.5);
+        assert_eq!(eval("1"), 1.0);
+        assert_eq!(eval("x*3"), 3.0);
+        assert_eq!(eval("3!"), 6.0);
+        assert_eq!(eval("-t"), -0.1);
+        assert_eq!(eval("y+100*t"), 15.0);
+        assert_eq!(eval("sin(pi*t)"), 0.3090169943749474);
+        assert_eq!(eval("log(6561, 3)"), 8.0);
+        assert_eq!(eval("max(x, y, -18)*t"), 0.5);
+        assert_eq!(eval("clamp(x + y, -273.15, t)"), 0.1);
+        assert_eq!(eval("digits(y, 1)"), 15.0);
+        assert_eq!(eval("digits(5, 4, 9)*t"), 94.5);
     }
 
     #[test]
