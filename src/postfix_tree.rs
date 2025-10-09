@@ -1,10 +1,12 @@
-use std::{
-    iter::FusedIterator,
-    ops::{Index, Range},
-};
+use std::ops::{Index, Range};
+
 use subtree_collection::SubtreeCollection;
+use tree_iterators::{ChildIter, ParentIter, PostOrderIter};
+
+use crate::postfix_tree::tree_iterators::EulerTour;
 
 pub mod subtree_collection;
+pub mod tree_iterators;
 
 pub trait Node: Clone + std::fmt::Debug {
     fn children(&self) -> usize;
@@ -42,6 +44,14 @@ impl OptUsize {
     #[expect(dead_code)]
     fn map<T>(self, f: impl FnOnce(usize) -> T) -> Option<T> {
         self.as_opt().map(f)
+    }
+
+    fn unwrap(self) -> usize {
+        if self.0 == usize::MAX {
+            panic!("called `unwrap()` on a `None` value")
+        } else {
+            self.0
+        }
     }
 }
 
@@ -141,6 +151,36 @@ impl<T: Node> Entry<T> {
         }
         res
     }
+
+    pub fn find_first_child(tree: &[Entry<T>], head: usize) -> Option<usize> {
+        let mut cc = tree[head].node.children();
+        if cc == 0 {
+            return None;
+        }
+        let mut idx = head - 1;
+        cc -= 1;
+        while cc > 0 {
+            idx -= tree[idx].descendants_count + 1;
+            cc -= 1;
+        }
+        Some(idx)
+    }
+
+    pub fn find_next_child(tree: &[Entry<T>], child: usize) -> Option<usize> {
+        let pd = tree[child].parent_distance.unwrap();
+        if pd == 1 {
+            return None;
+        }
+        let mut idx = pd + child - 1;
+        loop {
+            let prev = idx - tree[idx].descendants_count - 1;
+            if prev > child {
+                idx = prev;
+            } else {
+                break Some(idx);
+            }
+        }
+    }
 }
 
 fn offset_idx(idx: usize, offset: i64) -> usize {
@@ -167,97 +207,6 @@ fn sew_replacement<T: Node>(tree: &mut [Entry<T>], head: usize, offset: i64) {
         current = parent;
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChildIter<'a, T: Node> {
-    tree: &'a PostfixTree<T>,
-    pos: usize,
-    children: usize,
-}
-
-impl<'a, T: Node> Iterator for ChildIter<'a, T> {
-    type Item = (&'a T, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.children == 0 {
-            return None;
-        }
-        self.children -= 1;
-        let idx = self.pos;
-        let cur = &self.tree.0[self.pos];
-        if self.pos > cur.descendants_count {
-            self.pos -= cur.descendants_count + 1;
-        } else {
-            debug_assert_eq!(cur.descendants_count, self.pos);
-            debug_assert_eq!(self.children, 0);
-        }
-        Some((&cur.node, idx))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.children, Some(self.children))
-    }
-}
-
-impl<'a, T: Node> ExactSizeIterator for ChildIter<'a, T> {
-    fn len(&self) -> usize {
-        self.children
-    }
-}
-
-impl<'a, T: Node> FusedIterator for ChildIter<'a, T> {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParentIter<'a, T: Node> {
-    tree: &'a PostfixTree<T>,
-    pos: usize,
-}
-
-impl<'a, T: Node> Iterator for ParentIter<'a, T> {
-    type Item = (&'a T, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let parent = self.tree.0[self.pos].parent_distance.as_opt()? + self.pos;
-        self.pos = parent;
-        Some((&self.tree[parent], parent))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.tree.len() - self.pos - 1))
-    }
-}
-
-impl<'a, T: Node> FusedIterator for ParentIter<'a, T> {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PostOrderIter<'a, T: Node> {
-    slice: &'a [Entry<T>],
-    index: usize,
-}
-
-impl<'a, T: Node> Iterator for PostOrderIter<'a, T> {
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.slice.len() {
-            return None;
-        }
-        self.index += 1;
-        self.slice.get(self.index - 1).map(|n| &n.node)
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.slice.len() - self.index;
-        (len, Some(len))
-    }
-}
-
-impl<'a, T: Node> ExactSizeIterator for PostOrderIter<'a, T> {
-    fn len(&self) -> usize {
-        self.slice.len() - self.index
-    }
-}
-
-impl<'a, T: Node> FusedIterator for PostOrderIter<'a, T> {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostfixTree<T: Node>(Vec<Entry<T>>);
@@ -297,33 +246,27 @@ impl<T: Node> PostfixTree<T> {
     }
 
     pub fn children_iter<'a>(&'a self, head: usize) -> ChildIter<'a, T> {
-        let children = self.0[head].node.children();
-        ChildIter {
-            tree: self,
-            pos: head.wrapping_sub(1),
-            children,
-        }
+        ChildIter::new(self, head)
     }
 
     pub fn parent_iter<'a>(&'a self, head: usize) -> ParentIter<'a, T> {
-        ParentIter {
-            tree: self,
-            pos: head,
-        }
-    }
-
-    pub fn postorder_subtree_iter<'a>(&'a self, head: usize) -> PostOrderIter<'a, T> {
-        PostOrderIter {
-            slice: self.subtree_slice(head),
-            index: 0,
-        }
+        ParentIter::new(&self.0, head)
     }
 
     pub fn postorder_iter<'a>(&'a self) -> PostOrderIter<'a, T> {
-        PostOrderIter {
-            slice: &self.0,
-            index: 0,
-        }
+        PostOrderIter::new(&self.0)
+    }
+
+    pub fn postorder_subtree_iter<'a>(&'a self, head: usize) -> PostOrderIter<'a, T> {
+        PostOrderIter::new(self.subtree_slice(head))
+    }
+
+    pub fn euler_tour<'a>(&'a self) -> EulerTour<'a, T> {
+        EulerTour::new(self, self.len() - 1)
+    }
+
+    pub fn euler_tour_subtree<'a>(&'a self, head: usize) -> EulerTour<'a, T> {
+        EulerTour::new(self, head)
     }
 
     pub fn as_slice(&self) -> &[Entry<T>] {
@@ -459,22 +402,6 @@ mod tests {
                 (3, 7, None),
             ]
         );
-    }
-
-    #[test]
-    fn child_node_iter() {
-        let tree = PostfixTree(Entry::from_nodes([0, 0, 0, 2, 0, 1, 0, 0, 2, 0, 4, 2]));
-        let collect_children = |idx| {
-            tree.children_iter(idx)
-                .map(|(c, i)| (*c, i))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(collect_children(0), vec![]);
-        assert_eq!(collect_children(1), vec![]);
-        assert_eq!(collect_children(3), vec![(0, 2), (0, 1)]);
-        assert_eq!(collect_children(5), vec![(0, 4)]);
-        assert_eq!(collect_children(8), vec![(0, 7), (0, 6)]);
-        assert_eq!(collect_children(10), vec![(0, 9), (2, 8), (1, 5), (2, 3)]);
     }
 
     #[test]
