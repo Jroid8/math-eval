@@ -129,7 +129,7 @@ impl<T: Node> Entry<T> {
         dc
     }
 
-    pub fn configure_children_for_head(tree: &mut [Entry<T>]) {
+    fn configure_children_for_head(tree: &mut [Entry<T>]) {
         let head = tree.len() - 1;
         let mut cc = tree[head].node.children();
         let mut idx = head;
@@ -141,7 +141,7 @@ impl<T: Node> Entry<T> {
         }
     }
 
-    pub fn from_nodes(nodes: impl IntoIterator<Item = T>) -> Vec<Entry<T>> {
+    fn from_nodes(nodes: impl IntoIterator<Item = T>) -> Vec<Entry<T>> {
         let nodes = nodes.into_iter();
         let mut res = Vec::with_capacity(nodes.size_hint().1.unwrap_or(64));
         for node in nodes {
@@ -152,13 +152,13 @@ impl<T: Node> Entry<T> {
         res
     }
 
-    pub fn find_first_child(tree: &[Entry<T>], head: usize) -> Option<usize> {
-        let mut cc = tree[head].node.children();
-        if cc == 0 {
+    fn find_nth_child(tree: &[Entry<T>], parent: usize, n: usize) -> Option<usize> {
+        let mut cc = tree.get(parent)?.node.children();
+        if cc <= n {
             return None;
         }
-        let mut idx = head - 1;
-        cc -= 1;
+        let mut idx = parent - 1;
+        cc -= n + 1;
         while cc > 0 {
             idx -= tree[idx].descendants_count + 1;
             cc -= 1;
@@ -166,8 +166,8 @@ impl<T: Node> Entry<T> {
         Some(idx)
     }
 
-    pub fn find_next_child(tree: &[Entry<T>], child: usize) -> Option<usize> {
-        let pd = tree[child].parent_distance.unwrap();
+    fn find_next_sibling(tree: &[Entry<T>], child: usize) -> Option<usize> {
+        let pd = tree.get(child)?.parent_distance.unwrap();
         if pd == 1 {
             return None;
         }
@@ -344,6 +344,21 @@ impl<T: Node> PostfixTree<T> {
 
     pub fn subtree_slice(&self, head: usize) -> &[Entry<T>] {
         &self.0[head - self.0[head].descendants_count..=head]
+    }
+
+    pub fn parent(&self, idx: usize) -> Option<usize> {
+        self.0
+            .get(idx)
+            .and_then(|e| e.parent_distance.as_opt())
+            .map(|pd| pd+idx)
+    }
+
+    pub fn nth_child(&self, idx: usize, n: usize) -> Option<usize> {
+        Entry::find_nth_child(&self.0, idx, n)
+    }
+
+    pub fn next_sibling(&self, idx: usize) -> Option<usize> {
+        Entry::find_next_sibling(&self.0, idx)
     }
 }
 

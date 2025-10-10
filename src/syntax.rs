@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -5,11 +6,12 @@ use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, Stack};
 use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
+use crate::postfix_tree::tree_iterators::NodeEdge;
 use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
 use crate::tokenizer::Token;
 use crate::{
-    BinaryOp, FunctionIdentifier, ParsingError, ParsingErrorKind, UnaryOp, VariableIdentifier,
-    VariableStore,
+    Associativity, BinaryOp, FunctionIdentifier, ParsingError, ParsingErrorKind, UnaryOp,
+    VariableIdentifier, VariableStore,
 };
 use shunting_yard::{SyAstOutput, SyNumberOutput, parse_or_eval};
 
@@ -417,6 +419,59 @@ where
     }
 }
 
+fn parenthesis_required<N, V, F>(
+    tree: &PostfixTree<AstNode<N, V, F>>,
+    parent: usize,
+    target: usize,
+) -> bool
+where
+    N: MathEvalNumber,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    match (&tree[parent], &tree[target]) {
+        (AstNode::BinaryOp(head), AstNode::BinaryOp(arm)) => {
+            match head.precedence().cmp(&arm.precedence()) {
+                // Without the parenthesis around y-z in x-(y-z) the order of operations
+                // would be the opposite of what's intended.
+                Ordering::Equal => match head.associativity() {
+                    Associativity::Both => false,
+                    // parent is left associative and child is on the right
+                    Associativity::Left => tree.nth_child(parent, 1) == Some(target),
+                    // parent is right associative and child is on the left
+                    Associativity::Right => tree.nth_child(parent, 0) == Some(target),
+                },
+                Ordering::Less => false,
+                Ordering::Greater => true,
+            }
+        }
+        // Not only does multiplication, division and exponentiation take precedence over negation,
+        // wrapping parenthesis around negation removes ambiguity when paired with addition and subtraction.
+        (AstNode::BinaryOp(_), AstNode::UnaryOp(UnaryOp::Neg)) => true,
+        // Negation takes precedence over addition and subtraction.
+        (AstNode::UnaryOp(UnaryOp::Neg), AstNode::BinaryOp(opr)) => opr.precedence() == 0,
+        // Factorial always takes precedence over binary operations.
+        (AstNode::UnaryOp(UnaryOp::Fac | UnaryOp::DoubleFac), AstNode::BinaryOp(_)) => true,
+        (AstNode::BinaryOp(_), AstNode::UnaryOp(UnaryOp::Fac | UnaryOp::DoubleFac)) => false,
+        // Parenthesis is required for -(-x) and (x!)!, not just when the child's precedence is lower.
+        (AstNode::UnaryOp(parent), AstNode::UnaryOp(current)) => {
+            current.precedence() <= parent.precedence()
+        }
+        // Functions, variables and numbers take precedence over operators.
+        (
+            AstNode::BinaryOp(_) | AstNode::UnaryOp(_),
+            AstNode::NativeFunction(_, _)
+            | AstNode::CustomFunction(_, _)
+            | AstNode::Number(_)
+            | AstNode::Variable(_),
+        ) => false,
+        // Function arguments are clearly separated with commas.
+        (AstNode::NativeFunction(_, _) | AstNode::CustomFunction(_, _), _) => false,
+        // Numbers and variables shouldn't have a child.
+        (AstNode::Number(_) | AstNode::Variable(_), _) => unreachable!(),
+    }
+}
+
 impl<V, N, F> Display for MathAst<N, V, F>
 where
     N: MathEvalNumber + Display,
@@ -424,7 +479,40 @@ where
     F: FunctionIdentifier + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        for edge in self.0.euler_tour() {
+            if let Some(p) = self.0.parent(edge.index())
+                && parenthesis_required(&self.0, p, edge.index())
+            {
+                match edge {
+                    NodeEdge::Start(_, _) => f.write_str("(")?,
+                    NodeEdge::End(_, _) => f.write_str(")")?,
+                }
+            }
+            match edge {
+                NodeEdge::Start(AstNode::Number(num), _) => write!(f, "{num}")?,
+                NodeEdge::Start(AstNode::Variable(var), _) => write!(f, "{var}")?,
+                NodeEdge::Start(AstNode::UnaryOp(UnaryOp::Neg), _) => f.write_str("-")?,
+                NodeEdge::Start(AstNode::NativeFunction(func, _), _) => write!(f, "{func}(")?,
+                NodeEdge::Start(AstNode::CustomFunction(func, _), _) => write!(f, "{func}(")?,
+                NodeEdge::End(AstNode::UnaryOp(UnaryOp::Fac), idx) => f.write_str("!")?,
+                NodeEdge::End(AstNode::NativeFunction(_, _) | AstNode::CustomFunction(_, _), _) => {
+                    f.write_str(")")?
+                }
+                _ => (),
+            }
+            if let NodeEdge::End(_, idx) = edge
+                && let Some((AstNode::BinaryOp(opr), p)) =
+                    self.0.parent(idx).map(|p| (&self.0[p], p))
+                && self.0.nth_child(p, 0) == Some(idx)
+            {
+                if matches!(opr, BinaryOp::Add | BinaryOp::Sub) {
+                    write!(f, " {opr} ")?;
+                } else {
+                    write!(f, "{opr}")?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1390,7 +1478,7 @@ mod tests {
             "x/(-y)",
             "x/y!",
             "(x^2)^y",
-            "(7/x)/(y/2)",
+            "7/x/(y/2)",
             "(t^2 + 3*t + 2)/(t + 1)",
             "sin(x)",
             "x/sin(x + 1)",
@@ -1401,7 +1489,7 @@ mod tests {
         ];
 
         for c in cases {
-            assert_eq!(c, parse(c).unwrap().to_string());
+            assert_eq!(parse(c).unwrap().to_string(), c);
         }
     }
 

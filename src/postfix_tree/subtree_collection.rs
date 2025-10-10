@@ -132,6 +132,21 @@ impl<T: Node> SubtreeCollection<T> {
     pub fn subtree_range(&self, head: usize) -> Range<usize> {
         head - self.vec[head].descendants_count..head + 1
     }
+
+    pub fn parent(&self, idx: usize) -> Option<usize> {
+        self.vec
+            .get(idx)
+            .and_then(|e| e.parent_distance.as_opt())
+            .map(|pd| pd+idx)
+    }
+
+    pub fn nth_child(&self, idx: usize, n: usize) -> Option<usize> {
+        Entry::find_nth_child(&self.vec, idx, n)
+    }
+
+    pub fn next_sibling(&self, idx: usize) -> Option<usize> {
+        Entry::find_next_sibling(&self.vec, idx)
+    }
 }
 
 #[cfg(test)]

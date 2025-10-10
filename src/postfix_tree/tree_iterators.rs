@@ -136,6 +136,24 @@ pub enum NodeEdge<'a, T: Node> {
     End(&'a T, usize),
 }
 
+impl<'a, T: Node> NodeEdge<'a, T> {
+    #[inline]
+    pub fn node(&self) -> &'a T {
+        match self {
+            NodeEdge::Start(node, _) => node,
+            NodeEdge::End(node, _) => node
+        }
+    }
+
+    #[inline]
+    pub fn index(&self) -> usize {
+        match self {
+            NodeEdge::Start(_, idx) => *idx,
+            NodeEdge::End(_, idx) => *idx
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct EulerTour<'a, T: Node> {
     tree: &'a PostfixTree<T>,
@@ -161,7 +179,7 @@ impl<'a, T: Node> Iterator for EulerTour<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         let next = match self.current {
             CurrentNodeEdge::Start(idx) => {
-                if let Some(fc) = Entry::find_first_child(&self.tree.0, idx) {
+                if let Some(fc) = Entry::find_nth_child(&self.tree.0, idx, 0) {
                     CurrentNodeEdge::Start(fc)
                 } else {
                     CurrentNodeEdge::End(idx)
@@ -171,7 +189,7 @@ impl<'a, T: Node> Iterator for EulerTour<'a, T> {
                 if let Some(pd) = self.tree.0[idx].parent_distance.as_opt()
                     && idx < self.root
                 {
-                    if let Some(sib) = Entry::find_next_child(&self.tree.0, idx) {
+                    if let Some(sib) = Entry::find_next_sibling(&self.tree.0, idx) {
                         CurrentNodeEdge::Start(sib)
                     } else {
                         CurrentNodeEdge::End(idx + pd)

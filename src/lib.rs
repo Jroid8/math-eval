@@ -52,6 +52,13 @@ impl UnaryOp {
             UnaryOp::DoubleFac => N::double_factorial(value),
         }
     }
+
+    pub fn precedence(self) -> u8 {
+        match self {
+            UnaryOp::Neg => 0,
+            UnaryOp::Fac | UnaryOp::DoubleFac => 1,
+        }
+    }
 }
 
 impl Display for UnaryOp {
@@ -86,6 +93,7 @@ impl BinaryOp {
             _ => None,
         }
     }
+
     pub fn eval<N: MathEvalNumber>(self, lhs: N::AsArg<'_>, rhs: N::AsArg<'_>) -> N {
         match self {
             BinaryOp::Add => lhs + rhs,
@@ -96,6 +104,7 @@ impl BinaryOp {
             BinaryOp::Mod => N::modulo(lhs, rhs),
         }
     }
+
     pub fn as_char(self) -> char {
         match self {
             BinaryOp::Add => '+',
@@ -106,9 +115,11 @@ impl BinaryOp {
             BinaryOp::Mod => '%',
         }
     }
+
     pub fn is_commutative(self) -> bool {
         matches!(self, BinaryOp::Add | BinaryOp::Mul)
     }
+
     pub fn precedence(self) -> u8 {
         match self {
             BinaryOp::Add => 0,
@@ -119,9 +130,20 @@ impl BinaryOp {
             BinaryOp::Pow => 2,
         }
     }
-    pub fn is_left_associative(self) -> bool {
-        !matches!(self, BinaryOp::Pow)
+
+    pub fn associativity(self) -> Associativity {
+        match self {
+            BinaryOp::Add | BinaryOp::Mul => Associativity::Both,
+            BinaryOp::Sub | BinaryOp::Div | BinaryOp::Mod => Associativity::Left,
+            BinaryOp::Pow => Associativity::Right,
+        }
     }
+}
+
+pub enum Associativity {
+    Both,
+    Left,
+    Right,
 }
 
 impl Display for BinaryOp {
