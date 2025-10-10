@@ -324,13 +324,6 @@ mod tests {
         number::{MathEvalNumber, NativeFunction},
     };
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    enum TestVar {
-        X,
-        Y,
-        T,
-    }
-
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum TestFunc {
         Sigmoid,
