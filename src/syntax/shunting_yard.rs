@@ -1,12 +1,11 @@
 use std::marker::PhantomData;
 
-use super::AstNode;
+use super::{AstNode, FunctionType, MathAst, SyntaxError, SyntaxErrorKind};
 use crate::{
     BinaryOp, FunctionIdentifier, NAME_LIMIT, UnaryOp, VariableIdentifier, VariableStore,
     asm::CFPointer,
     number::{MathEvalNumber, NFPointer, NativeFunction},
     postfix_tree::subtree_collection::SubtreeCollection,
-    syntax::{MathAst, SyntaxError, SyntaxErrorKind},
     tokenizer::Token,
 };
 
@@ -66,13 +65,13 @@ where
             SyOperator::BinaryOp(opr) => AstNode::BinaryOp(opr),
             SyOperator::UnaryOp(opr) => AstNode::UnaryOp(opr),
             SyOperator::Function(SyFunction::NativeFunction(nf), args) => {
-                AstNode::NativeFunction(nf, args)
+                AstNode::Function(nf.into(), args)
             }
             SyOperator::Function(SyFunction::CustomFunction(cf, _, _), args) => {
-                AstNode::CustomFunction(cf, args)
+                AstNode::Function(FunctionType::Custom(cf), args)
             }
             SyOperator::Function(SyFunction::PipeAbs, _) => {
-                AstNode::NativeFunction(NativeFunction::Abs, 1)
+                AstNode::Function(NativeFunction::Abs.into(), 1)
             }
             SyOperator::Parentheses => unreachable!(),
         }
@@ -213,7 +212,7 @@ where
         let res = match node {
             AstNode::Number(num) => num,
             AstNode::Variable(var) => self.variable_store.get(var).to_owned(),
-            AstNode::NativeFunction(nf, args) => match nf.to_pointer::<N>() {
+            AstNode::Function(FunctionType::Native(nf), args) => match nf.to_pointer::<N>() {
                 NFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
                 NFPointer::Dual(func) => {
                     let rhs = self.args.pop().unwrap();
@@ -225,7 +224,7 @@ where
                     res
                 }
             },
-            AstNode::CustomFunction(cf, args) => match (self.cf2pointer)(cf) {
+            AstNode::Function(FunctionType::Custom(cf), args) => match (self.cf2pointer)(cf) {
                 CFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
                 CFPointer::Dual(func) => {
                     let rhs = self.args.pop().unwrap();
@@ -638,14 +637,14 @@ where
                                 }
                                 _ => (),
                             }
-                            output_queue.push(AstNode::NativeFunction(nf, args));
+                            output_queue.push(AstNode::Function(nf.into(), args));
                             Ok(())
                         } else if args < nf.min_args() {
                             Err(SyntaxErrorKind::NotEnoughArguments)
                         } else if nf.max_args().is_some_and(|m| args > m) {
                             Err(SyntaxErrorKind::TooManyArguments)
                         } else {
-                            output_queue.push(AstNode::NativeFunction(nf, args));
+                            output_queue.push(AstNode::Function(nf.into(), args));
                             Ok(())
                         }
                         .map_err(|e| {
@@ -660,7 +659,7 @@ where
                     } else if max_args.is_some_and(|m| args > m) {
                         Err(SyntaxErrorKind::TooManyArguments)
                     } else {
-                        output_queue.push(AstNode::CustomFunction(cf, args));
+                        output_queue.push(AstNode::Function(FunctionType::Custom(cf), args));
                         Ok(())
                     }
                     .map_err(|e| {
@@ -687,7 +686,7 @@ where
                             opening_pipe..=pos,
                         ));
                     }
-                    output_queue.push(AstNode::NativeFunction(NativeFunction::Abs, 1));
+                    output_queue.push(AstNode::Function(NativeFunction::Abs.into(), 1));
                 } else {
                     operator_stack.push(SyOperator::Function(SyFunction::PipeAbs, 0));
                 }
