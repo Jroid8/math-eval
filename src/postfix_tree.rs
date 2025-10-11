@@ -1,4 +1,4 @@
-use std::ops::{Index, Range};
+use std::{fmt::Debug, ops::{Index, Range}};
 
 use subtree_collection::SubtreeCollection;
 use tree_iterators::{ChildIter, ParentIter, PostOrderIter};
@@ -208,7 +208,7 @@ fn sew_replacement<T: Node>(tree: &mut [Entry<T>], head: usize, offset: i64) {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PostfixTree<T: Node>(Vec<Entry<T>>);
 
 impl<T: Node> PostfixTree<T> {
@@ -359,6 +359,17 @@ impl<T: Node> PostfixTree<T> {
 
     pub fn next_sibling(&self, idx: usize) -> Option<usize> {
         Entry::find_next_sibling(&self.0, idx)
+    }
+}
+
+impl<T> Debug for PostfixTree<T> where T: Node + Debug {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PostfixTree[")?;
+        for e in &self.0 {
+            f.write_str("\n\t")?;
+            <Entry<T> as Debug>::fmt(&e, f)?;
+        }
+        f.write_str("\n]")
     }
 }
 
