@@ -367,7 +367,7 @@ impl<T> Debug for PostfixTree<T> where T: Node + Debug {
         f.write_str("PostfixTree[")?;
         for e in &self.0 {
             f.write_str("\n\t")?;
-            <Entry<T> as Debug>::fmt(&e, f)?;
+            <Entry<T> as Debug>::fmt(e, f)?;
         }
         f.write_str("\n]")
     }
