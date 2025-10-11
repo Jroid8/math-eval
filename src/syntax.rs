@@ -1231,7 +1231,7 @@ mod tests {
         assert_eq!(evaluate("|-x|"), 1.0);
         assert_eq!(evaluate("x^2 + y^2"), 26.0);
         assert_eq!(evaluate("y*-0.5"), -2.5);
-        assert_eq!(evaluate("sin(pix/2)*t+cos(pix)*t"), 0.2);
+        assert_eq!(evaluate("sin(pix/2)*t-cos(pix)*t"), 0.2);
     }
 
     #[test]
