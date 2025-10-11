@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::mem;
 use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, Stack};
@@ -294,36 +295,26 @@ where
             };
             varless.push(res);
         }
-        let mut idx = self.0.len() - 1;
+        let mut idx = self.0.len();
         let mut stack: Stack<N> = Stack::with_capacity(0);
-        loop {
+        while idx > 0 {
+            idx -= 1;
             if varless[idx] && !matches!(self.0[idx], AstNode::Number(_)) {
                 let required_capacity =
                     Self::eval_stack_capacity(self.0.postorder_subtree_iter(idx));
                 if required_capacity > stack.capacity() {
                     stack.reserve(required_capacity - stack.capacity());
                 }
-                self.0.replace(
-                    idx,
-                    [AstNode::Number(
-                        Self::_eval(
-                            self.0.postorder_subtree_iter(idx),
-                            &function_to_pointer,
-                            &(),
-                            &mut stack,
-                        )
-                        .unwrap(),
-                    )],
-                );
-                if let Some(i) = self.0.subtree_start(idx).checked_sub(1) {
-                    idx = i;
-                } else {
-                    break;
-                }
-            } else if idx > 0 {
-                idx -= 1;
-            } else {
-                break;
+                let result = Self::_eval(
+                    self.0.postorder_subtree_iter(idx),
+                    &function_to_pointer,
+                    &(),
+                    &mut stack,
+                )
+                .unwrap();
+                let start = self.0.subtree_start(idx);
+                self.0
+                    .replace(mem::replace(&mut idx, start), [AstNode::Number(result)]);
             }
         }
     }
