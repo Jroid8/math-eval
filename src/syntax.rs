@@ -247,7 +247,7 @@ where
                     opr.eval(pop()?.asarg(), rhs.asarg())
                 }
                 AstNode::UnaryOp(opr) => opr.eval(pop()?.asarg()),
-                AstNode::Function(FunctionType::Native(nf), argc) => match nf.to_pointer() {
+                AstNode::Function(FunctionType::Native(nf), argc) => match nf.as_pointer() {
                     NFPointer::Single(func) => func(pop()?.asarg()),
                     NFPointer::Dual(func) => {
                         let arg2 = pop()?;
@@ -604,7 +604,7 @@ mod tests {
                 _ => None,
             }
         }
-        fn to_pointer(self) -> CFPointer<'static, f64> {
+        fn as_pointer(self) -> CFPointer<'static, f64> {
             match self {
                 TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
                 TestFunc::ExpD => CFPointer::Dual(&|l: f64, x: f64| l.powf(-l * x)),
@@ -1196,7 +1196,7 @@ mod tests {
                 TestFunc::parse,
                 TestVar::parse,
                 &TestVarStore,
-                TestFunc::to_pointer,
+                TestFunc::as_pointer,
             )
             .unwrap()
         }
@@ -1238,7 +1238,7 @@ mod tests {
     fn aot_evaluation() {
         let simplify = |nodes: &[AstNode<f64, TestVar, TestFunc>]| {
             let mut ast = MathAst::from_nodes(nodes.iter().copied());
-            ast.aot_evaluation(TestFunc::to_pointer);
+            ast.aot_evaluation(TestFunc::as_pointer);
             ast.0.postorder_iter().cloned().collect::<Vec<_>>()
         };
         assert_eq!(
@@ -1513,7 +1513,7 @@ mod tests {
         fn eval(input: &str) -> f64 {
             parse(input)
                 .unwrap()
-                .eval(TestFunc::to_pointer, &TestVarStore)
+                .eval(TestFunc::as_pointer, &TestVarStore)
         }
 
         assert_eq!(eval("1"), 1.0);

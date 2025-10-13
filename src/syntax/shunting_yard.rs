@@ -212,7 +212,7 @@ where
         let res = match node {
             AstNode::Number(num) => num,
             AstNode::Variable(var) => self.variable_store.get(var).to_owned(),
-            AstNode::Function(FunctionType::Native(nf), args) => match nf.to_pointer::<N>() {
+            AstNode::Function(FunctionType::Native(nf), args) => match nf.as_pointer::<N>() {
                 NFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
                 NFPointer::Dual(func) => {
                     let rhs = self.args.pop().unwrap();

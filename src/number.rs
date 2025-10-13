@@ -72,7 +72,7 @@ impl NativeFunction {
             _ => None,
         }
     }
-    pub fn to_pointer<N: Number>(self) -> NFPointer<N> {
+    pub fn as_pointer<N: Number>(self) -> NFPointer<N> {
         match self {
             NativeFunction::Sin => NFPointer::Single(N::sin),
             NativeFunction::Cos => NFPointer::Single(N::cos),
