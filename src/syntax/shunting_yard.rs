@@ -4,7 +4,7 @@ use super::{AstNode, FunctionType, MathAst, SyntaxError, SyntaxErrorKind};
 use crate::{
     BinaryOp, FunctionIdentifier, NAME_LIMIT, UnaryOp, VariableIdentifier, VariableStore,
     asm::CFPointer,
-    number::{MathEvalNumber, NFPointer, NativeFunction},
+    number::{NFPointer, NativeFunction, Number},
     postfix_tree::subtree_collection::SubtreeCollection,
     tokenizer::Token,
 };
@@ -58,7 +58,7 @@ where
     }
     fn to_syn<N, V>(self) -> AstNode<N, V, F>
     where
-        N: MathEvalNumber,
+        N: Number,
         V: VariableIdentifier,
     {
         match self {
@@ -93,7 +93,7 @@ where
 
 pub(super) trait ShuntingYardOutput<N, V, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
@@ -127,13 +127,13 @@ where
 #[derive(Debug, Clone)]
 pub(super) struct SyAstOutput<N, V, F>(pub(super) SubtreeCollection<AstNode<N, V, F>>)
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier;
 
 impl<N, V, F> ShuntingYardOutput<N, V, F> for SyAstOutput<N, V, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
@@ -158,7 +158,7 @@ where
     fn pop_arg(&mut self) -> Option<AstNode<N, V, F>> {
         self.0.pop()
     }
-    fn last_num<'a>(&'a self) -> Option<<N as MathEvalNumber>::AsArg<'a>> {
+    fn last_num<'a>(&'a self) -> Option<<N as Number>::AsArg<'a>> {
         if let Some(AstNode::Number(num)) = self.0.last() {
             Some(num.asarg())
         } else {
@@ -170,7 +170,7 @@ where
 #[derive(Debug, Clone)]
 pub(super) struct SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
     S: VariableStore<N, V>,
@@ -185,7 +185,7 @@ where
 
 impl<'a, 'b, N, V, F, S, C> ShuntingYardOutput<N, V, F> for SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
     S: VariableStore<N, V>,
@@ -343,7 +343,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Segment<N, V>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
 {
     Constant(N),
@@ -356,7 +356,7 @@ fn segment_variable<N, V>(
     variable_parser: &impl Fn(&str) -> Option<V>,
 ) -> Option<Vec<Segment<N, V>>>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
 {
     if input.len() > NAME_LIMIT as usize {
@@ -401,7 +401,7 @@ fn segment_function<N, V, F>(
     function_parser: &impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
 ) -> Option<(Vec<Segment<N, V>>, SyFunction<F>)>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
@@ -464,7 +464,7 @@ pub(super) fn parse_or_eval<'a, O, N, V, F>(
 ) -> Result<O::Output, SyntaxError>
 where
     O: ShuntingYardOutput<N, V, F>,
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {

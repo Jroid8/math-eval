@@ -6,7 +6,7 @@ use std::mem;
 use std::ops::RangeInclusive;
 
 use crate::asm::{CFPointer, Stack};
-use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
+use crate::number::{NFPointer, NativeFunction, Number};
 use crate::postfix_tree::tree_iterators::NodeEdge;
 use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
 use crate::tokenizer::Token;
@@ -45,7 +45,7 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AstNode<N, V, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
@@ -58,7 +58,7 @@ where
 
 impl<N, V, F> Node for AstNode<N, V, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
@@ -148,13 +148,13 @@ impl SyntaxError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MathAst<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
+pub struct MathAst<N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     PostfixTree<AstNode<N, V, F>>,
 );
 
 impl<V, N, F> MathAst<N, V, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
@@ -439,7 +439,7 @@ fn parenthesis_required<N, V, F>(
     target: usize,
 ) -> bool
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
@@ -485,7 +485,7 @@ where
 
 impl<V, N, F> Display for MathAst<N, V, F>
 where
-    N: MathEvalNumber + Display,
+    N: Number + Display,
     V: VariableIdentifier + Display,
     F: FunctionIdentifier + Display,
 {

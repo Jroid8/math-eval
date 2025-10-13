@@ -1,4 +1,7 @@
-use std::{fmt::Debug, ops::{Index, Range}};
+use std::{
+    fmt::Debug,
+    ops::{Index, Range},
+};
 
 use subtree_collection::SubtreeCollection;
 use tree_iterators::{ChildIter, ParentIter, PostOrderIter};
@@ -350,7 +353,7 @@ impl<T: Node> PostfixTree<T> {
         self.0
             .get(idx)
             .and_then(|e| e.parent_distance.as_opt())
-            .map(|pd| pd+idx)
+            .map(|pd| pd + idx)
     }
 
     pub fn nth_child(&self, idx: usize, n: usize) -> Option<usize> {
@@ -362,7 +365,10 @@ impl<T: Node> PostfixTree<T> {
     }
 }
 
-impl<T> Debug for PostfixTree<T> where T: Node + Debug {
+impl<T> Debug for PostfixTree<T>
+where
+    T: Node + Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("PostfixTree[")?;
         for e in &self.0 {

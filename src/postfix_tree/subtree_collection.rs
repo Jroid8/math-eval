@@ -137,7 +137,7 @@ impl<T: Node> SubtreeCollection<T> {
         self.vec
             .get(idx)
             .and_then(|e| e.parent_distance.as_opt())
-            .map(|pd| pd+idx)
+            .map(|pd| pd + idx)
     }
 
     pub fn nth_child(&self, idx: usize, n: usize) -> Option<usize> {

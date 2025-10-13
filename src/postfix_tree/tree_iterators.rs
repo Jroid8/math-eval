@@ -141,7 +141,7 @@ impl<'a, T: Node> NodeEdge<'a, T> {
     pub fn node(&self) -> &'a T {
         match self {
             NodeEdge::Start(node, _) => node,
-            NodeEdge::End(node, _) => node
+            NodeEdge::End(node, _) => node,
         }
     }
 
@@ -149,7 +149,7 @@ impl<'a, T: Node> NodeEdge<'a, T> {
     pub fn index(&self) -> usize {
         match self {
             NodeEdge::Start(_, idx) => *idx,
-            NodeEdge::End(_, idx) => *idx
+            NodeEdge::End(_, idx) => *idx,
         }
     }
 }

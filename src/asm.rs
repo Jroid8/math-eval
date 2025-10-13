@@ -3,21 +3,21 @@ use std::{fmt::Debug, hash::Hash};
 
 use crate::{
     BinaryOp, FunctionIdentifier, UnaryOp, VariableIdentifier,
-    number::{MathEvalNumber, NativeFunction, Reborrow},
+    number::{NativeFunction, Number, Reborrow},
     syntax::AstNode,
 };
 
 pub type Stack<N> = SmallVec<[N; 16]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Input<N: MathEvalNumber> {
+pub enum Input<N: Number> {
     Literal(N),
     Variable(usize),
     Memory,
 }
 
 #[derive(Clone, Copy)]
-pub enum Instruction<'a, N: MathEvalNumber, F: FunctionIdentifier> {
+pub enum Instruction<'a, N: Number, F: FunctionIdentifier> {
     Source(Input<N>),
     BinaryOp(BinaryOp, Input<N>, Input<N>),
     UnaryOp(UnaryOp, Input<N>),
@@ -48,7 +48,7 @@ pub enum Instruction<'a, N: MathEvalNumber, F: FunctionIdentifier> {
 
 impl<N, F> PartialEq for Instruction<'_, N, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     F: FunctionIdentifier + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
@@ -78,14 +78,14 @@ where
 
 impl<N, F> Eq for Instruction<'_, N, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     F: FunctionIdentifier + Eq,
 {
 }
 
 impl<N, F> Debug for Instruction<'_, N, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     F: FunctionIdentifier,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -134,11 +134,11 @@ where
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct MathAssembly<'a, N: MathEvalNumber, F: FunctionIdentifier>(Vec<Instruction<'a, N, F>>);
+pub struct MathAssembly<'a, N: Number, F: FunctionIdentifier>(Vec<Instruction<'a, N, F>>);
 
 impl<N, F> Debug for MathAssembly<'_, N, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     F: FunctionIdentifier,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -154,7 +154,7 @@ where
 #[derive(Clone)]
 pub enum CFPointer<'a, N>
 where
-    N: MathEvalNumber,
+    N: Number,
 {
     Single(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N),
     Dual(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N),
@@ -162,11 +162,11 @@ where
     Flexible(&'a dyn Fn(&[N]) -> N),
 }
 
-impl<'a, N> Copy for CFPointer<'a, N> where N: MathEvalNumber {}
+impl<'a, N> Copy for CFPointer<'a, N> where N: Number {}
 
 impl<N> Debug for CFPointer<'_, N>
 where
-    N: MathEvalNumber,
+    N: Number,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -180,7 +180,7 @@ where
 
 impl<'a, N, F> MathAssembly<'a, N, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     F: FunctionIdentifier,
 {
     pub fn new<V: VariableIdentifier>(
@@ -271,7 +271,7 @@ where
 
 impl<N, F> MathAssembly<'_, N, F>
 where
-    N: for<'b> MathEvalNumber<AsArg<'b> = N> + Copy,
+    N: for<'b> Number<AsArg<'b> = N> + Copy,
     F: FunctionIdentifier,
 {
     pub fn eval_copy(&self, variables: &[N], stack: &mut Stack<N>) -> N {
@@ -321,7 +321,7 @@ mod tests {
     use crate::{
         BinaryOp, ParsingError, UnaryOp,
         asm::{Input, Instruction, MathAssembly},
-        number::{MathEvalNumber, NativeFunction},
+        number::{NativeFunction, Number},
     };
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -401,7 +401,7 @@ mod tests {
                 Instruction::Source(Input::Variable(2)),
                 Instruction::Source(Input::Literal(0.0)),
                 Instruction::<'_, f64, TestFunc>::NFFlexible(
-                    <f64 as MathEvalNumber>::max,
+                    <f64 as Number>::max,
                     4,
                     NativeFunction::Max
                 )
@@ -453,18 +453,10 @@ mod tests {
                 ),
                 Instruction::BinaryOp(BinaryOp::Div, Input::Memory, Input::Literal(32.0)),
                 Instruction::BinaryOp(BinaryOp::Div, Input::Variable(0), Input::Variable(1)),
-                Instruction::NFSingle(
-                    <f64 as MathEvalNumber>::atan,
-                    Input::Memory,
-                    NativeFunction::Atan
-                ),
+                Instruction::NFSingle(<f64 as Number>::atan, Input::Memory, NativeFunction::Atan),
                 Instruction::BinaryOp(BinaryOp::Div, Input::Memory, Input::Literal(4.0)),
                 Instruction::BinaryOp(BinaryOp::Add, Input::Memory, Input::Memory),
-                Instruction::NFSingle(
-                    <f64 as MathEvalNumber>::sin,
-                    Input::Memory,
-                    NativeFunction::Sin
-                ),
+                Instruction::NFSingle(<f64 as Number>::sin, Input::Memory, NativeFunction::Sin),
             ])
         );
     }
@@ -504,7 +496,7 @@ mod tests {
         );
         assert_eval!(
             [Instruction::NFSingle(
-                <f64 as MathEvalNumber>::sqrt,
+                <f64 as Number>::sqrt,
                 Input::Literal(169.0),
                 NativeFunction::Sqrt
             )],
@@ -512,7 +504,7 @@ mod tests {
         );
         assert_eval!(
             [Instruction::NFDual(
-                <f64 as MathEvalNumber>::log,
+                <f64 as Number>::log,
                 Input::Literal(256.0),
                 Input::Literal(2.0),
                 NativeFunction::Log
@@ -524,7 +516,7 @@ mod tests {
                 Instruction::Source(Input::Literal(8.0)),
                 Instruction::Source(Input::Literal(-2.0)),
                 Instruction::Source(Input::Variable(2)),
-                Instruction::NFFlexible(<f64 as MathEvalNumber>::max, 3, NativeFunction::Max)
+                Instruction::NFFlexible(<f64 as Number>::max, 3, NativeFunction::Max)
             ],
             23.0
         );
@@ -596,11 +588,7 @@ mod tests {
                     Input::Literal(std::f64::consts::PI),
                     Input::Variable(0)
                 ),
-                Instruction::NFSingle(
-                    <f64 as MathEvalNumber>::sin,
-                    Input::Memory,
-                    NativeFunction::Sin
-                ),
+                Instruction::NFSingle(<f64 as Number>::sin, Input::Memory, NativeFunction::Sin),
                 Instruction::BinaryOp(BinaryOp::Add, Input::Memory, Input::Literal(1.0))
             ],
             1.0000000000000002

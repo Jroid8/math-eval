@@ -6,7 +6,7 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy, Hash)]
-pub enum NFPointer<N: MathEvalNumber> {
+pub enum NFPointer<N: Number> {
     Single(for<'a> fn(N::AsArg<'a>) -> N),
     Dual(for<'a> fn(N::AsArg<'a>, N::AsArg<'a>) -> N),
     Flexible(fn(&[N]) -> N),
@@ -72,7 +72,7 @@ impl NativeFunction {
             _ => None,
         }
     }
-    pub fn to_pointer<N: MathEvalNumber>(self) -> NFPointer<N> {
+    pub fn to_pointer<N: Number>(self) -> NFPointer<N> {
         match self {
             NativeFunction::Sin => NFPointer::Single(N::sin),
             NativeFunction::Cos => NFPointer::Single(N::cos),
@@ -169,7 +169,7 @@ impl<T> Reborrow for &'_ T {
     }
 }
 
-pub trait MathEvalNumber:
+pub trait Number:
     Add<Output = Self>
     + Sub<Output = Self>
     + Mul<Output = Self>
@@ -226,7 +226,7 @@ pub trait MathEvalNumber:
     fn asarg(&self) -> Self::AsArg<'_>;
 }
 
-impl MathEvalNumber for f64 {
+impl Number for f64 {
     type AsArg<'a> = f64;
 
     fn pow(value: Self, rhs: Self) -> Self {
