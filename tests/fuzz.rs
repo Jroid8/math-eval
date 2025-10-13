@@ -1,6 +1,6 @@
 use std::panic;
 
-use math_eval::asm::CFPointer;
+use math_eval::FunctionPointer;
 
 fn gen_random_f64() -> f64 {
     fastrand::f64()
@@ -92,7 +92,7 @@ fn operator() {
             |_| None,
             |_| None::<((), _, _)>,
             |_| None::<()>,
-            |_| CFPointer::Single(&|_| 0.0),
+            |_| FunctionPointer::Single(|_| 0.0),
         )
         .unwrap();
         let result = match opr {
@@ -114,10 +114,10 @@ fn operator() {
 #[test]
 fn all_valid() {
     let parser = math_eval::EvalBuilder::new()
-        .add_fn_flex("mean", 2, None, &|inputs: &[f64]| {
+        .add_fn_flex("mean", 2, None, |inputs: &[f64]| {
             inputs.iter().sum::<f64>() / inputs.len() as f64
         })
-        .add_fn2("dist", &|x, y| (x.powi(2) + y.powi(2)).sqrt())
+        .add_fn2("dist", |x, y| (x.powi(2) + y.powi(2)).sqrt())
         .add_variable("x")
         .add_variable("y")
         .add_variable("z")
@@ -191,9 +191,9 @@ fn fuzz_symbols() {
                 },
                 |func| match func {
                     MyFuncs::Mean => {
-                        CFPointer::Flexible(&|inp| inp.iter().sum::<f64>() / inp.len() as f64)
+                        FunctionPointer::Flexible(|inp| inp.iter().sum::<f64>() / inp.len() as f64)
                     }
-                    MyFuncs::Dist => CFPointer::Dual(&|x, y| (x * x + y * y).sqrt()),
+                    MyFuncs::Dist => FunctionPointer::Dual(|x, y| (x * x + y * y).sqrt()),
                 },
             )
         }) {
@@ -226,9 +226,9 @@ fn fuzz_all() {
                 },
                 |func| match func {
                     MyFuncs::Mean => {
-                        CFPointer::Flexible(&|inp| inp.iter().sum::<f64>() / inp.len() as f64)
+                        FunctionPointer::Flexible(|inp| inp.iter().sum::<f64>() / inp.len() as f64)
                     }
-                    MyFuncs::Dist => CFPointer::Dual(&|x, y| (x * x + y * y).sqrt()),
+                    MyFuncs::Dist => FunctionPointer::Dual(|x, y| (x * x + y * y).sqrt()),
                 },
             )
         }) {

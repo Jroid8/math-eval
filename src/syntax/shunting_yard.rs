@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 
 use super::{AstNode, FunctionType, MathAst, SyntaxError, SyntaxErrorKind};
 use crate::{
-    BinaryOp, FunctionIdentifier, NAME_LIMIT, UnaryOp, VariableIdentifier, VariableStore,
-    asm::CFPointer,
+    BinaryOp, FunctionIdentifier, FunctionPointer, NAME_LIMIT, UnaryOp, VariableIdentifier,
+    VariableStore,
     number::{NFPointer, NativeFunction, Number},
     postfix_tree::subtree_collection::SubtreeCollection,
     tokenizer::Token,
@@ -174,7 +174,7 @@ where
     V: VariableIdentifier,
     F: FunctionIdentifier,
     S: VariableStore<N, V>,
-    C: Fn(F) -> CFPointer<'a, N>,
+    C: Fn(F) -> FunctionPointer<'a, N>,
 {
     pub(super) args: Vec<N>,
     pub(super) variable_store: &'b S,
@@ -189,7 +189,7 @@ where
     V: VariableIdentifier,
     F: FunctionIdentifier,
     S: VariableStore<N, V>,
-    C: Fn(F) -> CFPointer<'a, N>,
+    C: Fn(F) -> FunctionPointer<'a, N>,
 {
     type Output = N;
 
@@ -225,17 +225,32 @@ where
                 }
             },
             AstNode::Function(FunctionType::Custom(cf), args) => match (self.cf2pointer)(cf) {
-                CFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
-                CFPointer::Dual(func) => {
+                FunctionPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
+                FunctionPointer::Dual(func) => {
                     let rhs = self.args.pop().unwrap();
                     func(self.args.pop().unwrap().asarg(), rhs.asarg())
                 }
-                CFPointer::Triple(func) => {
+                FunctionPointer::Triple(func) => {
                     let a3 = self.args.pop().unwrap();
                     let a2 = self.args.pop().unwrap();
                     func(self.args.pop().unwrap().asarg(), a2.asarg(), a3.asarg())
                 }
-                CFPointer::Flexible(func) => {
+                FunctionPointer::Flexible(func) => {
+                    let res = func(&self.args[self.args.len() - args as usize..]);
+                    self.args.truncate(self.args.len() - args as usize);
+                    res
+                }
+                FunctionPointer::DynSingle(func) => func(self.args.pop().unwrap().asarg()),
+                FunctionPointer::DynDual(func) => {
+                    let rhs = self.args.pop().unwrap();
+                    func(self.args.pop().unwrap().asarg(), rhs.asarg())
+                }
+                FunctionPointer::DynTriple(func) => {
+                    let a3 = self.args.pop().unwrap();
+                    let a2 = self.args.pop().unwrap();
+                    func(self.args.pop().unwrap().asarg(), a2.asarg(), a3.asarg())
+                }
+                FunctionPointer::DynFlexible(func) => {
                     let res = func(&self.args[self.args.len() - args as usize..]);
                     self.args.truncate(self.args.len() - args as usize);
                     res

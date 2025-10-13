@@ -5,14 +5,14 @@ use std::marker::PhantomData;
 use std::mem;
 use std::ops::RangeInclusive;
 
-use crate::asm::{CFPointer, Stack};
+use crate::asm::Stack;
 use crate::number::{NFPointer, NativeFunction, Number};
 use crate::postfix_tree::tree_iterators::NodeEdge;
 use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
 use crate::tokenizer::Token;
 use crate::{
-    Associativity, BinaryOp, FunctionIdentifier, ParsingError, ParsingErrorKind, UnaryOp,
-    VariableIdentifier, VariableStore,
+    Associativity, BinaryOp, FunctionIdentifier, FunctionPointer, ParsingError, ParsingErrorKind,
+    UnaryOp, VariableIdentifier, VariableStore,
 };
 use shunting_yard::{SyAstOutput, SyNumberOutput, parse_or_eval};
 
@@ -179,7 +179,7 @@ where
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
         variable_values: &'b S,
-        function_to_pointer: impl Fn(F) -> CFPointer<'c, N>,
+        function_to_pointer: impl Fn(F) -> FunctionPointer<'c, N>,
     ) -> Result<N, SyntaxError> {
         parse_or_eval(
             SyNumberOutput {
@@ -219,7 +219,7 @@ where
 
     pub fn eval<'a>(
         &self,
-        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+        function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
         variable_values: &impl crate::VariableStore<N, V>,
     ) -> N {
         Self::_eval(
@@ -233,7 +233,7 @@ where
 
     fn _eval<'a, 'b>(
         tree: impl IntoIterator<Item = &'a AstNode<N, V, F>>,
-        functibn_to_pointer: impl Fn(F) -> CFPointer<'b, N>,
+        functibn_to_pointer: impl Fn(F) -> FunctionPointer<'b, N>,
         variable_values: &impl crate::VariableStore<N, V>,
         stack: &mut Stack<N>,
     ) -> Result<N, usize> {
@@ -262,17 +262,33 @@ where
                 },
                 AstNode::Function(FunctionType::Custom(cf), argc) => match functibn_to_pointer(*cf)
                 {
-                    CFPointer::Single(func) => func(pop()?.asarg()),
-                    CFPointer::Dual(func) => {
+                    FunctionPointer::Single(func) => func(pop()?.asarg()),
+                    FunctionPointer::Dual(func) => {
                         let arg2 = pop()?;
                         func(pop()?.asarg(), arg2.asarg())
                     }
-                    CFPointer::Triple(func) => {
+                    FunctionPointer::Triple(func) => {
                         let arg3 = pop()?;
                         let arg2 = pop()?;
                         func(pop()?.asarg(), arg2.asarg(), arg3.asarg())
                     }
-                    CFPointer::Flexible(func) => {
+                    FunctionPointer::Flexible(func) => {
+                        let new_len = stack.len() - *argc as usize;
+                        let res = func(&stack[new_len..]);
+                        stack.truncate(new_len);
+                        res
+                    }
+                    FunctionPointer::DynSingle(func) => func(pop()?.asarg()),
+                    FunctionPointer::DynDual(func) => {
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg())
+                    }
+                    FunctionPointer::DynTriple(func) => {
+                        let arg3 = pop()?;
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg(), arg3.asarg())
+                    }
+                    FunctionPointer::DynFlexible(func) => {
                         let new_len = stack.len() - *argc as usize;
                         let res = func(&stack[new_len..]);
                         stack.truncate(new_len);
@@ -285,7 +301,10 @@ where
         stack.pop().ok_or(0)
     }
 
-    pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(F) -> CFPointer<'a, N>) {
+    pub fn aot_evaluation<'a>(
+        &mut self,
+        function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
+    ) {
         let mut varless: Vec<bool> = Vec::with_capacity(self.0.len());
         for (idx, node) in self.0.postorder_iter().enumerate() {
             let res = match node {
@@ -604,14 +623,14 @@ mod tests {
                 _ => None,
             }
         }
-        fn as_pointer(self) -> CFPointer<'static, f64> {
+        fn as_pointer(self) -> FunctionPointer<'static, f64> {
             match self {
-                TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
-                TestFunc::ExpD => CFPointer::Dual(&|l: f64, x: f64| l.powf(-l * x)),
+                TestFunc::Deg2Rad => FunctionPointer::Single(|x: f64| x.to_radians()),
+                TestFunc::ExpD => FunctionPointer::Dual(|l: f64, x: f64| l.powf(-l * x)),
                 TestFunc::Clamp => {
-                    CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min))
+                    FunctionPointer::Triple(|x: f64, min: f64, max: f64| x.min(max).max(min))
                 }
-                TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
+                TestFunc::Digits => FunctionPointer::Flexible(|values: &[f64]| {
                     values
                         .iter()
                         .enumerate()

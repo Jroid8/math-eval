@@ -2,7 +2,7 @@ use smallvec::SmallVec;
 use std::{fmt::Debug, hash::Hash};
 
 use crate::{
-    BinaryOp, FunctionIdentifier, UnaryOp, VariableIdentifier,
+    BinaryOp, FunctionIdentifier, FunctionPointer, UnaryOp, VariableIdentifier,
     number::{NativeFunction, Number, Reborrow},
     syntax::AstNode,
 };
@@ -151,33 +151,6 @@ where
     }
 }
 
-#[derive(Clone)]
-pub enum CFPointer<'a, N>
-where
-    N: Number,
-{
-    Single(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N),
-    Dual(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N),
-    Triple(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
-    Flexible(&'a dyn Fn(&[N]) -> N),
-}
-
-impl<'a, N> Copy for CFPointer<'a, N> where N: Number {}
-
-impl<N> Debug for CFPointer<'_, N>
-where
-    N: Number,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Single(_) => f.write_str("Single"),
-            Self::Dual(_) => f.write_str("Dual"),
-            Self::Triple(_) => f.write_str("Triple"),
-            Self::Flexible(_) => f.write_str("Flexible"),
-        }
-    }
-}
-
 impl<'a, N, F> MathAssembly<'a, N, F>
 where
     N: Number,
@@ -185,7 +158,7 @@ where
 {
     pub fn new<V: VariableIdentifier>(
         tree: Vec<AstNode<N, V, F>>,
-        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+        function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
         variable_order: &[V],
     ) -> Self {
         todo!()

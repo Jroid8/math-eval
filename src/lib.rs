@@ -6,7 +6,7 @@ use std::{
     ops::RangeInclusive,
 };
 
-use asm::{CFPointer, MathAssembly, Stack};
+use asm::{MathAssembly, Stack};
 use number::Number;
 use seq_macro::seq;
 use syntax::MathAst;
@@ -257,12 +257,44 @@ where
     }
 }
 
+#[derive(Clone)]
+pub enum FunctionPointer<'a, N>
+where
+    N: Number,
+{
+    Single(for<'b> fn(N::AsArg<'b>) -> N),
+    Dual(for<'b, 'c> fn(N::AsArg<'b>, N::AsArg<'c>) -> N),
+    Triple(for<'b, 'c, 'd> fn(N::AsArg<'b>, N::AsArg<'c>, N::AsArg<'d>) -> N),
+    Flexible(fn(&[N]) -> N),
+    DynSingle(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N),
+    DynDual(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N),
+    DynTriple(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
+    DynFlexible(&'a dyn Fn(&[N]) -> N),
+}
+
+impl<'a, N> Copy for FunctionPointer<'a, N> where N: Number {}
+
+impl<N: Number> Debug for FunctionPointer<'_, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Single(_) => f.write_str("Single"),
+            Self::Dual(_) => f.write_str("Dual"),
+            Self::Triple(_) => f.write_str("Triple"),
+            Self::Flexible(_) => f.write_str("Flexible"),
+            Self::DynSingle(_) => f.write_str("DynSingle"),
+            Self::DynDual(_) => f.write_str("DynDual"),
+            Self::DynTriple(_) => f.write_str("DynTriple"),
+            Self::DynFlexible(_) => f.write_str("DynFlexible"),
+        }
+    }
+}
+
 pub fn compile<'a, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
-    function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+    function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
 ) -> Result<MathAssembly<'a, N, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let mut syntax_tree = MathAst::new(
@@ -282,7 +314,7 @@ pub fn evaluate<'a, 'b, N: Number, V: VariableIdentifier, F: FunctionIdentifier>
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
-    function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+    function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
     variable_values: &impl VariableStore<N, V>,
 ) -> Result<N, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
@@ -322,18 +354,18 @@ pub struct EvalRef;
 pub struct EvalCopy;
 
 #[derive(Clone, Debug)]
-pub struct EvalBuilder<'a, N, V, E>
+pub struct EvalBuilder<'a, N, V = NoVariable, E = EvalCopy>
 where
     N: Number,
 {
     constants: HashMap<String, N>,
     function_identifier: HashMap<String, (usize, u8, Option<u8>)>,
-    functions: Vec<CFPointer<'a, N>>,
+    functions: Vec<FunctionPointer<'a, N>>,
     variables: V,
     evalmethod: E,
 }
 
-impl<N> Default for EvalBuilder<'_, N, NoVariable, EvalCopy>
+impl<N> Default for EvalBuilder<'_, N>
 where
     N: Number,
 {
@@ -348,6 +380,15 @@ where
     }
 }
 
+impl<'a, N> EvalBuilder<'a, N>
+where
+    N: Number,
+{
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 impl<'a, N, V, E> EvalBuilder<'a, N, V, E>
 where
     N: Number,
@@ -356,37 +397,93 @@ where
         self.constants.insert(name.into(), value);
         self
     }
+
     pub fn add_fn1(
         mut self,
         name: impl Into<String>,
-        function: &'a dyn Fn(N::AsArg<'_>) -> N,
+        function: for<'b> fn(N::AsArg<'b>) -> N,
     ) -> Self {
         self.function_identifier
             .insert(name.into(), (self.functions.len(), 1, Some(1)));
-        self.functions.push(CFPointer::Single(function));
+        self.functions.push(FunctionPointer::Single(function));
         self
     }
+
     pub fn add_fn2(
         mut self,
         name: impl Into<String>,
-        function: &'a dyn Fn(N::AsArg<'_>, N::AsArg<'_>) -> N,
+        function: for<'b, 'c> fn(N::AsArg<'b>, N::AsArg<'c>) -> N,
     ) -> Self {
         self.function_identifier
             .insert(name.into(), (self.functions.len(), 2, Some(2)));
-        self.functions.push(CFPointer::Dual(function));
+        self.functions.push(FunctionPointer::Dual(function));
         self
     }
+
     pub fn add_fn3(
         mut self,
         name: impl Into<String>,
-        function: &'a dyn Fn(N::AsArg<'_>, N::AsArg<'_>, N::AsArg<'_>) -> N,
+        function: for<'b, 'c, 'd> fn(N::AsArg<'b>, N::AsArg<'c>, N::AsArg<'d>) -> N,
     ) -> Self {
         self.function_identifier
             .insert(name.into(), (self.functions.len(), 3, Some(3)));
-        self.functions.push(CFPointer::Triple(function));
+        self.functions.push(FunctionPointer::Triple(function));
         self
     }
+
     pub fn add_fn_flex(
+        mut self,
+        name: impl Into<String>,
+        mininum_argument_count: u8,
+        maximum_argument_count: Option<u8>,
+        function: fn(&[N]) -> N,
+    ) -> Self {
+        self.function_identifier.insert(
+            name.into(),
+            (
+                self.functions.len(),
+                mininum_argument_count,
+                maximum_argument_count,
+            ),
+        );
+        self.functions.push(FunctionPointer::Flexible(function));
+        self
+    }
+
+    pub fn add_dyn_fn1(
+        mut self,
+        name: impl Into<String>,
+        function: &'a dyn for<'b> Fn(N::AsArg<'b>) -> N,
+    ) -> Self {
+        self.function_identifier
+            .insert(name.into(), (self.functions.len(), 1, Some(1)));
+        self.functions.push(FunctionPointer::DynSingle(function));
+        self
+    }
+
+    pub fn add_dyn_fn2(
+        mut self,
+        name: impl Into<String>,
+        function: &'a dyn for<'b, 'c> Fn(N::AsArg<'b>, N::AsArg<'c>) -> N,
+    ) -> Self {
+        self.function_identifier
+            .insert(name.into(), (self.functions.len(), 2, Some(2)));
+        self.functions.push(FunctionPointer::DynDual(function));
+        self
+    }
+
+    pub fn add_dyn_fn3(
+        mut self,
+        name: impl Into<String>,
+        function: &'a dyn for<'b, 'c, 'd> Fn(N::AsArg<'b>, N::AsArg<'c>, N::AsArg<'d>) -> N,
+    ) -> Self {
+        self.function_identifier
+            .insert(name.into(), (self.functions.len(), 3, Some(3)));
+        self.functions.push(FunctionPointer::DynTriple(function));
+        self
+    }
+
+    pub fn add_dyn_fn_flex(
         mut self,
         name: impl Into<String>,
         mininum_argument_count: u8,
@@ -401,7 +498,7 @@ where
                 maximum_argument_count,
             ),
         );
-        self.functions.push(CFPointer::Flexible(function));
+        self.functions.push(FunctionPointer::DynFlexible(function));
         self
     }
 }
@@ -470,9 +567,6 @@ impl<'a, N> EvalBuilder<'a, N, NoVariable, EvalCopy>
 where
     N: for<'b> Number<AsArg<'b> = N> + Copy,
 {
-    pub fn new() -> Self {
-        Self::default()
-    }
     pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
         let expr = compile(
             input,
@@ -778,7 +872,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::asm::CFPointer;
+    use crate::FunctionPointer;
 
     #[derive(PartialEq, Debug)]
     struct UnexpectedBuilderFieldValues<V> {
@@ -833,12 +927,30 @@ mod tests {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, cfp)| match cfp {
-                    CFPointer::Single(f) => Some((i, f(0.0))).filter(|(i, v)| *i != *v as usize),
-                    CFPointer::Dual(f) => Some((i, f(0.0, 0.0))).filter(|(i, v)| *i != *v as usize),
-                    CFPointer::Triple(f) => {
+                    FunctionPointer::Single(f) => {
+                        Some((i, f(0.0))).filter(|(i, v)| *i != *v as usize)
+                    }
+                    FunctionPointer::Dual(f) => {
+                        Some((i, f(0.0, 0.0))).filter(|(i, v)| *i != *v as usize)
+                    }
+                    FunctionPointer::Triple(f) => {
                         Some((i, f(0.0, 0.0, 0.0))).filter(|(i, v)| *i != *v as usize)
                     }
-                    CFPointer::Flexible(f) => Some((i, f(&[]))).filter(|(i, v)| *i != *v as usize),
+                    FunctionPointer::Flexible(f) => {
+                        Some((i, f(&[]))).filter(|(i, v)| *i != *v as usize)
+                    }
+                    FunctionPointer::DynSingle(f) => {
+                        Some((i, f(0.0))).filter(|(i, v)| *i != *v as usize)
+                    }
+                    FunctionPointer::DynDual(f) => {
+                        Some((i, f(0.0, 0.0))).filter(|(i, v)| *i != *v as usize)
+                    }
+                    FunctionPointer::DynTriple(f) => {
+                        Some((i, f(0.0, 0.0, 0.0))).filter(|(i, v)| *i != *v as usize)
+                    }
+                    FunctionPointer::DynFlexible(f) => {
+                        Some((i, f(&[]))).filter(|(i, v)| *i != *v as usize)
+                    }
                 })
                 .collect(),
             variables: (builder.variables != variables).then_some((builder.variables, variables)),
@@ -894,7 +1006,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new().add_fn1("f1", &|_| 0.0),
+            EvalBuilder::new().add_fn1("f1", |_| 0.0),
             [].into_iter(),
             [("f1", 0, 1, Some(1))].into_iter(),
             NoVariable,
@@ -903,8 +1015,19 @@ mod tests {
 
         test!(compare(
             EvalBuilder::new()
-                .add_fn1("f2", &|_| 0.0)
+                .add_fn1("f2", |_| 0.0)
                 .add_constant("c1", 7.319),
+            [("c1", 7.319)].into_iter(),
+            [("f2", 0, 1, Some(1))].into_iter(),
+            NoVariable,
+            EvalCopy
+        ));
+
+        let zero = String::from("0");
+        test!(compare(
+            EvalBuilder::new()
+                .add_constant("c1", 7.319)
+                .add_dyn_fn1("f2", &|_| zero.parse().unwrap()),
             [("c1", 7.319)].into_iter(),
             [("f2", 0, 1, Some(1))].into_iter(),
             NoVariable,
@@ -913,8 +1036,19 @@ mod tests {
 
         test!(compare(
             EvalBuilder::new()
-                .add_fn1("f1", &|_| 0.0)
-                .add_fn2("f2", &|_, _| 1.0),
+                .add_fn1("f1", |_| 0.0)
+                .add_fn2("f2", |_, _| 1.0),
+            [].into_iter(),
+            [("f1", 0, 1, Some(1)), ("f2", 1, 2, Some(2))].into_iter(),
+            NoVariable,
+            EvalCopy
+        ));
+
+        let one = String::from("1");
+        test!(compare(
+            EvalBuilder::new()
+                .add_dyn_fn1("f1", &|_| zero.parse().unwrap())
+                .add_dyn_fn2("f2", &|_, _| one.parse().unwrap()),
             [].into_iter(),
             [("f1", 0, 1, Some(1)), ("f2", 1, 2, Some(2))].into_iter(),
             NoVariable,
@@ -923,8 +1057,8 @@ mod tests {
 
         test!(compare(
             EvalBuilder::new()
-                .add_fn2("f2", &|_, _| 0.0)
-                .add_fn3("f3", &|_, _, _| 1.0),
+                .add_dyn_fn2("f2", &|_, _| zero.parse().unwrap())
+                .add_fn3("f3", |_, _, _| 1.0),
             [].into_iter(),
             [("f2", 0, 2, Some(2)), ("f3", 1, 3, Some(3))].into_iter(),
             NoVariable,
@@ -933,9 +1067,9 @@ mod tests {
 
         test!(compare(
             EvalBuilder::new()
-                .add_fn2("f2", &|_, _| 0.0)
-                .add_fn3("f3", &|_, _, _| 1.0)
-                .add_fn_flex("ff", 3, None, &|_| 2.0),
+                .add_fn2("f2", |_, _| 0.0)
+                .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
+                .add_fn_flex("ff", 3, None, |_| 2.0),
             [].into_iter(),
             [
                 ("f2", 0, 2, Some(2)),
@@ -947,12 +1081,13 @@ mod tests {
             EvalCopy
         ));
 
+        let two = String::from("2");
         test!(compare(
             EvalBuilder::new()
                 .add_variable("t")
-                .add_fn2("f2", &|_, _| 0.0)
-                .add_fn3("f3", &|_, _, _| 1.0)
-                .add_fn_flex("ff", 3, None, &|_| 2.0),
+                .add_fn2("f2", |_, _| 0.0)
+                .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
+                .add_dyn_fn_flex("ff", 3, None, &|_| two.parse().unwrap()),
             [].into_iter(),
             [
                 ("f2", 0, 2, Some(2)),
@@ -986,10 +1121,10 @@ mod tests {
         test!(compare(
             EvalBuilder::new()
                 .add_variable("y")
-                .add_fn2("f2", &|_, _| 0.0)
+                .add_dyn_fn2("f2", &|_, _| zero.parse().unwrap())
                 .add_variable("x")
-                .add_fn3("f3", &|_, _, _| 1.0)
-                .add_fn_flex("ff", 3, None, &|_| 2.0),
+                .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
+                .add_dyn_fn_flex("ff", 3, None, &|_| two.parse().unwrap()),
             [].into_iter(),
             [
                 ("f2", 0, 2, Some(2)),
@@ -1014,12 +1149,12 @@ mod tests {
 
         test!(compare(
             EvalBuilder::new()
-                .add_fn3("f0", &|_, _, _| 0.0)
+                .add_fn3("f0", |_, _, _| 0.0)
                 .add_variable("y")
-                .add_fn3("f1", &|_, _, _| 1.0)
-                .add_fn3("f2", &|_, _, _| 2.0)
+                .add_fn3("f1", |_, _, _| 1.0)
+                .add_fn3("f2", |_, _, _| 2.0)
                 .add_variable("x")
-                .add_fn3("f3", &|_, _, _| 3.0)
+                .add_fn3("f3", |_, _, _| 3.0)
                 .add_variable("z")
                 .use_ref(),
             [].into_iter(),
@@ -1051,18 +1186,19 @@ mod tests {
             EvalCopy
         ));
 
+        let three = String::from("3");
         test!(compare(
             EvalBuilder::new()
-                .add_fn1("f0", &|_| 0.0)
+                .add_dyn_fn1("f0", &|_| zero.parse().unwrap())
                 .add_variable("y")
                 .add_constant("c", 9.999999)
-                .add_fn2("f1", &|_, _| 1.0)
+                .add_fn2("f1", |_, _| 1.0)
                 .add_variable("x")
-                .add_fn3("f2", &|_, _, _| 2.0)
+                .add_fn3("f2", |_, _, _| 2.0)
                 .add_variable("z")
-                .add_fn_flex("f3", 1, Some(5), &|_| 3.0)
+                .add_dyn_fn_flex("f3", 1, Some(5), &|_| three.parse().unwrap())
                 .add_variable("w")
-                .add_fn1("f4", &|_| 4.0),
+                .add_fn1("f4", |_| 4.0),
             [("c", 9.999999)].into_iter(),
             [
                 ("f0", 0, 1, Some(1)),
@@ -1102,20 +1238,20 @@ mod tests {
 
         test!(compare(
             EvalBuilder::new()
-                .add_fn1("f0", &|_| 0.0)
+                .add_fn1("f0", |_| 0.0)
                 .add_variable("y")
                 .use_ref()
                 .add_constant("c", 9.999999)
                 .add_constant("ce", 2.222222)
-                .add_fn2("f1", &|_, _| 1.0)
+                .add_fn2("f1", |_, _| 1.0)
                 .add_variable("x")
-                .add_fn3("f2", &|_, _, _| 2.0)
+                .add_fn3("f2", |_, _, _| 2.0)
                 .add_variable("z")
-                .add_fn_flex("f3", 1, Some(5), &|_| 3.0)
+                .add_fn_flex("f3", 1, Some(5), |_| 3.0)
                 .add_variable("w")
-                .add_fn1("f4", &|_| 4.0)
+                .add_fn1("f4", |_| 4.0)
                 .add_variable("t")
-                .add_fn_flex("f5", 5, None, &|_| 5.0),
+                .add_fn_flex("f5", 5, None, |_| 5.0),
             [("c", 9.999999), ("ce", 2.222222)].into_iter(),
             [
                 ("f0", 0, 1, Some(1)),
@@ -1135,5 +1271,42 @@ mod tests {
             ]),
             EvalRef
         ));
+
+        let four = String::from("4");
+        test!(compare(
+            EvalBuilder::new()
+                .add_dyn_fn1("f0", &|_| zero.parse().unwrap())
+                .add_variable("y")
+                .add_constant("c", 9.999999)
+                .add_constant("ce", 2.222222)
+                .add_dyn_fn2("f1", &|_, _| one.parse().unwrap())
+                .add_variable("x")
+                .add_dyn_fn3("f2", &|_, _, _| two.parse().unwrap())
+                .add_variable("z")
+                .add_dyn_fn_flex("f3", 1, Some(5), &|_| three.parse().unwrap())
+                .add_variable("w")
+                .add_dyn_fn1("f4", &|_| four.parse().unwrap())
+                .add_variable("t")
+                .add_dyn_fn_flex("f5", 5, None, &|_| three.parse::<f64>().unwrap()
+                    + two.parse::<f64>().unwrap()),
+            [("c", 9.999999), ("ce", 2.222222)].into_iter(),
+            [
+                ("f0", 0, 1, Some(1)),
+                ("f1", 1, 2, Some(2)),
+                ("f2", 2, 3, Some(3)),
+                ("f3", 3, 1, Some(5)),
+                ("f4", 4, 1, Some(1)),
+                ("f5", 5, 5, None)
+            ]
+            .into_iter(),
+            ManyVariables(vec![
+                String::from("y"),
+                String::from("x"),
+                String::from("z"),
+                String::from("w"),
+                String::from("t")
+            ]),
+            EvalCopy
+        ))
     }
 }
