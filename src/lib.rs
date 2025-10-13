@@ -12,6 +12,8 @@ use seq_macro::seq;
 use syntax::MathAst;
 use tokenizer::TokenStream;
 
+use crate::number::NFPointer;
+
 pub mod asm;
 pub mod number;
 pub mod postfix_tree;
@@ -57,6 +59,14 @@ impl UnaryOp {
         match self {
             UnaryOp::Neg => 0,
             UnaryOp::Fac | UnaryOp::DoubleFac => 1,
+        }
+    }
+
+    pub fn as_pointer<N: Number>(self) -> for<'a> fn(N::AsArg<'a>) -> N {
+        match self {
+            UnaryOp::Fac => N::factorial,
+            UnaryOp::Neg => |v| -v,
+            UnaryOp::DoubleFac => N::double_factorial,
         }
     }
 }
@@ -136,6 +146,17 @@ impl BinaryOp {
             BinaryOp::Add | BinaryOp::Mul => Associativity::Both,
             BinaryOp::Sub | BinaryOp::Div | BinaryOp::Mod => Associativity::Left,
             BinaryOp::Pow => Associativity::Right,
+        }
+    }
+
+    pub fn as_pointer<N: Number>(self) -> for<'a, 'b> fn(N::AsArg<'a>, N::AsArg<'b>) -> N {
+        match self {
+            BinaryOp::Add => |x, y| x + y,
+            BinaryOp::Sub => |x, y| x - y,
+            BinaryOp::Mul => |x, y| x * y,
+            BinaryOp::Div => |x, y| x / y,
+            BinaryOp::Pow => N::pow,
+            BinaryOp::Mod => N::modulo,
         }
     }
 }
@@ -285,6 +306,16 @@ impl<N: Number> Debug for FunctionPointer<'_, N> {
             Self::DynDual(_) => f.write_str("DynDual"),
             Self::DynTriple(_) => f.write_str("DynTriple"),
             Self::DynFlexible(_) => f.write_str("DynFlexible"),
+        }
+    }
+}
+
+impl<N: Number> From<NFPointer<N>> for FunctionPointer<'static, N> {
+    fn from(value: NFPointer<N>) -> Self {
+        match value {
+            NFPointer::Single(func) => FunctionPointer::Single(func),
+            NFPointer::Dual(func) => FunctionPointer::Dual(func),
+            NFPointer::Flexible(func) => FunctionPointer::Flexible(func),
         }
     }
 }

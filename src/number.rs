@@ -8,7 +8,7 @@ use std::{
 #[derive(Debug, Clone, Copy, Hash)]
 pub enum NFPointer<N: Number> {
     Single(for<'a> fn(N::AsArg<'a>) -> N),
-    Dual(for<'a> fn(N::AsArg<'a>, N::AsArg<'a>) -> N),
+    Dual(for<'a, 'b> fn(N::AsArg<'a>, N::AsArg<'b>) -> N),
     Flexible(fn(&[N]) -> N),
 }
 
