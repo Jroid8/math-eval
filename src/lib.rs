@@ -379,13 +379,7 @@ pub struct FourVariables([String; 4]);
 pub struct ManyVariables(Vec<String>);
 
 #[derive(Clone, Debug)]
-pub struct EvalRef;
-
-#[derive(Clone, Debug)]
-pub struct EvalCopy;
-
-#[derive(Clone, Debug)]
-pub struct EvalBuilder<'a, N, V = NoVariable, E = EvalCopy>
+pub struct EvalBuilder<'a, N, V = NoVariable>
 where
     N: Number,
 {
@@ -393,7 +387,6 @@ where
     function_identifier: HashMap<String, (usize, u8, Option<u8>)>,
     functions: Vec<FunctionPointer<'a, N>>,
     variables: V,
-    evalmethod: E,
 }
 
 impl<N> Default for EvalBuilder<'_, N>
@@ -406,7 +399,6 @@ where
             function_identifier: HashMap::default(),
             functions: Vec::default(),
             variables: NoVariable,
-            evalmethod: EvalCopy,
         }
     }
 }
@@ -420,7 +412,7 @@ where
     }
 }
 
-impl<'a, N, V, E> EvalBuilder<'a, N, V, E>
+impl<'a, N, V> EvalBuilder<'a, N, V>
 where
     N: Number,
 {
@@ -534,33 +526,16 @@ where
     }
 }
 
-impl<'a, N, V> EvalBuilder<'a, N, V, EvalCopy>
+impl<'a, N> EvalBuilder<'a, N, NoVariable>
 where
     N: Number,
 {
-    pub fn use_ref(self) -> EvalBuilder<'a, N, V, EvalRef> {
-        EvalBuilder {
-            constants: self.constants,
-            function_identifier: self.function_identifier,
-            functions: self.functions,
-            variables: self.variables,
-            evalmethod: EvalRef,
-        }
-    }
-}
-
-impl<'a, N, E> EvalBuilder<'a, N, NoVariable, E>
-where
-    N: Number,
-    E: 'static,
-{
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, OneVariable, E> {
+    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, OneVariable> {
         EvalBuilder {
             variables: OneVariable(name.into()),
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
-            evalmethod: self.evalmethod,
         }
     }
     pub fn build_as_evaluator(self) -> impl Fn(&str) -> Result<N, ParsingError> + 'a {
@@ -577,24 +552,7 @@ where
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, NoVariable, EvalRef>
-where
-    N: Number,
-{
-    pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
-        let expr = compile(
-            input,
-            |inp| self.constants.get(inp).cloned(),
-            |inp| self.function_identifier.get(inp).copied(),
-            |_| None::<()>,
-            |idx| self.functions[idx],
-        )?;
-        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-        Ok(move || expr.eval(&[], &mut stack))
-    }
-}
-
-impl<'a, N> EvalBuilder<'a, N, NoVariable, EvalCopy>
+impl<'a, N> EvalBuilder<'a, N, NoVariable>
 where
     N: for<'b> Number<AsArg<'b> = N> + Copy,
 {
@@ -611,18 +569,16 @@ where
     }
 }
 
-impl<'a, N, E> EvalBuilder<'a, N, OneVariable, E>
+impl<'a, N> EvalBuilder<'a, N, OneVariable>
 where
     N: Number,
-    E: 'static,
 {
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, TwoVariables, E> {
+    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, TwoVariables> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
             variables: TwoVariables([self.variables.0, name.into()]),
-            evalmethod: self.evalmethod,
         }
     }
     pub fn build_as_evaluator(self) -> impl Fn(&str, N) -> Result<N, ParsingError> + 'a {
@@ -639,7 +595,7 @@ where
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, OneVariable, EvalRef>
+impl<'a, N> EvalBuilder<'a, N, OneVariable>
 where
     N: Number,
 {
@@ -656,26 +612,6 @@ where
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move |v0| expr.eval(&[v0], &mut stack))
-    }
-}
-
-impl<'a, N> EvalBuilder<'a, N, OneVariable, EvalCopy>
-where
-    N: for<'b> Number<AsArg<'b> = N> + Copy,
-{
-    pub fn build_as_function<'b>(
-        self,
-        input: &str,
-    ) -> Result<impl FnMut(N::AsArg<'b>) -> N + 'a, ParsingError> {
-        let expr = compile(
-            input,
-            |inp| self.constants.get(inp).copied(),
-            |inp| self.function_identifier.get(inp).copied(),
-            |inp| (self.variables.0 == inp).then_some(()),
-            |idx| self.functions[idx],
-        )?;
-        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-        Ok(move |v0| expr.eval_copy(&[v0], &mut stack))
     }
 }
 
@@ -715,7 +651,7 @@ macro_rules! fn_build_as_evaluator {
 }
 
 macro_rules! fn_build_as_function {
-    ($n: expr, $f: ident) => {
+    ($n: expr) => {
         seq!(I in 0..$n {
             pub fn build_as_function<'b>(
                 self,
@@ -729,7 +665,7 @@ macro_rules! fn_build_as_function {
                     |idx| self.functions[idx],
                 )?;
                 let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-                Ok(move |#(v~I,)*| expr.$f(&[#(v~I,)*], &mut stack))
+                Ok(move |#(v~I,)*| expr.eval(&[#(v~I,)*], &mut stack))
             }
         });
     };
@@ -738,95 +674,69 @@ macro_rules! fn_build_as_function {
 macro_rules! fn_add_variable {
     ($n: expr, $next: ident) => {
         seq!(I in 0..$n {
-            pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, $next, E> {
+            pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, $next> {
                 let mut iter = self.variables.0.into_iter();
                 EvalBuilder {
                     constants: self.constants,
                     function_identifier: self.function_identifier,
                     functions: self.functions,
                     variables: $next([#(iter.next().unwrap(),)* name.into()]),
-                    evalmethod: self.evalmethod
                 }
             }
         });
     };
 }
 
-impl<'a, N, E> EvalBuilder<'a, N, TwoVariables, E>
+impl<'a, N> EvalBuilder<'a, N, TwoVariables>
 where
     N: Number,
-    E: 'static,
 {
     fn_add_variable!(2, ThreeVariables);
     fn_build_as_evaluator!(2);
 }
 
-impl<'a, N> EvalBuilder<'a, N, TwoVariables, EvalCopy>
-where
-    N: for<'b> Number<AsArg<'b> = N> + Copy,
-{
-    fn_build_as_function!(2, eval_copy);
-}
-
-impl<'a, N> EvalBuilder<'a, N, TwoVariables, EvalRef>
+impl<'a, N> EvalBuilder<'a, N, TwoVariables>
 where
     N: Number,
 {
-    fn_build_as_function!(2, eval);
+    fn_build_as_function!(2);
 }
 
-impl<'a, N, E> EvalBuilder<'a, N, ThreeVariables, E>
+impl<'a, N> EvalBuilder<'a, N, ThreeVariables>
 where
     N: Number,
-    E: 'static,
 {
     fn_add_variable!(3, FourVariables);
     fn_build_as_evaluator!(3);
 }
 
-impl<'a, N> EvalBuilder<'a, N, ThreeVariables, EvalRef>
+impl<'a, N> EvalBuilder<'a, N, ThreeVariables>
 where
     N: Number,
 {
-    fn_build_as_function!(3, eval);
+    fn_build_as_function!(3);
 }
 
-impl<'a, N> EvalBuilder<'a, N, ThreeVariables, EvalCopy>
-where
-    N: for<'b> Number<AsArg<'b> = N> + Copy,
-{
-    fn_build_as_function!(3, eval_copy);
-}
-
-impl<'a, N, E> EvalBuilder<'a, N, FourVariables, E>
+impl<'a, N> EvalBuilder<'a, N, FourVariables>
 where
     N: Number,
-    E: 'static,
 {
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, ManyVariables, E> {
+    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, ManyVariables> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
             variables: ManyVariables(self.variables.0.into_iter().chain([name.into()]).collect()),
-            evalmethod: self.evalmethod,
         }
     }
     fn_build_as_evaluator!(4);
 }
 
-impl<'a, N> EvalBuilder<'a, N, FourVariables, EvalRef>
+impl<'a, N> EvalBuilder<'a, N, FourVariables>
 where
     N: Number,
 {
-    fn_build_as_function!(4, eval);
-}
-
-impl<'a, N> EvalBuilder<'a, N, FourVariables, EvalCopy>
-where
-    N: for<'b> Number<AsArg<'b> = N> + Copy,
-{
-    fn_build_as_function!(4, eval_copy);
+    fn_build_as_function!(4);
 }
 
 impl<N> VariableStore<N, usize> for &'_ [N]
@@ -839,10 +749,9 @@ where
     }
 }
 
-impl<'a, N, E> EvalBuilder<'a, N, ManyVariables, E>
+impl<'a, N> EvalBuilder<'a, N, ManyVariables>
 where
     N: Number,
-    E: 'static,
 {
     pub fn build_as_evaluator(self) -> impl Fn(&str, &[N]) -> Result<N, ParsingError> + 'a {
         move |input, vars| {
@@ -858,7 +767,7 @@ where
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, ManyVariables, EvalRef>
+impl<'a, N> EvalBuilder<'a, N, ManyVariables>
 where
     N: Number,
 {
@@ -875,26 +784,6 @@ where
         )?;
         let mut stack = Stack::with_capacity(expr.stack_alloc_size());
         Ok(move |vars| expr.eval(vars, &mut stack))
-    }
-}
-
-impl<'a, N> EvalBuilder<'a, N, ManyVariables, EvalCopy>
-where
-    N: for<'b> Number<AsArg<'b> = N> + Copy,
-{
-    pub fn build_as_function<'b>(
-        self,
-        input: &str,
-    ) -> Result<impl FnMut(&'b [N::AsArg<'b>]) -> N + 'a, ParsingError> {
-        let expr = compile(
-            input,
-            |inp| self.constants.get(inp).copied(),
-            |inp| self.function_identifier.get(inp).copied(),
-            |inp| self.variables.0.iter().position(|var| var == inp),
-            |idx| self.functions[idx],
-        )?;
-        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-        Ok(move |vars| expr.eval_copy(vars, &mut stack))
     }
 }
 
@@ -938,12 +827,11 @@ mod tests {
     }
 
     #[allow(clippy::result_large_err)]
-    fn compare<V: PartialEq, E>(
-        builder: EvalBuilder<'_, f64, V, E>,
+    fn compare<V: PartialEq>(
+        builder: EvalBuilder<'_, f64, V>,
         constants: impl Iterator<Item = (&'static str, f64)>,
         function_identifier: impl Iterator<Item = (&'static str, usize, u8, Option<u8>)>,
         variables: V,
-        _evalmethod: E,
     ) -> Option<UnexpectedBuilderFieldValues<V>> {
         let constants = constants.map(|(n, v)| (n.to_string(), v)).collect();
         let function_identifier = function_identifier
@@ -1009,7 +897,6 @@ mod tests {
             [].into_iter(),
             [].into_iter(),
             NoVariable,
-            EvalCopy
         ));
 
         test!(compare(
@@ -1017,7 +904,6 @@ mod tests {
             [("c", 3.57)].into_iter(),
             [].into_iter(),
             NoVariable,
-            EvalCopy
         ));
 
         test!(compare(
@@ -1025,15 +911,13 @@ mod tests {
             [].into_iter(),
             [].into_iter(),
             OneVariable(String::from("x")),
-            EvalCopy
         ));
 
         test!(compare(
-            EvalBuilder::new().use_ref(),
+            EvalBuilder::new(),
             [].into_iter(),
             [].into_iter(),
             NoVariable,
-            EvalRef
         ));
 
         test!(compare(
@@ -1041,7 +925,6 @@ mod tests {
             [].into_iter(),
             [("f1", 0, 1, Some(1))].into_iter(),
             NoVariable,
-            EvalCopy
         ));
 
         test!(compare(
@@ -1051,7 +934,6 @@ mod tests {
             [("c1", 7.319)].into_iter(),
             [("f2", 0, 1, Some(1))].into_iter(),
             NoVariable,
-            EvalCopy
         ));
 
         let zero = String::from("0");
@@ -1062,7 +944,6 @@ mod tests {
             [("c1", 7.319)].into_iter(),
             [("f2", 0, 1, Some(1))].into_iter(),
             NoVariable,
-            EvalCopy
         ));
 
         test!(compare(
@@ -1072,7 +953,6 @@ mod tests {
             [].into_iter(),
             [("f1", 0, 1, Some(1)), ("f2", 1, 2, Some(2))].into_iter(),
             NoVariable,
-            EvalCopy
         ));
 
         let one = String::from("1");
@@ -1083,7 +963,6 @@ mod tests {
             [].into_iter(),
             [("f1", 0, 1, Some(1)), ("f2", 1, 2, Some(2))].into_iter(),
             NoVariable,
-            EvalCopy
         ));
 
         test!(compare(
@@ -1093,7 +972,6 @@ mod tests {
             [].into_iter(),
             [("f2", 0, 2, Some(2)), ("f3", 1, 3, Some(3))].into_iter(),
             NoVariable,
-            EvalCopy
         ));
 
         test!(compare(
@@ -1109,7 +987,6 @@ mod tests {
             ]
             .into_iter(),
             NoVariable,
-            EvalCopy
         ));
 
         let two = String::from("2");
@@ -1127,7 +1004,6 @@ mod tests {
             ]
             .into_iter(),
             OneVariable(String::from("t")),
-            EvalCopy
         ));
 
         test!(compare(
@@ -1135,18 +1011,13 @@ mod tests {
             [].into_iter(),
             [].into_iter(),
             TwoVariables([String::from("y"), String::from("x")]),
-            EvalCopy
         ));
 
         test!(compare(
-            EvalBuilder::new()
-                .add_variable("y")
-                .use_ref()
-                .add_variable("x"),
+            EvalBuilder::new().add_variable("y").add_variable("x"),
             [].into_iter(),
             [].into_iter(),
             TwoVariables([String::from("y"), String::from("x")]),
-            EvalRef
         ));
 
         test!(compare(
@@ -1164,7 +1035,6 @@ mod tests {
             ]
             .into_iter(),
             TwoVariables([String::from("y"), String::from("x")]),
-            EvalCopy
         ));
 
         test!(compare(
@@ -1175,7 +1045,6 @@ mod tests {
             [].into_iter(),
             [].into_iter(),
             ThreeVariables([String::from("y"), String::from("x"), String::from("z")]),
-            EvalCopy
         ));
 
         test!(compare(
@@ -1186,8 +1055,7 @@ mod tests {
                 .add_fn3("f2", |_, _, _| 2.0)
                 .add_variable("x")
                 .add_fn3("f3", |_, _, _| 3.0)
-                .add_variable("z")
-                .use_ref(),
+                .add_variable("z"),
             [].into_iter(),
             [
                 ("f0", 0, 3, Some(3)),
@@ -1197,7 +1065,6 @@ mod tests {
             ]
             .into_iter(),
             ThreeVariables([String::from("y"), String::from("x"), String::from("z")]),
-            EvalRef
         ));
 
         test!(compare(
@@ -1214,7 +1081,6 @@ mod tests {
                 String::from("z"),
                 String::from("w")
             ]),
-            EvalCopy
         ));
 
         let three = String::from("3");
@@ -1245,7 +1111,6 @@ mod tests {
                 String::from("z"),
                 String::from("w")
             ]),
-            EvalCopy
         ));
 
         test!(compare(
@@ -1264,14 +1129,12 @@ mod tests {
                 String::from("v"),
                 String::from("w")
             ]),
-            EvalCopy
         ));
 
         test!(compare(
             EvalBuilder::new()
                 .add_fn1("f0", |_| 0.0)
                 .add_variable("y")
-                .use_ref()
                 .add_constant("c", 9.999999)
                 .add_constant("ce", 2.222222)
                 .add_fn2("f1", |_, _| 1.0)
@@ -1300,7 +1163,6 @@ mod tests {
                 String::from("w"),
                 String::from("t")
             ]),
-            EvalRef
         ));
 
         let four = String::from("4");
@@ -1337,7 +1199,6 @@ mod tests {
                 String::from("w"),
                 String::from("t")
             ]),
-            EvalCopy
         ))
     }
 }
