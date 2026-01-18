@@ -14,8 +14,8 @@ use tokenizer::TokenStream;
 use crate::{number::NFPointer, quick_expr::QuickExpr};
 
 pub mod number;
-pub mod quick_expr;
 pub mod postfix_tree;
+pub mod quick_expr;
 pub mod syntax;
 pub mod tokenizer;
 
@@ -333,10 +333,10 @@ impl<N: Number> From<UnaryOp> for FunctionPointer<'static, N> {
 
 impl<N: Number> FunctionPointer<'_, N> {
     fn is_fixed(&self) -> bool {
-        match self {
-            FunctionPointer::Flexible(_) | FunctionPointer::DynFlexible(_) => false,
-            _ => true,
-        }
+        !matches!(
+            self,
+            FunctionPointer::Flexible(_) | FunctionPointer::DynFlexible(_)
+        )
     }
 }
 
@@ -619,7 +619,7 @@ impl<'a, N> EvalBuilder<'a, N, OneVariable>
 where
     N: Number,
 {
-    pub fn build_as_function<'b>(
+    pub fn build_as_function(
         self,
         input: &str,
     ) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
@@ -673,7 +673,7 @@ macro_rules! fn_build_as_evaluator {
 macro_rules! fn_build_as_function {
     ($n: expr) => {
         seq!(I in 0..$n {
-            pub fn build_as_function<'b>(
+            pub fn build_as_function(
                 self,
                 input: &str,
             ) -> Result<impl FnMut(#(N,)*) -> N + 'a, ParsingError> {

@@ -1,4 +1,4 @@
-use std::{fmt::Debug, marker::PhantomData, slice::Iter, usize};
+use std::{fmt::Debug, marker::PhantomData, slice::Iter};
 
 use crate::{
     BinaryOp, FunctionIdentifier, FunctionPointer, UnaryOp, VariableIdentifier, VariableStore,
@@ -20,7 +20,7 @@ impl Source {
         literals: &mut Iter<'b, N>,
         variables: &mut Iter<'b, V>,
         variable_values: &'a impl VariableStore<N, V>,
-        stack: &'a Vec<N>,
+        stack: &'a [N],
         removed: &mut u8,
     ) -> Result<N::AsArg<'a>, OptExprEvalError>
     where
@@ -51,7 +51,7 @@ impl Source {
         literals: &mut Iter<'_, N>,
         variables: &mut Iter<'_, V>,
         variable_values: &'_ impl VariableStore<N, V>,
-        stack: &Vec<N>,
+        stack: &[N],
         removed: &mut u8,
     ) -> Result<N, OptExprEvalError> {
         match self {
@@ -237,6 +237,9 @@ pub enum OptExprEvalError {
     NotEnoughParams,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct StackUnderflowError;
+
 #[derive(Clone, Debug)]
 pub struct QuickExpr<'a, N: Number, V: VariableIdentifier, F: FunctionIdentifier> {
     pub param_sources: Vec<Source>,
@@ -366,7 +369,7 @@ where
         }
     }
 
-    pub fn stack_req_capacity(&self) -> Result<usize, ()> {
+    pub fn stack_req_capacity(&self) -> Result<usize, StackUnderflowError> {
         let mut p: usize = 0;
         let mut length: usize = 0;
         let mut capacity: usize = 0;
@@ -381,7 +384,7 @@ where
                                 .count()
                                 - 1,
                         )
-                        .ok_or(())?;
+                        .ok_or(StackUnderflowError)?;
                     p += $argc;
                 }};
             }
