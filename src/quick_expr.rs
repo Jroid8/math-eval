@@ -237,8 +237,11 @@ pub enum OptExprEvalError {
     NotEnoughParams,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct StackUnderflowError;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackCapCalcError {
+    StackUnderflow,
+    NotEnoughParameters,
+}
 
 #[derive(Clone, Debug)]
 pub struct QuickExpr<'a, N: Number, V: VariableIdentifier, F: FunctionIdentifier> {
@@ -369,22 +372,25 @@ where
         }
     }
 
-    pub fn stack_req_capacity(&self) -> Result<usize, StackUnderflowError> {
+    pub fn stack_req_capacity(&self) -> Result<usize, StackCapCalcError> {
         let mut p: usize = 0;
         let mut length: usize = 0;
         let mut capacity: usize = 0;
         for instr in &self.instructions {
             macro_rules! asc {
                 ($argc: expr) => {{
+                    if p + $argc > self.param_sources.len() {
+                        return Err(StackCapCalcError::NotEnoughParameters);
+                    }
                     length = length
                         .checked_sub(
                             self.param_sources[p..p + $argc]
                                 .iter()
-                                .map(|s| s.is_stack())
-                                .count()
-                                - 1,
+                                .filter(|s| s.is_stack())
+                                .count(),
                         )
-                        .ok_or(StackUnderflowError)?;
+                        .ok_or(StackCapCalcError::StackUnderflow)?;
+                    length += 1;
                     p += $argc;
                 }};
             }
@@ -395,7 +401,10 @@ where
                     CtxFuncPtr::DynDual(_) | CtxFuncPtr::Dual(_) => asc!(2),
                     CtxFuncPtr::DynTriple(_) | CtxFuncPtr::Triple(_) => asc!(3),
                     CtxFuncPtr::DynFlexible(_, argc) | CtxFuncPtr::Flexible(_, argc) => {
-                        asc!(argc as usize)
+                        length = length
+                            .checked_sub(argc as usize)
+                            .ok_or(StackCapCalcError::StackUnderflow)?;
+                        length += 1;
                     }
                 },
             }
@@ -697,6 +706,50 @@ mod tests {
                 ]
             }
         )
+    }
+
+    #[test]
+    fn stack_req_capacity() {
+        assert_eq!(
+            QuickExpr::<f64, TestVar, TestFunc> {
+                param_sources: vec![],
+                literals: vec![2.0],
+                variables: vec![],
+                instructions: vec![Instr::Push(Source::Literal)],
+            }
+            .stack_req_capacity(),
+            Ok(1)
+        );
+        assert_eq!(
+            QuickExpr::<f64, TestVar, TestFunc> {
+                param_sources: vec![Source::Variable, Source::Literal],
+                literals: vec![2.0],
+                variables: vec![TestVar::X],
+                instructions: vec![Instr::Calculate(BinaryOp::Add.into())],
+            }
+            .stack_req_capacity(),
+            Ok(1)
+        );
+        assert_eq!(
+            QuickExpr::<f64, TestVar, TestFunc> {
+                param_sources: vec![Source::Stack(1), Source::Stack(0)],
+                literals: vec![],
+                variables: vec![],
+                instructions: vec![Instr::Calculate(BinaryOp::Add.into())]
+            }
+            .stack_req_capacity(),
+            Err(StackCapCalcError::StackUnderflow)
+        );
+        assert_eq!(
+            QuickExpr::<f64, TestVar, TestFunc> {
+                param_sources: vec![Source::Literal],
+                literals: vec![5.8],
+                variables: vec![],
+                instructions: vec![Instr::Calculate(BinaryOp::Add.into())]
+            }
+            .stack_req_capacity(),
+            Err(StackCapCalcError::NotEnoughParameters)
+        );
     }
 
     #[test]
