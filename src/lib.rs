@@ -20,7 +20,6 @@ pub mod syntax;
 pub mod tokenizer;
 
 const NAME_LIMIT: u8 = 32;
-const NAME_LIMIT_ERROR_MSG: &str = "Identifier exceeds maximum length of 32 characters.";
 
 pub trait VariableIdentifier: Clone + Copy + Debug + Eq + 'static {}
 
@@ -247,7 +246,7 @@ impl Display for ParsingErrorKind {
             ParsingErrorKind::EmptyArgument => "Function arguments shouldn't be empty",
             ParsingErrorKind::EmptyInput => "Input shouldn't be empty",
             ParsingErrorKind::PipeAbsNotClosed => "Unmatched '|' in absolute value expression",
-            ParsingErrorKind::NameTooLong => NAME_LIMIT_ERROR_MSG,
+            ParsingErrorKind::NameTooLong => "Identifier exceeds maximum length of 32 characters.",
         })
     }
 }
@@ -619,10 +618,7 @@ impl<'a, N> EvalBuilder<'a, N, OneVariable>
 where
     N: Number,
 {
-    pub fn build_as_function(
-        self,
-        input: &str,
-    ) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
+    pub fn build_as_function(self, input: &str) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
         let expr = compile(
             input,
             |inp| self.constants.get(inp).cloned(),

@@ -374,9 +374,6 @@ where
     N: Number,
     V: VariableIdentifier,
 {
-    if input.len() > NAME_LIMIT as usize {
-        panic!();
-    }
     let mut can_segment: Vec<Option<(Option<u8>, Segment<N, V>)>> = vec![None; input.len()];
     for i in 1..=input.len() {
         for j in 0..i {
@@ -420,9 +417,6 @@ where
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    if input.len() > NAME_LIMIT as usize {
-        panic!();
-    }
     let mut can_segment: Vec<Option<(Option<u8>, Segment<N, V>)>> = vec![None; input.len() - 1];
     let mut function: Option<(u8, SyFunction<F>)> = None;
     for i in 1..input.len() {
@@ -578,6 +572,9 @@ where
                 }
             }
             Token::Function(name) => {
+                if name.len() > NAME_LIMIT as usize {
+                    return Err(SyntaxError(SyntaxErrorKind::NameTooLong, pos..=pos));
+                }
                 if let Some(func) = NativeFunction::parse(name)
                     .map(|nf| SyOperator::Function(SyFunction::NativeFunction(nf), 1))
                     .or_else(|| {
