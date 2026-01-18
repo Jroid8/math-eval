@@ -102,7 +102,7 @@ fn operator() {
             '/' => x / y,
             _ => unreachable!(),
         };
-        let eval_result = expr.eval(&[], &mut math_eval::asm::Stack::new());
+        let eval_result = expr.eval((), &mut Vec::new()).unwrap();
         if eval_result != result {
             panic!(
                 "the result of \"{expr_str}\" didn't match the calculated result\n{eval_result} != {result}"

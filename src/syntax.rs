@@ -5,7 +5,6 @@ use std::marker::PhantomData;
 use std::mem;
 use std::ops::RangeInclusive;
 
-use crate::asm::Stack;
 use crate::number::{NFPointer, NativeFunction, Number};
 use crate::postfix_tree::tree_iterators::NodeEdge;
 use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
@@ -200,6 +199,14 @@ where
         MathAst(PostfixTree::from_nodes(nodes))
     }
 
+    pub fn as_tree(&self) -> &PostfixTree<AstNode<N, V, F>> {
+        &self.0
+    }
+
+    pub fn into_tree(self) -> PostfixTree<AstNode<N, V, F>> {
+        self.0
+    }
+
     fn eval_stack_capacity<'a>(tree: impl IntoIterator<Item = &'a AstNode<N, V, F>>) -> usize {
         let mut stack_capacity = 0usize;
         let mut stack_len = 0i64;
@@ -226,7 +233,7 @@ where
             self.0.postorder_iter(),
             function_to_pointer,
             variable_values,
-            &mut Stack::with_capacity(Self::eval_stack_capacity(self.0.postorder_iter())),
+            &mut Vec::with_capacity(Self::eval_stack_capacity(self.0.postorder_iter())),
         )
         .unwrap()
     }
@@ -235,7 +242,7 @@ where
         tree: impl IntoIterator<Item = &'a AstNode<N, V, F>>,
         functibn_to_pointer: impl Fn(F) -> FunctionPointer<'b, N>,
         variable_values: &impl crate::VariableStore<N, V>,
-        stack: &mut Stack<N>,
+        stack: &mut Vec<N>,
     ) -> Result<N, usize> {
         for (idx, node) in tree.into_iter().enumerate() {
             let mut pop = || stack.pop().ok_or(idx);
@@ -315,7 +322,7 @@ where
             varless.push(res);
         }
         let mut idx = self.0.len();
-        let mut stack: Stack<N> = Stack::with_capacity(0);
+        let mut stack: Vec<N> = Vec::with_capacity(0);
         while idx > 0 {
             idx -= 1;
             if varless[idx] && !matches!(self.0[idx], AstNode::Number(_)) {

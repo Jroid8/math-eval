@@ -264,6 +264,10 @@ impl<T: Node> PostfixTree<T> {
         PostOrderIter::new(self.subtree_slice(head))
     }
 
+    pub fn into_postorder_iter(self) -> impl Iterator<Item = T> {
+        self.0.into_iter().map(|e| e.into_inner())
+    }
+
     pub fn euler_tour<'a>(&'a self) -> EulerTour<'a, T> {
         EulerTour::new(self, self.len() - 1)
     }

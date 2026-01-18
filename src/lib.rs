@@ -6,16 +6,15 @@ use std::{
     ops::RangeInclusive,
 };
 
-use asm::{MathAssembly, Stack};
 use number::Number;
 use seq_macro::seq;
 use syntax::MathAst;
 use tokenizer::TokenStream;
 
-use crate::number::NFPointer;
+use crate::{number::NFPointer, quick_expr::QuickExpr};
 
-pub mod asm;
 pub mod number;
+pub mod quick_expr;
 pub mod postfix_tree;
 pub mod syntax;
 pub mod tokenizer;
@@ -25,7 +24,7 @@ const NAME_LIMIT_ERROR_MSG: &str = "Identifier exceeds maximum length of 32 char
 
 pub trait VariableIdentifier: Clone + Copy + Debug + Eq + 'static {}
 
-impl<T> VariableIdentifier for T where T: Clone + Copy + Debug + Hash + Eq + 'static {}
+impl<T> VariableIdentifier for T where T: Clone + Copy + Debug + Eq + 'static {}
 
 pub trait FunctionIdentifier: Clone + Copy + Eq + Debug + 'static {}
 
@@ -310,12 +309,33 @@ impl<N: Number> Debug for FunctionPointer<'_, N> {
     }
 }
 
-impl<N: Number> From<NFPointer<N>> for FunctionPointer<'static, N> {
-    fn from(value: NFPointer<N>) -> Self {
-        match value {
+impl<N: Number> From<number::NativeFunction> for FunctionPointer<'static, N> {
+    fn from(value: number::NativeFunction) -> Self {
+        match value.as_pointer() {
             NFPointer::Single(func) => FunctionPointer::Single(func),
             NFPointer::Dual(func) => FunctionPointer::Dual(func),
             NFPointer::Flexible(func) => FunctionPointer::Flexible(func),
+        }
+    }
+}
+
+impl<N: Number> From<BinaryOp> for FunctionPointer<'static, N> {
+    fn from(value: BinaryOp) -> Self {
+        Self::Dual(value.as_pointer())
+    }
+}
+
+impl<N: Number> From<UnaryOp> for FunctionPointer<'static, N> {
+    fn from(value: UnaryOp) -> Self {
+        Self::Single(value.as_pointer())
+    }
+}
+
+impl<N: Number> FunctionPointer<'_, N> {
+    fn is_fixed(&self) -> bool {
+        match self {
+            FunctionPointer::Flexible(_) | FunctionPointer::DynFlexible(_) => false,
+            _ => true,
         }
     }
 }
@@ -326,7 +346,7 @@ pub fn compile<'a, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
     function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
-) -> Result<MathAssembly<'a, N, F>, ParsingError> {
+) -> Result<QuickExpr<'a, N, V, F>, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
     let mut syntax_tree = MathAst::new(
         &token_stream.0,
@@ -337,7 +357,7 @@ pub fn compile<'a, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     .map_err(|e| e.to_general(input, &token_stream.0))?;
     syntax_tree.aot_evaluation(&function_to_pointer);
     syntax_tree.displacing_simplification();
-    todo!()
+    Ok(QuickExpr::new(syntax_tree, function_to_pointer))
 }
 
 pub fn evaluate<'a, 'b, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
@@ -564,8 +584,8 @@ where
             |_| None::<()>,
             |idx| self.functions[idx],
         )?;
-        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-        Ok(move || expr.eval_copy(&[], &mut stack))
+        let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
+        Ok(move || expr.eval((), &mut stack).unwrap())
     }
 }
 
@@ -602,7 +622,7 @@ where
     pub fn build_as_function<'b>(
         self,
         input: &str,
-    ) -> Result<impl FnMut(N::AsArg<'b>) -> N + 'a, ParsingError> {
+    ) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
         let expr = compile(
             input,
             |inp| self.constants.get(inp).cloned(),
@@ -610,8 +630,8 @@ where
             |inp| (self.variables.0 == inp).then_some(()),
             |idx| self.functions[idx],
         )?;
-        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-        Ok(move |v0| expr.eval(&[v0], &mut stack))
+        let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
+        Ok(move |v0| expr.eval((v0,), &mut stack).unwrap())
     }
 }
 
@@ -656,16 +676,16 @@ macro_rules! fn_build_as_function {
             pub fn build_as_function<'b>(
                 self,
                 input: &str,
-            ) -> Result<impl FnMut(#(N::AsArg<'b>,)*) -> N + 'a, ParsingError> {
+            ) -> Result<impl FnMut(#(N,)*) -> N + 'a, ParsingError> {
                 let expr = compile(
                     input,
                     |inp| self.constants.get(inp).cloned(),
                     |inp| self.function_identifier.get(inp).copied(),
-                    |inp| self.variables.0.iter().position(|var| var == inp),
+                    |inp| self.variables.0.iter().position(|var| var == inp).map(|i| i as u8),
                     |idx| self.functions[idx],
                 )?;
-                let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-                Ok(move |#(v~I,)*| expr.eval(&[#(v~I,)*], &mut stack))
+                let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
+                Ok(move |#(v~I,)*| expr.eval([#(v~I,)*], &mut stack).unwrap())
             }
         });
     };
@@ -774,7 +794,7 @@ where
     pub fn build_as_function<'b>(
         self,
         input: &str,
-    ) -> Result<impl FnMut(&'b [N::AsArg<'b>]) -> N + 'a, ParsingError> {
+    ) -> Result<impl FnMut(&'b [N]) -> N + 'a, ParsingError> {
         let expr = compile(
             input,
             |inp| self.constants.get(inp).cloned(),
@@ -782,8 +802,8 @@ where
             |inp| self.variables.0.iter().position(|var| var == inp),
             |idx| self.functions[idx],
         )?;
-        let mut stack = Stack::with_capacity(expr.stack_alloc_size());
-        Ok(move |vars| expr.eval(vars, &mut stack))
+        let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
+        Ok(move |vars| expr.eval(vars, &mut stack).unwrap())
     }
 }
 

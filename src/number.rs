@@ -1,8 +1,14 @@
 use std::{
     f64::consts::{E, PI, TAU},
     fmt::{Debug, Display},
+    marker::PhantomData,
     ops::{Add, Div, Mul, Neg, Sub},
     str::FromStr,
+};
+
+use crate::{
+    FunctionIdentifier,
+    quick_expr::{CtxFuncPtr, FunctionSource, MarkedFunc},
 };
 
 #[derive(Debug, Clone, Copy, Hash)]
@@ -98,6 +104,25 @@ impl NativeFunction {
             NativeFunction::Cbrt => NFPointer::Single(N::cbrt),
             NativeFunction::Max => NFPointer::Flexible(N::max),
             NativeFunction::Min => NFPointer::Flexible(N::min),
+        }
+    }
+    pub fn as_markedfunc<N: Number, F: FunctionIdentifier>(self, argc: u8) -> MarkedFunc<'static, N, F> {
+        match self.as_pointer::<N>() {
+            NFPointer::Single(func) => MarkedFunc {
+                func: CtxFuncPtr::Single(func),
+                _src: PhantomData,
+                src: FunctionSource::NativeFunction(self),
+            },
+            NFPointer::Dual(func) => MarkedFunc {
+                func: CtxFuncPtr::Dual(func),
+                _src: PhantomData,
+                src: FunctionSource::NativeFunction(self),
+            },
+            NFPointer::Flexible(func) => MarkedFunc {
+                func: CtxFuncPtr::Flexible(func, argc),
+                _src: PhantomData,
+                src: FunctionSource::NativeFunction(self),
+            },
         }
     }
     pub fn is_fixed(self) -> bool {
