@@ -355,7 +355,8 @@ where
         }
         let mut symbol_space: SubtreeCollection<AstNode<N, V, F>> =
             SubtreeCollection::from_alloc(Vec::with_capacity(0));
-        for idx in 4..self.0.len() {
+        let mut idx = 4;
+        while idx < self.0.len() {
             if let AstNode::BinaryOp(head) = self.0[idx]
                 && self
                     .0
@@ -381,6 +382,7 @@ where
             {
                 self._displacing_simplification(idx, head, &mut symbol_space);
             }
+            idx += 1;
         }
     }
 
