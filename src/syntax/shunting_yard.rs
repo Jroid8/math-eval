@@ -275,12 +275,12 @@ fn validate_consecutive_tokens<'a>(
 ) -> Result<(), SyntaxError> {
     match (last, current) {
         (
-            None | Some(Token::OpenParen | Token::Function(_)),
+            None | Some(Token::OpenParen | Token::Function(_) | Token::Comma),
             Some(Token::Operation('!' | '*' | '/' | '^' | '%')),
         ) => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, pos..=pos)),
         (
             Some(Token::Operation('+' | '-' | '*' | '/' | '^' | '%')),
-            None | Some(Token::CloseParen),
+            None | Some(Token::CloseParen | Token::Comma),
         ) => Err(SyntaxError(
             SyntaxErrorKind::MisplacedOperator,
             pos - 1..=pos - 1,
