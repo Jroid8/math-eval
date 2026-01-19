@@ -571,7 +571,10 @@ where
                     }
                 } else if opr == '!' && last_tk.is_some_and(|tk| tk == Token::Operator('!')) {
                     let fac = operator_stack.pop();
-                    debug_assert_eq!(fac, Some(SyOperator::UnaryOp(UnaryOp::Fac)));
+                    debug_assert!(matches!(
+                        fac,
+                        Some(SyOperator::UnaryOp(UnaryOp::Fac | UnaryOp::DoubleFac))
+                    ));
                     sy_opr = SyOperator::UnaryOp(UnaryOp::DoubleFac)
                 }
                 if opr != '+' || last_tk.is_some_and(|tk| !after_implies_neg(tk, &operator_stack)) {
