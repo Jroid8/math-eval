@@ -286,8 +286,8 @@ fn validate_consecutive_tokens<'a>(
             pos - 1..=pos - 1,
         )),
         (
-            Some(Token::Operation('*' | '/' | '%' | '^')),
-            Some(Token::Operation('*' | '/' | '%' | '^')),
+            Some(Token::Operation('*' | '/' | '%' | '^' | '-' | '+')),
+            Some(Token::Operation('*' | '/' | '%' | '^' | '!')),
         ) => Err(SyntaxError(
             SyntaxErrorKind::MisplacedOperator,
             pos - 1..=pos,
