@@ -87,6 +87,7 @@ pub enum BinaryOp {
     Div,
     Pow,
     Mod,
+    NegExp,
 }
 
 impl BinaryOp {
@@ -110,17 +111,7 @@ impl BinaryOp {
             BinaryOp::Div => lhs / rhs,
             BinaryOp::Pow => N::pow(lhs, rhs),
             BinaryOp::Mod => N::modulo(lhs, rhs),
-        }
-    }
-
-    pub fn as_char(self) -> char {
-        match self {
-            BinaryOp::Add => '+',
-            BinaryOp::Sub => '-',
-            BinaryOp::Mul => '*',
-            BinaryOp::Div => '/',
-            BinaryOp::Pow => '^',
-            BinaryOp::Mod => '%',
+            BinaryOp::NegExp => N::negexp(lhs, rhs)
         }
     }
 
@@ -136,6 +127,7 @@ impl BinaryOp {
             BinaryOp::Div => 1,
             BinaryOp::Mod => 1,
             BinaryOp::Pow => 2,
+            BinaryOp::NegExp => 2,
         }
     }
 
@@ -143,7 +135,7 @@ impl BinaryOp {
         match self {
             BinaryOp::Add | BinaryOp::Mul => Associativity::Both,
             BinaryOp::Sub | BinaryOp::Div | BinaryOp::Mod => Associativity::Left,
-            BinaryOp::Pow => Associativity::Right,
+            BinaryOp::Pow | BinaryOp::NegExp => Associativity::Right,
         }
     }
 
@@ -155,6 +147,7 @@ impl BinaryOp {
             BinaryOp::Div => |x, y| x / y,
             BinaryOp::Pow => N::pow,
             BinaryOp::Mod => N::modulo,
+            BinaryOp::NegExp => N::negexp,
         }
     }
 }
@@ -167,7 +160,15 @@ pub enum Associativity {
 
 impl Display for BinaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_char())
+        match self {
+            BinaryOp::Add => f.write_str("+"),
+            BinaryOp::Sub => f.write_str("-"),
+            BinaryOp::Mul => f.write_str("*"),
+            BinaryOp::Div => f.write_str("/"),
+            BinaryOp::Pow => f.write_str("^"),
+            BinaryOp::Mod => f.write_str("%"),
+            BinaryOp::NegExp => f.write_str("^-"),
+        }
     }
 }
 

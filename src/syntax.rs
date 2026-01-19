@@ -996,6 +996,14 @@ mod tests {
             ])
         );
         assert_eq!(
+            syntaxify("2^-1"),
+            Ok(vec![
+                AstNode::Number(2.0),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::NegExp),
+            ])
+        );
+        assert_eq!(
             syntaxify("x!y"),
             Ok(vec![
                 AstNode::Variable(TestVar::X),

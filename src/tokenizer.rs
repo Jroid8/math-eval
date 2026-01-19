@@ -1,7 +1,7 @@
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum Token<'a> {
     Number(&'a str),
-    Operation(char),
+    Operator(char),
     Variable(&'a str),
     Function(&'a str),
     OpenParen,
@@ -16,7 +16,7 @@ impl Token<'_> {
             // this token captures both the function name and the opening parentheses
             Token::Function(s) => s.len() + 1,
             Token::Number(s) | Token::Variable(s) => s.len(),
-            Token::Operation(_)
+            Token::Operator(_)
             | Token::OpenParen
             | Token::CloseParen
             | Token::Comma
@@ -74,7 +74,7 @@ impl<'a> TokenStream<'a> {
                         CharNotion::Number | CharNotion::Dot => {
                             state = Reading::Number(pos, cha == '.')
                         }
-                        CharNotion::Operation => result.push(Token::Operation(cha)),
+                        CharNotion::Operation => result.push(Token::Operator(cha)),
                         CharNotion::Alphabet => state = Reading::VarFunc(pos),
                         CharNotion::OpenParen => result.push(Token::OpenParen),
                         CharNotion::CloseParen => result.push(Token::CloseParen),
@@ -173,7 +173,7 @@ mod tests {
         );
         assert_eq!(
             TokenStream::new("-1.0"),
-            Ok(TokenStream(vec![Operation('-'), Number("1.0")]))
+            Ok(TokenStream(vec![Operator('-'), Number("1.0")]))
         );
         assert_eq!(
             TokenStream::new("(11)"),
@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(
             TokenStream::new("-(pi)"),
             Ok(TokenStream(vec![
-                Operation('-'),
+                Operator('-'),
                 OpenParen,
                 Variable("pi"),
                 CloseParen
@@ -198,13 +198,13 @@ mod tests {
         );
         assert_eq!(
             TokenStream::new("10*5"),
-            Ok(TokenStream(vec![Number("10"), Operation('*'), Number("5")]))
+            Ok(TokenStream(vec![Number("10"), Operator('*'), Number("5")]))
         );
         assert_eq!(
             TokenStream::new("839   *            4"),
             Ok(TokenStream(vec![
                 Number("839"),
-                Operation('*'),
+                Operator('*'),
                 Number("4")
             ]))
         );
@@ -212,7 +212,7 @@ mod tests {
             TokenStream::new("7.620-90.001"),
             Ok(TokenStream(vec![
                 Number("7.620"),
-                Operation('-'),
+                Operator('-'),
                 Number("90.001")
             ]))
         );
@@ -220,7 +220,7 @@ mod tests {
             TokenStream::new("1.10/pi"),
             Ok(TokenStream(vec![
                 Number("1.10"),
-                Operation('/'),
+                Operator('/'),
                 Variable("pi")
             ]))
         );
@@ -228,7 +228,7 @@ mod tests {
             TokenStream::new("x+y"),
             Ok(TokenStream(vec![
                 Variable("x"),
-                Operation('+'),
+                Operator('+'),
                 Variable("y")
             ]))
         );
@@ -277,7 +277,7 @@ mod tests {
             Ok(TokenStream(vec![
                 Function("cos"),
                 Number("1"),
-                Operation('+'),
+                Operator('+'),
                 Function("sin"),
                 Number("0"),
                 CloseParen,
@@ -289,13 +289,13 @@ mod tests {
             TokenStream::new("theta+phi"),
             Ok(TokenStream(vec![
                 Variable("theta"),
-                Operation('+'),
+                Operator('+'),
                 Variable("phi")
             ]))
         );
         assert_eq!(
             TokenStream::new("2^10"),
-            Ok(TokenStream(vec![Number("2"), Operation('^'), Number("10")]))
+            Ok(TokenStream(vec![Number("2"), Operator('^'), Number("10")]))
         );
         assert_eq!(TokenStream::new("="), Err(TokenizationError(0)));
         assert_eq!(TokenStream::new("99$"), Err(TokenizationError(2)));

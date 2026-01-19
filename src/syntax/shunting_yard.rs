@@ -43,6 +43,7 @@ where
             SyOperator::BinaryOp(BinaryOp::Mod) => 1,
             SyOperator::UnaryOp(UnaryOp::Neg) => 2,
             SyOperator::BinaryOp(BinaryOp::Pow) => 3,
+            SyOperator::BinaryOp(BinaryOp::NegExp) => 3,
             SyOperator::UnaryOp(UnaryOp::Fac) => 4,
             SyOperator::UnaryOp(UnaryOp::DoubleFac) => 4,
             SyOperator::Function(_, _) | SyOperator::Parentheses => {
@@ -84,7 +85,7 @@ where
 {
     matches!(
         token,
-        Token::Operation('*' | '/' | '%' | '^' | '-' | '+')
+        Token::Operator('*' | '/' | '%' | '^' | '-' | '+')
             | Token::OpenParen
             | Token::Comma
             | Token::Function(_)
@@ -276,18 +277,18 @@ fn validate_consecutive_tokens<'a>(
     match (last, current) {
         (
             None | Some(Token::OpenParen | Token::Function(_) | Token::Comma),
-            Some(Token::Operation('!' | '*' | '/' | '^' | '%')),
+            Some(Token::Operator('!' | '*' | '/' | '^' | '%')),
         ) => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, pos..=pos)),
         (
-            Some(Token::Operation('+' | '-' | '*' | '/' | '^' | '%')),
+            Some(Token::Operator('+' | '-' | '*' | '/' | '^' | '%')),
             None | Some(Token::CloseParen | Token::Comma),
         ) => Err(SyntaxError(
             SyntaxErrorKind::MisplacedOperator,
             pos - 1..=pos - 1,
         )),
         (
-            Some(Token::Operation('*' | '/' | '%' | '^' | '-' | '+')),
-            Some(Token::Operation('*' | '/' | '%' | '^' | '!')),
+            Some(Token::Operator('*' | '/' | '%' | '^' | '-' | '+')),
+            Some(Token::Operator('*' | '/' | '%' | '^' | '!')),
         ) => Err(SyntaxError(
             SyntaxErrorKind::MisplacedOperator,
             pos - 1..=pos,
@@ -487,7 +488,7 @@ where
             (last_tk, token),
             (
                 Some(
-                    Token::Operation('!')
+                    Token::Operator('!')
                         | Token::Number(_)
                         | Token::Variable(_)
                         | Token::CloseParen,
@@ -505,7 +506,7 @@ where
                 (last_tk, token),
                 (
                     Some(
-                        Token::Operation('!')
+                        Token::Operator('!')
                             | Token::Number(_)
                             | Token::Variable(_)
                             | Token::CloseParen,
@@ -555,14 +556,20 @@ where
                     ));
                 }
             }
-            Token::Operation(opr) => {
+            Token::Operator(opr) => {
                 let mut sy_opr: SyOperator<F> = BinaryOp::parse(opr)
                     .map(|biopr| SyOperator::BinaryOp(biopr))
                     .or_else(|| UnaryOp::parse(opr).map(|unopr| SyOperator::UnaryOp(unopr)))
                     .unwrap();
                 if opr == '-' && last_tk.is_none_or(|tk| after_implies_neg(tk, &operator_stack)) {
-                    sy_opr = SyOperator::UnaryOp(UnaryOp::Neg);
-                } else if opr == '!' && last_tk.is_some_and(|tk| tk == Token::Operation('!')) {
+                    if last_tk.is_some_and(|tk| tk == Token::Operator('^')) {
+                        let pow = operator_stack.pop();
+                        debug_assert_eq!(pow, Some(SyOperator::BinaryOp(BinaryOp::Pow)));
+                        sy_opr = SyOperator::BinaryOp(BinaryOp::NegExp)
+                    } else {
+                        sy_opr = SyOperator::UnaryOp(UnaryOp::Neg);
+                    }
+                } else if opr == '!' && last_tk.is_some_and(|tk| tk == Token::Operator('!')) {
                     let fac = operator_stack.pop();
                     debug_assert_eq!(fac, Some(SyOperator::UnaryOp(UnaryOp::Fac)));
                     sy_opr = SyOperator::UnaryOp(UnaryOp::DoubleFac)

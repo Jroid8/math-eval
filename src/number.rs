@@ -106,7 +106,10 @@ impl NativeFunction {
             NativeFunction::Min => NFPointer::Flexible(N::min),
         }
     }
-    pub fn as_markedfunc<N: Number, F: FunctionIdentifier>(self, argc: u8) -> MarkedFunc<'static, N, F> {
+    pub fn as_markedfunc<N: Number, F: FunctionIdentifier>(
+        self,
+        argc: u8,
+    ) -> MarkedFunc<'static, N, F> {
         match self.as_pointer::<N>() {
             NFPointer::Single(func) => MarkedFunc {
                 func: CtxFuncPtr::Single(func),
@@ -249,6 +252,10 @@ pub trait Number:
     fn factorial(value: Self::AsArg<'_>) -> Self;
     fn double_factorial(value: Self::AsArg<'_>) -> Self;
     fn asarg(&self) -> Self::AsArg<'_>;
+
+    fn negexp(lhs: Self::AsArg<'_>, rhs: Self::AsArg<'_>) -> Self {
+        Self::pow(lhs, (-rhs).asarg())
+    }
 }
 
 impl Number for f64 {
