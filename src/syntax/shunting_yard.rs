@@ -635,12 +635,12 @@ where
                             // FIX: recieve 10 and 2 from MathEvalNumber so it can be const
                             let ten = N::from(10);
                             let two = N::from(2);
-                            match output_queue.last_num().unwrap() {
-                                num if num == ten.asarg() => {
+                            match output_queue.last_num() {
+                                Some(num) if num == ten.asarg() => {
                                     output_queue.pop_arg();
                                     nf = NativeFunction::Log10;
                                 }
-                                num if num == two.asarg() => {
+                                Some(num) if num == two.asarg() => {
                                     output_queue.pop_arg();
                                     nf = NativeFunction::Log2;
                                 }
