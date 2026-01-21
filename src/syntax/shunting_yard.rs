@@ -79,7 +79,7 @@ where
     }
 }
 
-fn after_implies_neg<F>(token: Token<'_>, operator_stack: &[SyOperator<F>]) -> bool
+fn after_implies_neg<F, S: AsRef<str>>(token: &Token<S>, operator_stack: &[SyOperator<F>]) -> bool
 where
     F: FunctionIdentifier,
 {
@@ -269,9 +269,9 @@ where
     }
 }
 
-fn validate_consecutive_tokens<'a>(
-    last: Option<Token<'a>>,
-    current: Option<Token<'a>>,
+fn validate_consecutive_tokens<S: AsRef<str>>(
+    last: Option<&Token<S>>,
+    current: Option<&Token<S>>,
     pos: usize,
 ) -> Result<(), SyntaxError> {
     match (last, current) {
@@ -306,7 +306,7 @@ fn validate_consecutive_tokens<'a>(
     }
 }
 
-fn find_opening_paren(tokens: &[Token<'_>]) -> Option<usize> {
+fn find_opening_paren<S: AsRef<str>>(tokens: &[Token<S>]) -> Option<usize> {
     let mut nesting = 1;
     for (i, tk) in tokens.iter().enumerate().rev() {
         match tk {
@@ -323,7 +323,7 @@ fn find_opening_paren(tokens: &[Token<'_>]) -> Option<usize> {
     None
 }
 
-fn find_opening_pipe(tokens: &[Token<'_>]) -> Option<usize> {
+fn find_opening_pipe<S: AsRef<str>>(tokens: &[Token<S>]) -> Option<usize> {
     let mut idx = tokens.len() - 1;
     loop {
         match tokens[idx] {
@@ -465,9 +465,9 @@ where
     }
 }
 
-pub(super) fn parse_or_eval<'a, O, N, V, F>(
+pub(super) fn parse_or_eval<O, N, V, F, S>(
     mut output_queue: O,
-    tokens: &'a [Token<'a>],
+    tokens: impl AsRef<[Token<S>]>,
     custom_constant_parser: impl Fn(&str) -> Option<N>,
     custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
     custom_variable_parser: impl Fn(&str) -> Option<V>,
@@ -477,11 +477,13 @@ where
     N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
+    S: AsRef<str>,
 {
     // Dijkstra's shunting yard algorithm
+    let tokens = tokens.as_ref();
     let mut operator_stack: Vec<SyOperator<F>> = Vec::new();
-    let mut last_tk: Option<Token<'a>> = None;
-    for (pos, &token) in tokens.iter().enumerate() {
+    let mut last_tk: Option<&Token<S>> = None;
+    for (pos, token) in tokens.iter().enumerate() {
         validate_consecutive_tokens(last_tk, Some(token), pos)?;
         // for detecting implied multiplication
         if matches!(
@@ -519,11 +521,13 @@ where
         }
         match token {
             Token::Number(num) => output_queue.push(
-                num.parse::<N>()
+                num.as_ref()
+                    .parse::<N>()
                     .map(AstNode::Number)
                     .map_err(|_| SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos))?,
             ),
             Token::Variable(var) => {
+                let var = var.as_ref();
                 if var.len() > NAME_LIMIT as usize {
                     return Err(SyntaxError(SyntaxErrorKind::NameTooLong, pos..=pos));
                 }
@@ -557,19 +561,21 @@ where
                 }
             }
             Token::Operator(opr) => {
+                let opr = *opr;
                 let mut sy_opr: SyOperator<F> = BinaryOp::parse(opr)
                     .map(|biopr| SyOperator::BinaryOp(biopr))
                     .or_else(|| UnaryOp::parse(opr).map(|unopr| SyOperator::UnaryOp(unopr)))
                     .unwrap();
                 if opr == '-' && last_tk.is_none_or(|tk| after_implies_neg(tk, &operator_stack)) {
-                    if last_tk.is_some_and(|tk| tk == Token::Operator('^')) {
+                    if last_tk.is_some_and(|tk| matches!(tk, Token::Operator('^'))) {
                         let pow = operator_stack.pop();
                         debug_assert_eq!(pow, Some(SyOperator::BinaryOp(BinaryOp::Pow)));
                         sy_opr = SyOperator::BinaryOp(BinaryOp::NegExp)
                     } else {
                         sy_opr = SyOperator::UnaryOp(UnaryOp::Neg);
                     }
-                } else if opr == '!' && last_tk.is_some_and(|tk| tk == Token::Operator('!')) {
+                } else if opr == '!' && last_tk.is_some_and(|tk| matches!(tk, Token::Operator('!')))
+                {
                     let fac = operator_stack.pop();
                     debug_assert!(matches!(
                         fac,
@@ -582,6 +588,7 @@ where
                 }
             }
             Token::Function(name) => {
+                let name = name.as_ref();
                 if name.len() > NAME_LIMIT as usize {
                     return Err(SyntaxError(SyntaxErrorKind::NameTooLong, pos..=pos));
                 }

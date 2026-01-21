@@ -68,7 +68,7 @@ const MATH_EXPRESSIONS: [(&str, &str); 9] = [
 ];
 
 fn get_throughput(input: &str) -> u64 {
-    TokenStream::new(input).unwrap().get().len() as u64
+    TokenStream::new(input).unwrap().as_ref().len() as u64
 }
 
 fn hardcoded(crit: &mut Criterion) {

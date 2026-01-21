@@ -1,26 +1,43 @@
+use std::fmt::Display;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
-pub enum Token<'a> {
-    Number(&'a str),
+pub enum Token<S: AsRef<str>> {
+    Number(S),
     Operator(char),
-    Variable(&'a str),
-    Function(&'a str),
+    Variable(S),
+    Function(S),
     OpenParen,
     CloseParen,
     Comma,
     Pipe,
 }
 
-impl Token<'_> {
+impl<S: AsRef<str>> Token<S> {
     pub fn length(&self) -> usize {
         match self {
             // this token captures both the function name and the opening parentheses
-            Token::Function(s) => s.len() + 1,
-            Token::Number(s) | Token::Variable(s) => s.len(),
+            Token::Function(s) => s.as_ref().len() + 1,
+            Token::Number(s) | Token::Variable(s) => s.as_ref().len(),
             Token::Operator(_)
             | Token::OpenParen
             | Token::CloseParen
             | Token::Comma
             | Token::Pipe => 1,
+        }
+    }
+}
+
+impl<S: AsRef<str>> Display for Token<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Number(num) => f.write_str(num.as_ref()),
+            Token::Operator(opr) => write!(f, "{opr}"),
+            Token::Variable(var) => f.write_str(var.as_ref()),
+            Token::Function(func) => f.write_str(func.as_ref()),
+            Token::OpenParen => f.write_str("("),
+            Token::CloseParen => f.write_str(")"),
+            Token::Comma => f.write_str(","),
+            Token::Pipe => f.write_str("|"),
         }
     }
 }
@@ -54,10 +71,10 @@ fn recognize(input: char) -> Option<CharNotion> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct TokenStream<'a>(pub(crate) Vec<Token<'a>>);
+pub struct TokenStream<S: AsRef<str>>(pub(crate) Vec<Token<S>>);
 
-impl<'a> TokenStream<'a> {
-    pub fn new(input: &'a str) -> Result<TokenStream<'a>, TokenizationError> {
+impl<'a> TokenStream<&'a str> {
+    pub fn new(input: &'a str) -> Result<Self, TokenizationError> {
         enum Reading {
             Nothing,
             Number(usize, bool),
@@ -141,8 +158,10 @@ impl<'a> TokenStream<'a> {
         }
         Ok(TokenStream(result))
     }
+}
 
-    pub fn get(&self) -> &[Token<'a>] {
+impl<S: AsRef<str>> AsRef<[Token<S>]> for TokenStream<S> {
+    fn as_ref(&self) -> &[Token<S>] {
         &self.0
     }
 }
@@ -202,11 +221,7 @@ mod tests {
         );
         assert_eq!(
             TokenStream::new("839   *            4"),
-            Ok(TokenStream(vec![
-                Number("839"),
-                Operator('*'),
-                Number("4")
-            ]))
+            Ok(TokenStream(vec![Number("839"), Operator('*'), Number("4")]))
         );
         assert_eq!(
             TokenStream::new("7.620-90.001"),

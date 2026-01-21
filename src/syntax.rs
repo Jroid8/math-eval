@@ -90,9 +90,9 @@ pub enum SyntaxErrorKind {
     NameTooLong,
 }
 
-fn token_range_to_str_range(
+fn token_range_to_str_range<S: AsRef<str>>(
     input: &str,
-    tokens: &[Token<'_>],
+    tokens: &[Token<S>],
     token_range: RangeInclusive<usize>,
 ) -> RangeInclusive<usize> {
     let mut start = 0;
@@ -113,7 +113,7 @@ fn token_range_to_str_range(
 pub struct SyntaxError(SyntaxErrorKind, RangeInclusive<usize>);
 
 impl SyntaxError {
-    pub fn to_general(self, input: &str, tokens: &[Token<'_>]) -> ParsingError {
+    pub fn to_general<S: AsRef<str>>(self, input: &str, tokens: &[Token<S>]) -> ParsingError {
         ParsingError {
             at: if self.0 == SyntaxErrorKind::EmptyInput {
                 0..=0
@@ -157,8 +157,8 @@ where
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    pub fn new<'a>(
-        tokens: &'a [Token<'a>],
+    pub fn new<S: AsRef<str>>(
+        tokens: impl AsRef<[Token<S>]>,
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
@@ -172,13 +172,13 @@ where
         )
     }
 
-    pub fn parse_and_eval<'a, 'b, 'c, S: VariableStore<N, V>>(
-        tokens: &'a [Token<'a>],
+    pub fn parse_and_eval<'a, 'b, S: VariableStore<N, V>, A: AsRef<str>>(
+        tokens: impl AsRef<[Token<A>]>,
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
-        variable_values: &'b S,
-        function_to_pointer: impl Fn(F) -> FunctionPointer<'c, N>,
+        variable_values: &'a S,
+        function_to_pointer: impl Fn(F) -> FunctionPointer<'b, N>,
     ) -> Result<N, SyntaxError> {
         parse_or_eval(
             SyNumberOutput {
