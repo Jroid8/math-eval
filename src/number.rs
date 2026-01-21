@@ -147,6 +147,36 @@ impl NativeFunction {
             _ => Some(1),
         }
     }
+
+    pub fn all() -> [NativeFunction; 24] {
+        // FIX: replace with a derive macro, if available
+        [
+            NativeFunction::Sin,
+            NativeFunction::Cos,
+            NativeFunction::Tan,
+            NativeFunction::Cot,
+            NativeFunction::Asin,
+            NativeFunction::Acos,
+            NativeFunction::Atan,
+            NativeFunction::Acot,
+            NativeFunction::Log,
+            NativeFunction::Log2,
+            NativeFunction::Log10,
+            NativeFunction::Ln,
+            NativeFunction::Exp,
+            NativeFunction::Floor,
+            NativeFunction::Ceil,
+            NativeFunction::Round,
+            NativeFunction::Trunc,
+            NativeFunction::Frac,
+            NativeFunction::Abs,
+            NativeFunction::Sign,
+            NativeFunction::Sqrt,
+            NativeFunction::Cbrt,
+            NativeFunction::Max,
+            NativeFunction::Min,
+        ]
+    }
 }
 
 impl Display for NativeFunction {
