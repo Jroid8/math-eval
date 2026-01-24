@@ -89,7 +89,7 @@ where
             | Token::OpenParen
             | Token::Comma
             | Token::Function(_)
-    ) || matches!(token, Token::Pipe) && inside_pipe_abs(operator_stack).is_some()
+    ) || matches!(token, Token::Pipe) && inside_pipe_abs(operator_stack)
 }
 
 pub(super) trait ShuntingYardOutput<N, V, F>
@@ -342,18 +342,18 @@ fn find_opening_pipe<S: AsRef<str>>(tokens: &[Token<S>]) -> Option<usize> {
     }
 }
 
-fn inside_pipe_abs<F>(operator_stack: &[SyOperator<F>]) -> Option<usize>
+fn inside_pipe_abs<F>(operator_stack: &[SyOperator<F>]) -> bool
 where
     F: FunctionIdentifier,
 {
-    for (i, opr) in operator_stack.iter().enumerate().rev() {
+    for opr in operator_stack.iter().rev() {
         match opr {
             SyOperator::BinaryOp(_) | SyOperator::UnaryOp(_) => (),
-            SyOperator::Function(SyFunction::PipeAbs, _) => return Some(i),
-            SyOperator::Function(_, _) | SyOperator::Parentheses => return None,
+            SyOperator::Function(SyFunction::PipeAbs, _) => return true,
+            SyOperator::Function(_, _) | SyOperator::Parentheses => return false,
         }
     }
-    None
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -503,7 +503,7 @@ where
                 Some(Token::Pipe),
                 Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_)
             )
-        ) && inside_pipe_abs(&operator_stack).is_none()
+        ) && !inside_pipe_abs(&operator_stack)
             || matches!(
                 (last_tk, token),
                 (
@@ -515,7 +515,7 @@ where
                     ),
                     Token::Pipe
                 )
-            ) && inside_pipe_abs(&operator_stack).is_none()
+            ) && !inside_pipe_abs(&operator_stack)
         {
             output_queue.push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
         }
@@ -704,12 +704,19 @@ where
                 }
             }
             Token::Pipe => {
-                if let Some(opening_pipe) = inside_pipe_abs(&operator_stack) {
+                if inside_pipe_abs(&operator_stack) {
                     output_queue.flush(&mut operator_stack);
                     if let Some(SyOperator::Function(SyFunction::PipeAbs, args)) =
                         operator_stack.pop()
                         && args > 1
                     {
+                        let mut opening_pipe = 0;
+                        for (i, tk) in tokens[..pos].iter().enumerate().rev() {
+                            if matches!(tk, Token::Pipe) {
+                                opening_pipe = i;
+                                break
+                            }
+                        }
                         return Err(SyntaxError(
                             SyntaxErrorKind::TooManyArguments,
                             opening_pipe..=pos,
