@@ -1,9 +1,55 @@
 use std::fmt::Display;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub enum OprToken {
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    Power,
+    Factorial,
+    DoubleFactorial,
+    Modulo,
+    NegExp,
+    DoubleStar,
+}
+
+impl OprToken {
+    pub fn length(&self) -> usize {
+        match self {
+            Self::Plus
+            | Self::Minus
+            | Self::Multiply
+            | Self::Divide
+            | Self::Power
+            | Self::Modulo
+            | Self::Factorial => 1,
+            Self::DoubleFactorial | Self::NegExp | Self::DoubleStar => 2,
+        }
+    }
+}
+
+impl Display for OprToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Plus => f.write_str("+"),
+            Self::Minus => f.write_str("-"),
+            Self::Multiply => f.write_str("*"),
+            Self::Divide => f.write_str("/"),
+            Self::Power => f.write_str("^"),
+            Self::Factorial => f.write_str("!"),
+            Self::DoubleFactorial => f.write_str("!!"),
+            Self::Modulo => f.write_str("%"),
+            Self::DoubleStar => f.write_str("**"),
+            Self::NegExp => f.write_str("^-"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum Token<S: AsRef<str>> {
     Number(S),
-    Operator(char),
+    Operator(OprToken),
     Variable(S),
     Function(S),
     OpenParen,
@@ -18,11 +64,8 @@ impl<S: AsRef<str>> Token<S> {
             // this token captures both the function name and the opening parentheses
             Token::Function(s) => s.as_ref().len() + 1,
             Token::Number(s) | Token::Variable(s) => s.as_ref().len(),
-            Token::Operator(_)
-            | Token::OpenParen
-            | Token::CloseParen
-            | Token::Comma
-            | Token::Pipe => 1,
+            Token::Operator(opr) => opr.length(),
+            Token::OpenParen | Token::CloseParen | Token::Comma | Token::Pipe => 1,
         }
     }
 }
@@ -42,10 +85,21 @@ impl<S: AsRef<str>> Display for Token<S> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OprChar {
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Caret,
+    Percent,
+    Exclamation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CharNotion {
     Number,
-    Operation,
+    Operation(OprChar),
     Pipe,
     Alphabet,
     OpenParen,
@@ -59,7 +113,13 @@ fn recognize(input: char) -> Option<CharNotion> {
     match input {
         '0'..='9' => Some(CharNotion::Number),
         '.' => Some(CharNotion::Dot),
-        '+' | '-' | '*' | '/' | '^' | '%' | '!' => Some(CharNotion::Operation),
+        '+' => Some(CharNotion::Operation(OprChar::Plus)),
+        '-' => Some(CharNotion::Operation(OprChar::Minus)),
+        '*' => Some(CharNotion::Operation(OprChar::Star)),
+        '/' => Some(CharNotion::Operation(OprChar::Slash)),
+        '^' => Some(CharNotion::Operation(OprChar::Caret)),
+        '%' => Some(CharNotion::Operation(OprChar::Percent)),
+        '!' => Some(CharNotion::Operation(OprChar::Exclamation)),
         'a'..='z' | 'A'..='Z' => Some(CharNotion::Alphabet),
         '(' | '[' | '{' => Some(CharNotion::OpenParen),
         ')' | ']' | '}' => Some(CharNotion::CloseParen),
@@ -79,6 +139,9 @@ impl<'a> TokenStream<&'a str> {
             Nothing,
             Number(usize, bool),
             VarFunc(usize),
+            Star,
+            Caret,
+            Exclamation,
         }
 
         let mut result = Vec::new();
@@ -91,7 +154,15 @@ impl<'a> TokenStream<&'a str> {
                         CharNotion::Number | CharNotion::Dot => {
                             state = Reading::Number(pos, cha == '.')
                         }
-                        CharNotion::Operation => result.push(Token::Operator(cha)),
+                        CharNotion::Operation(oc) => match oc {
+                            OprChar::Plus => result.push(Token::Operator(OprToken::Plus)),
+                            OprChar::Minus => result.push(Token::Operator(OprToken::Minus)),
+                            OprChar::Slash => result.push(Token::Operator(OprToken::Divide)),
+                            OprChar::Percent => result.push(Token::Operator(OprToken::Modulo)),
+                            OprChar::Star => state = Reading::Star,
+                            OprChar::Caret => state = Reading::Caret,
+                            OprChar::Exclamation => state = Reading::Exclamation,
+                        },
                         CharNotion::Alphabet => state = Reading::VarFunc(pos),
                         CharNotion::OpenParen => result.push(Token::OpenParen),
                         CharNotion::CloseParen => result.push(Token::CloseParen),
@@ -108,7 +179,7 @@ impl<'a> TokenStream<&'a str> {
                                 state = Reading::Number(start, true);
                             }
                         }
-                        CharNotion::Operation
+                        CharNotion::Operation(_)
                         | CharNotion::Alphabet
                         | CharNotion::OpenParen
                         | CharNotion::CloseParen
@@ -130,7 +201,7 @@ impl<'a> TokenStream<&'a str> {
                             result.push(Token::Function(&input[start..pos]));
                             state = Reading::Nothing;
                         }
-                        CharNotion::Operation
+                        CharNotion::Operation(_)
                         | CharNotion::CloseParen
                         | CharNotion::Dot
                         | CharNotion::Comma
@@ -141,6 +212,36 @@ impl<'a> TokenStream<&'a str> {
                             continue;
                         }
                     },
+                    Reading::Star => {
+                        if notion == CharNotion::Operation(OprChar::Star) {
+                            result.push(Token::Operator(OprToken::DoubleStar));
+                            state = Reading::Nothing;
+                        } else {
+                            result.push(Token::Operator(OprToken::Multiply));
+                            state = Reading::Nothing;
+                            continue;
+                        }
+                    }
+                    Reading::Caret => {
+                        if notion == CharNotion::Operation(OprChar::Minus) {
+                            result.push(Token::Operator(OprToken::NegExp));
+                            state = Reading::Nothing;
+                        } else {
+                            result.push(Token::Operator(OprToken::Power));
+                            state = Reading::Nothing;
+                            continue;
+                        }
+                    }
+                    Reading::Exclamation => {
+                        if notion == CharNotion::Operation(OprChar::Exclamation) {
+                            result.push(Token::Operator(OprToken::DoubleFactorial));
+                            state = Reading::Nothing;
+                        } else {
+                            result.push(Token::Operator(OprToken::Factorial));
+                            state = Reading::Nothing;
+                            continue;
+                        }
+                    }
                 }
                 break;
             }
@@ -155,6 +256,9 @@ impl<'a> TokenStream<&'a str> {
                 }
             }
             Reading::VarFunc(start) => result.push(Token::Variable(&input[start..])),
+            Reading::Star => result.push(Token::Operator(OprToken::Multiply)),
+            Reading::Caret => result.push(Token::Operator(OprToken::Power)),
+            Reading::Exclamation => result.push(Token::Operator(OprToken::Factorial)),
         }
         Ok(TokenStream(result))
     }
@@ -192,7 +296,7 @@ mod tests {
         );
         assert_eq!(
             TokenStream::new("-1.0"),
-            Ok(TokenStream(vec![Operator('-'), Number("1.0")]))
+            Ok(TokenStream(vec![Operator(OprToken::Minus), Number("1.0")]))
         );
         assert_eq!(
             TokenStream::new("(11)"),
@@ -209,7 +313,7 @@ mod tests {
         assert_eq!(
             TokenStream::new("-(pi)"),
             Ok(TokenStream(vec![
-                Operator('-'),
+                Operator(OprToken::Minus),
                 OpenParen,
                 Variable("pi"),
                 CloseParen
@@ -217,17 +321,25 @@ mod tests {
         );
         assert_eq!(
             TokenStream::new("10*5"),
-            Ok(TokenStream(vec![Number("10"), Operator('*'), Number("5")]))
+            Ok(TokenStream(vec![
+                Number("10"),
+                Operator(OprToken::Multiply),
+                Number("5")
+            ]))
         );
         assert_eq!(
             TokenStream::new("839   *            4"),
-            Ok(TokenStream(vec![Number("839"), Operator('*'), Number("4")]))
+            Ok(TokenStream(vec![
+                Number("839"),
+                Operator(OprToken::Multiply),
+                Number("4")
+            ]))
         );
         assert_eq!(
             TokenStream::new("7.620-90.001"),
             Ok(TokenStream(vec![
                 Number("7.620"),
-                Operator('-'),
+                Operator(OprToken::Minus),
                 Number("90.001")
             ]))
         );
@@ -235,7 +347,7 @@ mod tests {
             TokenStream::new("1.10/pi"),
             Ok(TokenStream(vec![
                 Number("1.10"),
-                Operator('/'),
+                Operator(OprToken::Divide),
                 Variable("pi")
             ]))
         );
@@ -243,7 +355,7 @@ mod tests {
             TokenStream::new("x+y"),
             Ok(TokenStream(vec![
                 Variable("x"),
-                Operator('+'),
+                Operator(OprToken::Plus),
                 Variable("y")
             ]))
         );
@@ -292,7 +404,7 @@ mod tests {
             Ok(TokenStream(vec![
                 Function("cos"),
                 Number("1"),
-                Operator('+'),
+                Operator(OprToken::Plus),
                 Function("sin"),
                 Number("0"),
                 CloseParen,
@@ -304,13 +416,41 @@ mod tests {
             TokenStream::new("theta+phi"),
             Ok(TokenStream(vec![
                 Variable("theta"),
-                Operator('+'),
+                Operator(OprToken::Plus),
                 Variable("phi")
             ]))
         );
         assert_eq!(
             TokenStream::new("2^10"),
-            Ok(TokenStream(vec![Number("2"), Operator('^'), Number("10")]))
+            Ok(TokenStream(vec![
+                Number("2"),
+                Operator(OprToken::Power),
+                Number("10")
+            ]))
+        );
+        assert_eq!(
+            TokenStream::new("2^-10"),
+            Ok(TokenStream(vec![
+                Number("2"),
+                Operator(OprToken::NegExp),
+                Number("10")
+            ]))
+        );
+        assert_eq!(
+            TokenStream::new("2**10"),
+            Ok(TokenStream(vec![
+                Number("2"),
+                Operator(OprToken::DoubleStar),
+                Number("10")
+            ]))
+        );
+        assert_eq!(
+            TokenStream::new("x!!!"),
+            Ok(TokenStream(vec![
+                Number("2"),
+                Operator(OprToken::DoubleFactorial),
+                Operator(OprToken::Factorial)
+            ]))
         );
         assert_eq!(TokenStream::new("="), Err(TokenizationError(0)));
         assert_eq!(TokenStream::new("99$"), Err(TokenizationError(2)));

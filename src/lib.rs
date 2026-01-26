@@ -37,14 +37,6 @@ pub enum UnaryOp {
 }
 
 impl UnaryOp {
-    pub fn parse(input: char) -> Option<Self> {
-        match input {
-            '!' => Some(UnaryOp::Fac),
-            '-' => Some(UnaryOp::Neg),
-            _ => None,
-        }
-    }
-
     pub fn eval<N: Number>(self, value: N::AsArg<'_>) -> N {
         match self {
             UnaryOp::Fac => N::factorial(value),
@@ -91,18 +83,6 @@ pub enum BinaryOp {
 }
 
 impl BinaryOp {
-    pub fn parse(input: char) -> Option<BinaryOp> {
-        match input {
-            '+' => Some(BinaryOp::Add),
-            '-' => Some(BinaryOp::Sub),
-            '*' => Some(BinaryOp::Mul),
-            '/' => Some(BinaryOp::Div),
-            '^' => Some(BinaryOp::Pow),
-            '%' => Some(BinaryOp::Mod),
-            _ => None,
-        }
-    }
-
     pub fn eval<N: Number>(self, lhs: N::AsArg<'_>, rhs: N::AsArg<'_>) -> N {
         match self {
             BinaryOp::Add => lhs + rhs,
