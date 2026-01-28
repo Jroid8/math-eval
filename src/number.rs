@@ -6,6 +6,8 @@ use std::{
     str::FromStr,
 };
 
+use strum::EnumIter;
+
 use crate::{
     FunctionIdentifier,
     quick_expr::{CtxFuncPtr, FunctionSource, MarkedFunc},
@@ -18,7 +20,7 @@ pub enum NFPointer<N: Number> {
     Flexible(fn(&[N]) -> N),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, EnumIter)]
 pub enum NativeFunction {
     Sin,
     Cos,
@@ -146,36 +148,6 @@ impl NativeFunction {
             NativeFunction::Min => None,
             _ => Some(1),
         }
-    }
-
-    pub fn all() -> [NativeFunction; 24] {
-        // FIX: replace with a derive macro, if available
-        [
-            NativeFunction::Sin,
-            NativeFunction::Cos,
-            NativeFunction::Tan,
-            NativeFunction::Cot,
-            NativeFunction::Asin,
-            NativeFunction::Acos,
-            NativeFunction::Atan,
-            NativeFunction::Acot,
-            NativeFunction::Log,
-            NativeFunction::Log2,
-            NativeFunction::Log10,
-            NativeFunction::Ln,
-            NativeFunction::Exp,
-            NativeFunction::Floor,
-            NativeFunction::Ceil,
-            NativeFunction::Round,
-            NativeFunction::Trunc,
-            NativeFunction::Frac,
-            NativeFunction::Abs,
-            NativeFunction::Sign,
-            NativeFunction::Sqrt,
-            NativeFunction::Cbrt,
-            NativeFunction::Max,
-            NativeFunction::Min,
-        ]
     }
 }
 

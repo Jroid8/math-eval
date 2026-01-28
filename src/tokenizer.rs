@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+use strum::EnumIter;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, EnumIter)]
 pub enum OprToken {
     Plus,
     Minus,

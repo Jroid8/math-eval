@@ -27,7 +27,7 @@ fn tokenizer() {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 enum MyVar {
     X,
     Y,
@@ -44,10 +44,6 @@ impl MyVar {
             "theta" | "Θ" => Some(Self::Theta),
             _ => None,
         }
-    }
-
-    fn all() -> [MyVar; 4] {
-        [MyVar::X, MyVar::Y, MyVar::Z, MyVar::Theta]
     }
 }
 
@@ -75,7 +71,7 @@ impl VariableStore<f64, MyVar> for MyStore {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 enum MyFunc {
     Deg2Rad,
     Clamp,
@@ -106,9 +102,6 @@ impl MyFunc {
             }),
         }
     }
-    fn all() -> [MyFunc; 3] {
-        [MyFunc::Deg2Rad, MyFunc::Clamp, MyFunc::Digits]
-    }
 }
 
 impl Display for MyFunc {
@@ -127,11 +120,11 @@ fn parser() {
     let rand_token = || match fastrand::u8(0..8) {
         0 => Token::Number(gen_random_f64().to_string()),
         1 => Token::Operator(fastrand::choice(OPERATORS).unwrap()),
-        2 => Token::Variable(fastrand::choice(MyVar::all()).unwrap().to_string()),
+        2 => Token::Variable(fastrand::choice(MyVar::iter()).unwrap().to_string()),
         3 => Token::Function(if fastrand::u8(0..100) < 80 {
-            fastrand::choice(NativeFunction::all()).unwrap().to_string()
+            fastrand::choice(NativeFunction::iter()).unwrap().to_string()
         } else {
-            fastrand::choice(MyFunc::all()).unwrap().to_string()
+            fastrand::choice(MyFunc::iter()).unwrap().to_string()
         }),
         4 => Token::OpenParen,
         5 => Token::CloseParen,
