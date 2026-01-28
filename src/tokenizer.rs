@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 use strum::EnumIter;
 
@@ -48,7 +48,7 @@ impl Display for OprToken {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub enum Token<S: AsRef<str>> {
     Number(S),
     Operator(OprToken),
@@ -68,6 +68,21 @@ impl<S: AsRef<str>> Token<S> {
             Token::Number(s) | Token::Variable(s) => s.as_ref().len(),
             Token::Operator(opr) => opr.length(),
             Token::OpenParen | Token::CloseParen | Token::Comma | Token::Pipe => 1,
+        }
+    }
+}
+
+impl<S: AsRef<str>> Debug for Token<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Number(num) => f.debug_tuple("Number").field(&num.as_ref()).finish(),
+            Self::Operator(opr) => f.debug_tuple("Operator").field(opr).finish(),
+            Self::Variable(var) => f.debug_tuple("Variable").field(&var.as_ref()).finish(),
+            Self::Function(func) => f.debug_tuple("Function").field(&func.as_ref()).finish(),
+            Self::OpenParen => write!(f, "OpenParen"),
+            Self::CloseParen => write!(f, "CloseParen"),
+            Self::Comma => write!(f, "Comma"),
+            Self::Pipe => write!(f, "Pipe"),
         }
     }
 }
