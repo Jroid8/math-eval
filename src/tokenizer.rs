@@ -449,7 +449,7 @@ mod tests {
         assert_eq!(
             TokenStream::new("x!!!"),
             Ok(TokenStream(vec![
-                Number("2"),
+                Variable("x"),
                 Operator(OprToken::DoubleFactorial),
                 Operator(OprToken::Factorial)
             ]))
