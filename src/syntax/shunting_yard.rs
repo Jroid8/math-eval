@@ -6,7 +6,7 @@ use crate::{
     VariableStore,
     number::{NFPointer, NativeFunction, Number},
     postfix_tree::subtree_collection::SubtreeCollection,
-    tokenizer::Token,
+    tokenizer::{OprToken, Token},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,17 +79,24 @@ where
     }
 }
 
-fn after_implies_neg<F, S: AsRef<str>>(token: &Token<S>, operator_stack: &[SyOperator<F>]) -> bool
+impl<F> From<OprToken> for SyOperator<F>
 where
     F: FunctionIdentifier,
 {
-    matches!(
-        token,
-        Token::Operator('*' | '/' | '%' | '^' | '-' | '+')
-            | Token::OpenParen
-            | Token::Comma
-            | Token::Function(_)
-    ) || matches!(token, Token::Pipe) && inside_pipe_abs(operator_stack)
+    fn from(value: OprToken) -> Self {
+        match value {
+            OprToken::Plus => Self::BinaryOp(BinaryOp::Add),
+            OprToken::Minus => Self::BinaryOp(BinaryOp::Sub),
+            OprToken::Multiply => Self::BinaryOp(BinaryOp::Mul),
+            OprToken::Divide => Self::BinaryOp(BinaryOp::Div),
+            OprToken::Power => Self::BinaryOp(BinaryOp::Pow),
+            OprToken::Modulo => Self::BinaryOp(BinaryOp::Mod),
+            OprToken::NegExp => Self::BinaryOp(BinaryOp::NegExp),
+            OprToken::DoubleStar => Self::BinaryOp(BinaryOp::Mul),
+            OprToken::Factorial => Self::UnaryOp(UnaryOp::Fac),
+            OprToken::DoubleFactorial => Self::UnaryOp(UnaryOp::DoubleFac),
+        }
+    }
 }
 
 pub(super) trait ShuntingYardOutput<N, V, F>
@@ -210,6 +217,7 @@ where
         self.args.pop().unwrap()
     }
     fn push(&mut self, node: AstNode<N, V, F>) {
+        // FIX: unwrap in one place
         let res = match node {
             AstNode::Number(num) => num,
             AstNode::Variable(var) => self.variable_store.get(var).to_owned(),

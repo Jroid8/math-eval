@@ -4,8 +4,9 @@ use math_eval::{
     FunctionPointer, VariableStore,
     number::NativeFunction,
     syntax::MathAst,
-    tokenizer::{Token, TokenStream},
+    tokenizer::{OprToken, Token, TokenStream},
 };
+use strum::{EnumIter, IntoEnumIterator};
 
 fn gen_random_f64() -> f64 {
     (fastrand::f64() - 0.5)
@@ -116,10 +117,9 @@ impl Display for MyFunc {
 
 #[test]
 fn parser() {
-    const OPERATORS: [char; 7] = ['+', '-', '*', '/', '^', '%', '!'];
     let rand_token = || match fastrand::u8(0..8) {
         0 => Token::Number(gen_random_f64().to_string()),
-        1 => Token::Operator(fastrand::choice(OPERATORS).unwrap()),
+        1 => Token::Operator(fastrand::choice(OprToken::iter()).unwrap()),
         2 => Token::Variable(fastrand::choice(MyVar::iter()).unwrap().to_string()),
         3 => Token::Function(if fastrand::u8(0..100) < 80 {
             fastrand::choice(NativeFunction::iter()).unwrap().to_string()
