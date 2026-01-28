@@ -552,9 +552,9 @@ mod tests {
         }
         fn as_pointer(self) -> FunctionPointer<'static, f64> {
             match self {
-                TestFunc::Sigmoid => FunctionPointer::Single(sigmoid),
-                TestFunc::Hypot => FunctionPointer::Dual(hypot),
-                TestFunc::F1 => FunctionPointer::Triple(func1),
+                TestFunc::Sigmoid => FunctionPointer::<f64>::Single(sigmoid),
+                TestFunc::Hypot => FunctionPointer::<f64>::Dual(hypot),
+                TestFunc::F1 => FunctionPointer::<f64>::Triple(func1),
                 TestFunc::Digits => FunctionPointer::Flexible(digits),
             }
         }
