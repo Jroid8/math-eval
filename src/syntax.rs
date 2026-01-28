@@ -83,11 +83,13 @@ pub enum SyntaxErrorKind {
     EmptyParenthesis,
     EmptyArgument,
     EmptyInput,
+    EmptyPipeAbs,
     MissingOpeningParenthesis,
     MissingClosingParenthesis,
     CommaOutsideFunction,
     PipeAbsNotClosed,
     NameTooLong,
+    UnexpectedToken,
 }
 
 fn token_range_to_str_range<S: AsRef<str>>(
@@ -141,6 +143,8 @@ impl SyntaxError {
                 SyntaxErrorKind::EmptyInput => ParsingErrorKind::EmptyInput,
                 SyntaxErrorKind::PipeAbsNotClosed => ParsingErrorKind::PipeAbsNotClosed,
                 SyntaxErrorKind::NameTooLong => ParsingErrorKind::NameTooLong,
+                SyntaxErrorKind::UnexpectedToken => ParsingErrorKind::UnexpectedCharacter,
+                SyntaxErrorKind::EmptyPipeAbs => ParsingErrorKind::EmptyPipeAbs,
             },
         }
     }

@@ -277,43 +277,6 @@ where
     }
 }
 
-fn validate_consecutive_tokens<S: AsRef<str>>(
-    last: Option<&Token<S>>,
-    current: Option<&Token<S>>,
-    pos: usize,
-) -> Result<(), SyntaxError> {
-    match (last, current) {
-        (
-            None | Some(Token::OpenParen | Token::Function(_) | Token::Comma),
-            Some(Token::Operator('!' | '*' | '/' | '^' | '%')),
-        ) => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, pos..=pos)),
-        (
-            Some(Token::Operator('+' | '-' | '*' | '/' | '^' | '%')),
-            None | Some(Token::CloseParen | Token::Comma),
-        ) => Err(SyntaxError(
-            SyntaxErrorKind::MisplacedOperator,
-            pos - 1..=pos - 1,
-        )),
-        (
-            Some(Token::Operator('*' | '/' | '%' | '^' | '-' | '+')),
-            Some(Token::Operator('*' | '/' | '%' | '^' | '!')),
-        ) => Err(SyntaxError(
-            SyntaxErrorKind::MisplacedOperator,
-            pos - 1..=pos,
-        )),
-        (Some(Token::OpenParen), Some(Token::CloseParen))
-        | (Some(Token::Pipe), Some(Token::Pipe)) => Err(SyntaxError(
-            SyntaxErrorKind::EmptyParenthesis,
-            pos - 1..=pos,
-        )),
-        (Some(Token::Comma | Token::Function(_)), Some(Token::CloseParen | Token::Comma)) => {
-            Err(SyntaxError(SyntaxErrorKind::EmptyArgument, pos - 1..=pos))
-        }
-        (None, None) => Err(SyntaxError(SyntaxErrorKind::EmptyInput, 0..=0)),
-        _ => Ok(()),
-    }
-}
-
 fn find_opening_paren<S: AsRef<str>>(tokens: &[Token<S>]) -> Option<usize> {
     let mut nesting = 1;
     for (i, tk) in tokens.iter().enumerate().rev() {
@@ -473,6 +436,100 @@ where
     }
 }
 
+// E -> PE | ES | EIE | (E) | |E| | F(A) | T
+// P -> + | -
+// S -> ! | !!
+// I -> + | - | * | / | ^
+// A -> E,A | E
+// T -> N | V
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExprState {
+    Prefix,
+    Suffix,
+}
+
+impl ExprState {
+    fn new() -> Self {
+        Self::Prefix
+    }
+
+    fn next<S: AsRef<str>, F: FunctionIdentifier>(
+        &mut self,
+        token: &Token<S>,
+        operator_stack: &[SyOperator<F>],
+    ) -> Result<bool, SyntaxErrorKind> {
+        match self {
+            ExprState::Prefix => match token {
+                // prefix
+                Token::Operator(OprToken::Plus | OprToken::Minus)
+                | Token::OpenParen
+                | Token::Function(_) => Ok(false),
+                // suffix & infix
+                Token::CloseParen | Token::Comma => Err(SyntaxErrorKind::UnexpectedToken),
+                Token::Operator(
+                    OprToken::Factorial
+                    | OprToken::DoubleFactorial
+                    | OprToken::Multiply
+                    | OprToken::Divide
+                    | OprToken::Power
+                    | OprToken::NegExp
+                    | OprToken::Modulo
+                    | OprToken::DoubleStar,
+                ) => Err(SyntaxErrorKind::MisplacedOperator),
+                // pipe which may be prefix or suffix depending on the state
+                Token::Pipe => {
+                    if inside_pipe_abs(operator_stack) {
+                        // suffix
+                        Err(SyntaxErrorKind::UnexpectedToken)
+                    } else {
+                        // prefix
+                        Ok(false)
+                    }
+                }
+                // terminal
+                Token::Number(_) | Token::Variable(_) => {
+                    *self = ExprState::Suffix;
+                    Ok(false)
+                }
+            },
+            ExprState::Suffix => match token {
+                // suffix
+                Token::Operator(OprToken::Factorial | OprToken::DoubleFactorial)
+                | Token::CloseParen => Ok(false),
+                // prefix
+                Token::OpenParen | Token::Function(_) => Ok(true),
+                // pipe which may be prefix or suffix depending on the state
+                Token::Pipe => {
+                    if inside_pipe_abs(operator_stack) {
+                        Ok(false)
+                    } else {
+                        *self = ExprState::Prefix;
+                        Ok(true)
+                    }
+                }
+                // infix
+                Token::Operator(
+                    OprToken::Plus
+                    | OprToken::Minus
+                    | OprToken::Multiply
+                    | OprToken::Divide
+                    | OprToken::Power
+                    | OprToken::NegExp
+                    | OprToken::Modulo
+                    | OprToken::DoubleStar,
+                )
+                | Token::Comma => {
+                    *self = ExprState::Prefix;
+                    Ok(false)
+                }
+                // terminal
+                Token::Number(_) | Token::Variable(_) => Ok(true),
+            },
+        }
+    }
+}
+
 pub(super) fn parse_or_eval<O, N, V, F, S>(
     mut output_queue: O,
     tokens: impl AsRef<[Token<S>]>,
@@ -489,42 +546,37 @@ where
 {
     // Dijkstra's shunting yard algorithm
     let tokens = tokens.as_ref();
+    if tokens.is_empty() {
+        return Err(SyntaxError(SyntaxErrorKind::EmptyInput, 0..=0));
+    }
+    let clarify_err = |kind: SyntaxErrorKind, pos: usize| {
+        if kind == SyntaxErrorKind::UnexpectedToken && pos > 0 {
+            match tokens[pos - 1..=pos] {
+                [Token::Comma, Token::CloseParen]
+                | [Token::OpenParen, Token::Comma]
+                | [Token::Comma, Token::Comma] => {
+                    SyntaxError(SyntaxErrorKind::EmptyArgument, pos - 1..=pos)
+                }
+                [Token::OpenParen, Token::CloseParen] => {
+                    SyntaxError(SyntaxErrorKind::EmptyParenthesis, pos - 1..=pos)
+                },
+                [Token::Pipe, Token::Pipe] => {
+                    SyntaxError(SyntaxErrorKind::EmptyPipeAbs, pos - 1..=pos)
+                }
+                _ => SyntaxError(kind, pos..=pos),
+            }
+        } else {
+            return SyntaxError(kind, pos..=pos);
+        }
+    };
+    let mut state = ExprState::new();
     let mut operator_stack: Vec<SyOperator<F>> = Vec::new();
-    let mut last_tk: Option<&Token<S>> = None;
     for (pos, token) in tokens.iter().enumerate() {
-        validate_consecutive_tokens(last_tk, Some(token), pos)?;
-        // for detecting implied multiplication
-        if matches!(
-            (last_tk, token),
-            (
-                Some(
-                    Token::Operator('!')
-                        | Token::Number(_)
-                        | Token::Variable(_)
-                        | Token::CloseParen,
-                ),
-                Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_),
-            ),
-        ) || matches!(
-            (last_tk, token),
-            (
-                Some(Token::Pipe),
-                Token::Number(_) | Token::Variable(_) | Token::OpenParen | Token::Function(_)
-            )
-        ) && !inside_pipe_abs(&operator_stack)
-            || matches!(
-                (last_tk, token),
-                (
-                    Some(
-                        Token::Operator('!')
-                            | Token::Number(_)
-                            | Token::Variable(_)
-                            | Token::CloseParen,
-                    ),
-                    Token::Pipe
-                )
-            ) && !inside_pipe_abs(&operator_stack)
-        {
+        let last_state = state;
+        let implied_mult = state
+            .next(token, &operator_stack)
+            .map_err(|e| SyntaxError(e, pos..=pos))?;
+        if implied_mult {
             output_queue.push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
         }
         match token {
@@ -570,30 +622,14 @@ where
             }
             Token::Operator(opr) => {
                 let opr = *opr;
-                let mut sy_opr: SyOperator<F> = BinaryOp::parse(opr)
-                    .map(|biopr| SyOperator::BinaryOp(biopr))
-                    .or_else(|| UnaryOp::parse(opr).map(|unopr| SyOperator::UnaryOp(unopr)))
-                    .unwrap();
-                if opr == '-' && last_tk.is_none_or(|tk| after_implies_neg(tk, &operator_stack)) {
-                    if last_tk.is_some_and(|tk| matches!(tk, Token::Operator('^'))) {
-                        let pow = operator_stack.pop();
-                        debug_assert_eq!(pow, Some(SyOperator::BinaryOp(BinaryOp::Pow)));
-                        sy_opr = SyOperator::BinaryOp(BinaryOp::NegExp)
+                output_queue.push_opr(
+                    if opr == OprToken::Minus && last_state == ExprState::Prefix {
+                        SyOperator::UnaryOp(UnaryOp::Neg)
                     } else {
-                        sy_opr = SyOperator::UnaryOp(UnaryOp::Neg);
-                    }
-                } else if opr == '!' && last_tk.is_some_and(|tk| matches!(tk, Token::Operator('!')))
-                {
-                    let fac = operator_stack.pop();
-                    debug_assert!(matches!(
-                        fac,
-                        Some(SyOperator::UnaryOp(UnaryOp::Fac | UnaryOp::DoubleFac))
-                    ));
-                    sy_opr = SyOperator::UnaryOp(UnaryOp::DoubleFac)
-                }
-                if opr != '+' || last_tk.is_some_and(|tk| !after_implies_neg(tk, &operator_stack)) {
-                    output_queue.push_opr(sy_opr, &mut operator_stack);
-                }
+                        opr.into()
+                    },
+                    &mut operator_stack,
+                );
             }
             Token::Function(name) => {
                 let name = name.as_ref();
@@ -722,7 +758,7 @@ where
                         for (i, tk) in tokens[..pos].iter().enumerate().rev() {
                             if matches!(tk, Token::Pipe) {
                                 opening_pipe = i;
-                                break
+                                break;
                             }
                         }
                         return Err(SyntaxError(
@@ -736,9 +772,7 @@ where
                 }
             }
         }
-        last_tk = Some(token);
     }
-    validate_consecutive_tokens(last_tk, None, tokens.len())?;
     output_queue.flush(&mut operator_stack);
     match operator_stack.last() {
         Some(SyOperator::Function(SyFunction::PipeAbs, _)) => {

@@ -91,7 +91,7 @@ impl BinaryOp {
             BinaryOp::Div => lhs / rhs,
             BinaryOp::Pow => N::pow(lhs, rhs),
             BinaryOp::Mod => N::modulo(lhs, rhs),
-            BinaryOp::NegExp => N::negexp(lhs, rhs)
+            BinaryOp::NegExp => N::negexp(lhs, rhs),
         }
     }
 
@@ -207,6 +207,7 @@ pub enum ParsingErrorKind {
     EmptyParenthesis,
     EmptyArgument,
     EmptyInput,
+    EmptyPipeAbs,
     NameTooLong,
 }
 
@@ -226,8 +227,13 @@ impl Display for ParsingErrorKind {
             ParsingErrorKind::EmptyParenthesis => "Parentheses should not be empty",
             ParsingErrorKind::EmptyArgument => "Function arguments shouldn't be empty",
             ParsingErrorKind::EmptyInput => "Input shouldn't be empty",
-            ParsingErrorKind::PipeAbsNotClosed => "Unmatched '|' in absolute value expression",
+            ParsingErrorKind::PipeAbsNotClosed => {
+                "Unmatched vertical bar in absolute value expression"
+            }
             ParsingErrorKind::NameTooLong => "Identifier exceeds maximum length of 32 characters.",
+            ParsingErrorKind::EmptyPipeAbs => {
+                "Pairs of vertical bars for the absolute value shouldn not be empty"
+            }
         })
     }
 }
