@@ -622,14 +622,11 @@ where
             }
             Token::Operator(opr) => {
                 let opr = *opr;
-                output_queue.push_opr(
-                    if opr == OprToken::Minus && last_state == ExprState::Prefix {
-                        SyOperator::UnaryOp(UnaryOp::Neg)
-                    } else {
-                        opr.into()
-                    },
-                    &mut operator_stack,
-                );
+                if opr == OprToken::Minus && last_state == ExprState::Prefix {
+                    output_queue.push_opr(SyOperator::UnaryOp(UnaryOp::Neg), &mut operator_stack)
+                } else if opr != OprToken::Plus || last_state != ExprState::Prefix {
+                    output_queue.push_opr(opr.into(), &mut operator_stack)
+                }
             }
             Token::Function(name) => {
                 let name = name.as_ref();
