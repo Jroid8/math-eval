@@ -658,6 +658,18 @@ where
                             .push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
                     }
                     operator_stack.push(SyOperator::Function(func, 1));
+                } else if let Some(segments) =
+                    segment_variable(name, &custom_constant_parser, &custom_variable_parser)
+                {
+                    for seg in segments {
+                        output_queue.push(match seg {
+                            Segment::Constant(c) => AstNode::Number(c),
+                            Segment::Variable(v) => AstNode::Variable(v),
+                        });
+                        output_queue
+                            .push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
+                    }
+                    operator_stack.push(SyOperator::Parentheses);
                 } else {
                     return Err(SyntaxError(SyntaxErrorKind::UnknownFunction, pos..=pos));
                 }

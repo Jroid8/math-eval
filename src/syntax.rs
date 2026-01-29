@@ -1044,6 +1044,14 @@ mod tests {
             ])
         );
         assert_eq!(
+            syntaxify("x(-1)"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(-1.0),
+                AstNode::BinaryOp(BinaryOp::Mul)
+            ])
+        );
+        assert_eq!(
             syntaxify(""),
             Err(ParsingError {
                 kind: ParsingErrorKind::EmptyInput,
