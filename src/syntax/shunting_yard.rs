@@ -546,22 +546,23 @@ where
 {
     // Dijkstra's shunting yard algorithm
     let tokens = tokens.as_ref();
-    if tokens.is_empty() {
-        return Err(SyntaxError(SyntaxErrorKind::EmptyInput, 0..=0));
-    }
     let clarify_err = |kind: SyntaxErrorKind, pos: usize| {
         if kind == SyntaxErrorKind::UnexpectedToken && pos > 0 {
             match tokens[pos - 1..=pos] {
                 [Token::Comma, Token::CloseParen]
-                | [Token::OpenParen, Token::Comma]
-                | [Token::Comma, Token::Comma] => {
+                | [Token::OpenParen | Token::Function(_), Token::Comma]
+                | [Token::Comma, Token::Comma]
+                | [Token::Function(_), Token::CloseParen] => {
                     SyntaxError(SyntaxErrorKind::EmptyArgument, pos - 1..=pos)
                 }
                 [Token::OpenParen, Token::CloseParen] => {
                     SyntaxError(SyntaxErrorKind::EmptyParenthesis, pos - 1..=pos)
-                },
+                }
                 [Token::Pipe, Token::Pipe] => {
                     SyntaxError(SyntaxErrorKind::EmptyPipeAbs, pos - 1..=pos)
+                }
+                [Token::Operator(_), Token::CloseParen | Token::Comma] => {
+                    SyntaxError(SyntaxErrorKind::MisplacedOperator, pos - 1..=pos - 1)
                 }
                 _ => SyntaxError(kind, pos..=pos),
             }
@@ -575,7 +576,7 @@ where
         let last_state = state;
         let implied_mult = state
             .next(token, &operator_stack)
-            .map_err(|e| SyntaxError(e, pos..=pos))?;
+            .map_err(|e| clarify_err(e, pos))?;
         if implied_mult {
             output_queue.push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
         }
@@ -769,6 +770,18 @@ where
                 }
             }
         }
+    }
+    if let Some(last) = tokens.last() {
+        if state == ExprState::Prefix {
+            let pos = tokens.len() - 1;
+            if matches!(last, Token::Operator(_)) {
+                return Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, pos..=pos));
+            } else {
+                return Err(SyntaxError(SyntaxErrorKind::UnexpectedToken, pos..=pos));
+            }
+        }
+    } else {
+        return Err(SyntaxError(SyntaxErrorKind::EmptyInput, 0..=0));
     }
     output_queue.flush(&mut operator_stack);
     match operator_stack.last() {

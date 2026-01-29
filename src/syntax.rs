@@ -1225,6 +1225,13 @@ mod tests {
                 at: 5..=5
             })
         );
+        assert_eq!(
+            syntaxify("x*"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 1..=1
+            })
+        );
     }
 
     #[test]
