@@ -1,4 +1,4 @@
-use std::{fmt::Display, panic};
+use std::{any::Any, fmt::Display, panic};
 
 use math_eval::{
     FunctionPointer, VariableStore,
@@ -9,8 +9,7 @@ use math_eval::{
 use strum::{EnumIter, IntoEnumIterator};
 
 fn gen_random_f64() -> f64 {
-    (fastrand::f64() - 0.5)
-        * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
+    (fastrand::f64() - 0.5) * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
 }
 
 #[test]
@@ -117,24 +116,27 @@ impl Display for MyFunc {
 
 #[test]
 fn parser() {
-    let rand_token = || match fastrand::u8(0..8) {
-        0 => Token::Number(gen_random_f64().to_string()),
-        1 => Token::Operator(fastrand::choice(OprToken::iter()).unwrap()),
-        2 => Token::Variable(fastrand::choice(MyVar::iter()).unwrap().to_string()),
-        3 => Token::Function(if fastrand::u8(0..100) < 80 {
-            fastrand::choice(NativeFunction::iter()).unwrap().to_string()
-        } else {
-            fastrand::choice(MyFunc::iter()).unwrap().to_string()
-        }),
-        4 => Token::OpenParen,
-        5 => Token::CloseParen,
-        6 => Token::Comma,
-        7 => Token::Pipe,
-        _ => unreachable!(),
-    };
-    for _ in 0..1000 {
-        let input: Vec<Token<_>> = (0..fastrand::u8(1..50)).map(|_| rand_token()).collect();
-        if let Err(err) = std::panic::catch_unwind(|| {
+    fn rand_token() -> Token<String> {
+        match fastrand::u8(0..8) {
+            0 => Token::Number(gen_random_f64().to_string()),
+            1 => Token::Operator(fastrand::choice(OprToken::iter()).unwrap()),
+            2 => Token::Variable(fastrand::choice(MyVar::iter()).unwrap().to_string()),
+            3 => Token::Function(if fastrand::u8(0..100) < 80 {
+                fastrand::choice(NativeFunction::iter())
+                    .unwrap()
+                    .to_string()
+            } else {
+                fastrand::choice(MyFunc::iter()).unwrap().to_string()
+            }),
+            4 => Token::OpenParen,
+            5 => Token::CloseParen,
+            6 => Token::Comma,
+            7 => Token::Pipe,
+            _ => unreachable!(),
+        }
+    }
+    fn tryinput(input: &[Token<String>]) -> Result<(), Box<dyn Any + Send + 'static>> {
+        std::panic::catch_unwind(|| {
             let _ = MathAst::new(&input, |_| None::<f64>, MyFunc::parse, MyVar::parse);
             let _ = MathAst::parse_and_eval(
                 &input,
@@ -144,12 +146,15 @@ fn parser() {
                 &MyStore([3., 5., 1., 0.8]),
                 MyFunc::as_pointer,
             );
-        }) {
-            for tk in input {
-                eprint!("{tk}");
+        })
+    }
+    for s in [1, 30, 100] {
+        for _ in 0..1000 {
+            let input: Vec<Token<_>> = (0..fastrand::u8(s..s + 10)).map(|_| rand_token()).collect();
+            if let Err(pan) = tryinput(&input) {
+                eprintln!("input: {input:?}");
+                panic::resume_unwind(pan);
             }
-            eprintln!();
-            panic::resume_unwind(err);
         }
     }
 }
