@@ -498,7 +498,10 @@ impl ExprState {
                 Token::Operator(OprToken::Factorial | OprToken::DoubleFactorial)
                 | Token::CloseParen => Ok(false),
                 // prefix
-                Token::OpenParen | Token::Function(_) => Ok(true),
+                Token::OpenParen | Token::Function(_) => {
+                    *self = ExprState::Prefix;
+                    Ok(true)
+                }
                 // pipe which may be prefix or suffix depending on the state
                 Token::Pipe => {
                     if inside_pipe_abs(operator_stack) {
