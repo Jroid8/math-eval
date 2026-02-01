@@ -1001,12 +1001,24 @@ mod tests {
                 AstNode::UnaryOp(UnaryOp::Neg),
             ])
         );
+        println!("CASE START");
         assert_eq!(
             syntaxify("2^-1"),
             Ok(vec![
                 AstNode::Number(2.0),
-                AstNode::Number(1.0),
-                AstNode::BinaryOp(BinaryOp::NegExp),
+                AstNode::Number(-1.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+            ])
+        );
+        assert_eq!(
+            syntaxify("2^-(x+2)"),
+            Ok(vec![
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::UnaryOp(UnaryOp::Neg),
+                AstNode::BinaryOp(BinaryOp::Pow),
             ])
         );
         assert_eq!(

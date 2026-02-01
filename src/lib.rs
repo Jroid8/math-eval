@@ -79,7 +79,6 @@ pub enum BinaryOp {
     Div,
     Pow,
     Mod,
-    NegExp,
 }
 
 impl BinaryOp {
@@ -91,7 +90,6 @@ impl BinaryOp {
             BinaryOp::Div => lhs / rhs,
             BinaryOp::Pow => N::pow(lhs, rhs),
             BinaryOp::Mod => N::modulo(lhs, rhs),
-            BinaryOp::NegExp => N::negexp(lhs, rhs),
         }
     }
 
@@ -107,7 +105,6 @@ impl BinaryOp {
             BinaryOp::Div => 1,
             BinaryOp::Mod => 1,
             BinaryOp::Pow => 2,
-            BinaryOp::NegExp => 2,
         }
     }
 
@@ -115,7 +112,7 @@ impl BinaryOp {
         match self {
             BinaryOp::Add | BinaryOp::Mul => Associativity::Both,
             BinaryOp::Sub | BinaryOp::Div | BinaryOp::Mod => Associativity::Left,
-            BinaryOp::Pow | BinaryOp::NegExp => Associativity::Right,
+            BinaryOp::Pow => Associativity::Right,
         }
     }
 
@@ -127,7 +124,6 @@ impl BinaryOp {
             BinaryOp::Div => |x, y| x / y,
             BinaryOp::Pow => N::pow,
             BinaryOp::Mod => N::modulo,
-            BinaryOp::NegExp => N::negexp,
         }
     }
 }
@@ -147,7 +143,6 @@ impl Display for BinaryOp {
             BinaryOp::Div => f.write_str("/"),
             BinaryOp::Pow => f.write_str("^"),
             BinaryOp::Mod => f.write_str("%"),
-            BinaryOp::NegExp => f.write_str("^-"),
         }
     }
 }

@@ -12,7 +12,6 @@ pub enum OprToken {
     Factorial,
     DoubleFactorial,
     Modulo,
-    NegExp,
     DoubleStar,
 }
 
@@ -26,7 +25,7 @@ impl OprToken {
             | Self::Power
             | Self::Modulo
             | Self::Factorial => 1,
-            Self::DoubleFactorial | Self::NegExp | Self::DoubleStar => 2,
+            Self::DoubleFactorial | Self::DoubleStar => 2,
         }
     }
 }
@@ -43,7 +42,6 @@ impl Display for OprToken {
             Self::DoubleFactorial => f.write_str("!!"),
             Self::Modulo => f.write_str("%"),
             Self::DoubleStar => f.write_str("**"),
-            Self::NegExp => f.write_str("^-"),
         }
     }
 }
@@ -108,7 +106,7 @@ enum OprChar {
     Minus,
     Star,
     Slash,
-    Caret,
+    Power,
     Percent,
     Exclamation,
 }
@@ -134,7 +132,7 @@ fn recognize(input: char) -> Option<CharNotion> {
         '-' => Some(CharNotion::Operation(OprChar::Minus)),
         '*' => Some(CharNotion::Operation(OprChar::Star)),
         '/' => Some(CharNotion::Operation(OprChar::Slash)),
-        '^' => Some(CharNotion::Operation(OprChar::Caret)),
+        '^' => Some(CharNotion::Operation(OprChar::Power)),
         '%' => Some(CharNotion::Operation(OprChar::Percent)),
         '!' => Some(CharNotion::Operation(OprChar::Exclamation)),
         'a'..='z' | 'A'..='Z' => Some(CharNotion::Alphabet),
@@ -157,7 +155,6 @@ impl<'a> TokenStream<&'a str> {
             Number(usize, bool),
             VarFunc(usize),
             Star,
-            Caret,
             Exclamation,
         }
 
@@ -176,8 +173,8 @@ impl<'a> TokenStream<&'a str> {
                             OprChar::Minus => result.push(Token::Operator(OprToken::Minus)),
                             OprChar::Slash => result.push(Token::Operator(OprToken::Divide)),
                             OprChar::Percent => result.push(Token::Operator(OprToken::Modulo)),
+                            OprChar::Power => result.push(Token::Operator(OprToken::Power)),
                             OprChar::Star => state = Reading::Star,
-                            OprChar::Caret => state = Reading::Caret,
                             OprChar::Exclamation => state = Reading::Exclamation,
                         },
                         CharNotion::Alphabet => state = Reading::VarFunc(pos),
@@ -239,16 +236,6 @@ impl<'a> TokenStream<&'a str> {
                             continue;
                         }
                     }
-                    Reading::Caret => {
-                        if notion == CharNotion::Operation(OprChar::Minus) {
-                            result.push(Token::Operator(OprToken::NegExp));
-                            state = Reading::Nothing;
-                        } else {
-                            result.push(Token::Operator(OprToken::Power));
-                            state = Reading::Nothing;
-                            continue;
-                        }
-                    }
                     Reading::Exclamation => {
                         if notion == CharNotion::Operation(OprChar::Exclamation) {
                             result.push(Token::Operator(OprToken::DoubleFactorial));
@@ -274,7 +261,6 @@ impl<'a> TokenStream<&'a str> {
             }
             Reading::VarFunc(start) => result.push(Token::Variable(&input[start..])),
             Reading::Star => result.push(Token::Operator(OprToken::Multiply)),
-            Reading::Caret => result.push(Token::Operator(OprToken::Power)),
             Reading::Exclamation => result.push(Token::Operator(OprToken::Factorial)),
         }
         Ok(TokenStream(result))
@@ -442,14 +428,6 @@ mod tests {
             Ok(TokenStream(vec![
                 Number("2"),
                 Operator(OprToken::Power),
-                Number("10")
-            ]))
-        );
-        assert_eq!(
-            TokenStream::new("2^-10"),
-            Ok(TokenStream(vec![
-                Number("2"),
-                Operator(OprToken::NegExp),
                 Number("10")
             ]))
         );

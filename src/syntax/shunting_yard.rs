@@ -26,6 +26,7 @@ where
 {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
+    HpNeg,
     Function(SyFunction<F>, u8),
     Parentheses,
 }
@@ -43,7 +44,7 @@ where
             SyOperator::BinaryOp(BinaryOp::Mod) => 1,
             SyOperator::UnaryOp(UnaryOp::Neg) => 2,
             SyOperator::BinaryOp(BinaryOp::Pow) => 3,
-            SyOperator::BinaryOp(BinaryOp::NegExp) => 3,
+            SyOperator::HpNeg => 4,
             SyOperator::UnaryOp(UnaryOp::Fac) => 4,
             SyOperator::UnaryOp(UnaryOp::DoubleFac) => 4,
             SyOperator::Function(_, _) | SyOperator::Parentheses => {
@@ -65,6 +66,7 @@ where
         match self {
             SyOperator::BinaryOp(opr) => AstNode::BinaryOp(opr),
             SyOperator::UnaryOp(opr) => AstNode::UnaryOp(opr),
+            SyOperator::HpNeg => AstNode::UnaryOp(UnaryOp::Neg),
             SyOperator::Function(SyFunction::NativeFunction(nf), args) => {
                 AstNode::Function(nf.into(), args)
             }
@@ -91,7 +93,6 @@ where
             OprToken::Divide => Self::BinaryOp(BinaryOp::Div),
             OprToken::Power => Self::BinaryOp(BinaryOp::Pow),
             OprToken::Modulo => Self::BinaryOp(BinaryOp::Mod),
-            OprToken::NegExp => Self::BinaryOp(BinaryOp::NegExp),
             OprToken::DoubleStar => Self::BinaryOp(BinaryOp::Mul),
             OprToken::Factorial => Self::UnaryOp(UnaryOp::Fac),
             OprToken::DoubleFactorial => Self::UnaryOp(UnaryOp::DoubleFac),
@@ -125,7 +126,7 @@ where
     }
     fn flush(&mut self, operator_stack: &mut Vec<SyOperator<F>>) {
         while let Some(opr) = operator_stack.last()
-            && matches!(opr, SyOperator::BinaryOp(_) | SyOperator::UnaryOp(_))
+            && matches!(opr, SyOperator::BinaryOp(_) | SyOperator::UnaryOp(_) | SyOperator::HpNeg)
         {
             self.pop_opr(operator_stack)
         }
@@ -150,7 +151,7 @@ where
     fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>) {
         let opr = operator_stack.pop().unwrap();
         if let Some(AstNode::Number(num)) = self.0.last_mut()
-            && opr == SyOperator::UnaryOp(UnaryOp::Neg)
+            && matches!(opr, SyOperator::UnaryOp(UnaryOp::Neg) | SyOperator::HpNeg)
         {
             *num = -num.asarg();
         } else {
@@ -208,6 +209,7 @@ where
                 opr.eval(self.args.pop().unwrap().asarg(), rhs.asarg())
             }
             SyOperator::UnaryOp(opr) => opr.eval(self.args.pop().unwrap().asarg()),
+            SyOperator::HpNeg => -self.args.pop().unwrap(),
             _ => panic!(),
         };
         self.args.push(res);
@@ -319,7 +321,7 @@ where
 {
     for opr in operator_stack.iter().rev() {
         match opr {
-            SyOperator::BinaryOp(_) | SyOperator::UnaryOp(_) => (),
+            SyOperator::BinaryOp(_) | SyOperator::UnaryOp(_) | SyOperator::HpNeg => (),
             SyOperator::Function(SyFunction::PipeAbs, _) => return true,
             SyOperator::Function(_, _) | SyOperator::Parentheses => return false,
         }
@@ -473,7 +475,6 @@ impl ExprState {
                     | OprToken::Multiply
                     | OprToken::Divide
                     | OprToken::Power
-                    | OprToken::NegExp
                     | OprToken::Modulo
                     | OprToken::DoubleStar,
                 ) => Err(SyntaxErrorKind::MisplacedOperator),
@@ -518,7 +519,6 @@ impl ExprState {
                     | OprToken::Multiply
                     | OprToken::Divide
                     | OprToken::Power
-                    | OprToken::NegExp
                     | OprToken::Modulo
                     | OprToken::DoubleStar,
                 )
@@ -574,6 +574,7 @@ where
         }
     };
     let mut state = ExprState::new();
+    let mut was_pow = false;
     let mut operator_stack: Vec<SyOperator<F>> = Vec::new();
     for (pos, token) in tokens.iter().enumerate() {
         let last_state = state;
@@ -590,6 +591,19 @@ where
                     .map(AstNode::Number)
                     .map_err(|_| SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos))?,
             ),
+            Token::Operator(opr) => {
+                let opr = *opr;
+                if opr == OprToken::Minus && last_state == ExprState::Prefix {
+                    if was_pow {
+                        output_queue.push_opr(SyOperator::HpNeg, &mut operator_stack)
+                    } else {
+                        output_queue
+                            .push_opr(SyOperator::UnaryOp(UnaryOp::Neg), &mut operator_stack)
+                    }
+                } else if opr != OprToken::Plus || last_state != ExprState::Prefix {
+                    output_queue.push_opr(opr.into(), &mut operator_stack)
+                }
+            }
             Token::Variable(var) => {
                 let var = var.as_ref();
                 if var.len() > NAME_LIMIT as usize {
@@ -622,14 +636,6 @@ where
                         SyntaxErrorKind::UnknownVariableOrConstant,
                         pos..=pos,
                     ));
-                }
-            }
-            Token::Operator(opr) => {
-                let opr = *opr;
-                if opr == OprToken::Minus && last_state == ExprState::Prefix {
-                    output_queue.push_opr(SyOperator::UnaryOp(UnaryOp::Neg), &mut operator_stack)
-                } else if opr != OprToken::Plus || last_state != ExprState::Prefix {
-                    output_queue.push_opr(opr.into(), &mut operator_stack)
                 }
             }
             Token::Function(name) => {
@@ -785,6 +791,7 @@ where
                 }
             }
         }
+        was_pow = matches!(token, Token::Operator(OprToken::Power));
     }
     if let Some(last) = tokens.last() {
         if state == ExprState::Prefix {

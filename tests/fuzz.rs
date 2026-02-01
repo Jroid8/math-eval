@@ -149,8 +149,8 @@ fn parser() {
         })
     }
     for s in [1, 30, 100] {
-        for _ in 0..1000 {
-            let input: Vec<Token<_>> = (0..fastrand::u8(s..s + 10)).map(|_| rand_token()).collect();
+        for _ in 0..10000/s {
+            let input: Vec<Token<_>> = (0..fastrand::u16(s..s + 10)).map(|_| rand_token()).collect();
             if let Err(pan) = tryinput(&input) {
                 eprintln!("input: {input:?}");
                 panic::resume_unwind(pan);
