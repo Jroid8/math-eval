@@ -781,7 +781,7 @@ where
                     }
                     output_queue.push(AstNode::Function(NativeFunction::Abs.into(), 1));
                 } else {
-                    operator_stack.push(SyOperator::Function(SyFunction::PipeAbs, 0));
+                    operator_stack.push(SyOperator::Function(SyFunction::PipeAbs, 1));
                 }
             }
         }
