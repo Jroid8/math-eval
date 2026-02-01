@@ -16,6 +16,12 @@ impl<T: Node> Default for SubtreeCollection<T> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct NotEnoughOrphans;
+
+#[derive(Debug, Clone)]
+pub struct MultipleRoots;
+
 /// The subtrees are kept valid except they don't need to have a parent
 /// until it is converted to a PostfixTree, where a quick O(1) check is performed
 /// so only a single root exists at the end.
@@ -47,14 +53,16 @@ impl<T: Node> SubtreeCollection<T> {
         }
     }
 
-    /// panics if the children `node` expects
-    /// is more than the current number of orphan subtrees.
-    pub fn push(&mut self, node: T) {
-        assert!(node.children() <= self.orphan_subtrees);
-        self.orphan_subtrees = self.orphan_subtrees + 1 - node.children();
-        let dc = Entry::calc_descendents(&self.vec, &node);
-        self.vec.push(Entry::new(node, dc, None));
-        Entry::configure_children_for_head(&mut self.vec);
+    pub fn push(&mut self, node: T) -> Result<(), NotEnoughOrphans> {
+        if node.children() > self.orphan_subtrees {
+            Err(NotEnoughOrphans)
+        } else {
+            self.orphan_subtrees = self.orphan_subtrees + 1 - node.children();
+            let dc = Entry::calc_descendents(&self.vec, &node);
+            self.vec.push(Entry::new(node, dc, None));
+            Entry::configure_children_for_head(&mut self.vec);
+            Ok(())
+        }
     }
 
     pub fn pop(&mut self) -> Option<T> {
@@ -66,9 +74,12 @@ impl<T: Node> SubtreeCollection<T> {
         }
     }
 
-    pub fn into_tree(self) -> PostfixTree<T> {
-        assert_eq!(self.orphan_subtrees, 1);
-        PostfixTree(self.vec)
+    pub fn into_tree(self) -> Result<PostfixTree<T>, MultipleRoots> {
+        if self.orphan_subtrees > 1 {
+            Err(MultipleRoots)
+        } else {
+            Ok(PostfixTree(self.vec))
+        }
     }
 
     pub fn into_inner(self) -> Vec<Entry<T>> {
@@ -160,10 +171,11 @@ mod tests {
         let mass_push = |nodes: &[usize]| {
             let mut builder = SubtreeCollection::new();
             for it in nodes {
-                builder.push(*it);
+                builder.push(*it).unwrap();
             }
             builder
                 .into_tree()
+                .unwrap()
                 .0
                 .into_iter()
                 .map(|n| n.descendants_count)
@@ -183,7 +195,7 @@ mod tests {
             catch_unwind(|| {
                 let mut builder = SubtreeCollection::new();
                 for it in nodes {
-                    builder.push(*it);
+                    builder.push(*it).unwrap();
                 }
                 builder
             })

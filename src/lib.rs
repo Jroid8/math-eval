@@ -204,6 +204,7 @@ pub enum ParsingErrorKind {
     EmptyInput,
     EmptyPipeAbs,
     NameTooLong,
+    UnknownError
 }
 
 impl Display for ParsingErrorKind {
@@ -228,7 +229,8 @@ impl Display for ParsingErrorKind {
             ParsingErrorKind::NameTooLong => "Identifier exceeds maximum length of 32 characters.",
             ParsingErrorKind::EmptyPipeAbs => {
                 "Pairs of vertical bars for the absolute value shouldn not be empty"
-            }
+            },
+            Self::UnknownError => "Unknown error"
         })
     }
 }

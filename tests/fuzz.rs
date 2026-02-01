@@ -13,8 +13,8 @@ fn gen_random_f64() -> f64 {
 }
 
 #[test]
-fn tokenizer() {
-    for _ in 1..100 {
+fn fuzz_tokenizer() {
+    for _ in 1..1000 {
         let noise: String = (0..fastrand::u8(8..100))
             .map(|_| fastrand::char('\x00'..char::MAX))
             .collect();
@@ -115,7 +115,7 @@ impl Display for MyFunc {
 }
 
 #[test]
-fn parser() {
+fn fuzz_parser() {
     fn rand_token() -> Token<String> {
         match fastrand::u8(0..8) {
             0 => Token::Number(gen_random_f64().to_string()),

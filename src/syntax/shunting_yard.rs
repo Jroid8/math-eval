@@ -5,7 +5,7 @@ use crate::{
     BinaryOp, FunctionIdentifier, FunctionPointer, NAME_LIMIT, UnaryOp, VariableIdentifier,
     VariableStore,
     number::{NFPointer, NativeFunction, Number},
-    postfix_tree::subtree_collection::SubtreeCollection,
+    postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans, SubtreeCollection},
     tokenizer::{OprToken, Token},
 };
 
@@ -108,28 +108,37 @@ where
 {
     type Output;
 
-    fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>);
-    fn make(self) -> Self::Output;
-    fn push(&mut self, node: AstNode<N, V, F>);
+    fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>) -> Result<(), NotEnoughOrphans>;
+    fn make(self) -> Result<Self::Output, MultipleRoots>;
+    fn push(&mut self, node: AstNode<N, V, F>) -> Result<(), NotEnoughOrphans>;
     fn pop_arg(&mut self) -> Option<AstNode<N, V, F>>;
     fn last_num<'a>(&'a self) -> Option<N::AsArg<'a>>;
 
-    fn push_opr(&mut self, operator: SyOperator<F>, operator_stack: &mut Vec<SyOperator<F>>) {
+    fn push_opr(
+        &mut self,
+        operator: SyOperator<F>,
+        operator_stack: &mut Vec<SyOperator<F>>,
+    ) -> Result<(), NotEnoughOrphans> {
         while let Some(top_opr) = operator_stack.last()
             && matches!(top_opr, SyOperator::BinaryOp(_) | SyOperator::UnaryOp(_))
             && (operator.precedence() < top_opr.precedence()
                 || operator.precedence() == top_opr.precedence() && !operator.is_right_binding())
         {
-            self.pop_opr(operator_stack);
+            self.pop_opr(operator_stack)?;
         }
         operator_stack.push(operator);
+        Ok(())
     }
-    fn flush(&mut self, operator_stack: &mut Vec<SyOperator<F>>) {
+    fn flush(&mut self, operator_stack: &mut Vec<SyOperator<F>>) -> Result<(), NotEnoughOrphans> {
         while let Some(opr) = operator_stack.last()
-            && matches!(opr, SyOperator::BinaryOp(_) | SyOperator::UnaryOp(_) | SyOperator::HpNeg)
+            && matches!(
+                opr,
+                SyOperator::BinaryOp(_) | SyOperator::UnaryOp(_) | SyOperator::HpNeg
+            )
         {
-            self.pop_opr(operator_stack)
+            self.pop_opr(operator_stack)?;
         }
+        Ok(())
     }
 }
 
@@ -148,20 +157,21 @@ where
 {
     type Output = MathAst<N, V, F>;
 
-    fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>) {
+    fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>) -> Result<(), NotEnoughOrphans> {
         let opr = operator_stack.pop().unwrap();
         if let Some(AstNode::Number(num)) = self.0.last_mut()
             && matches!(opr, SyOperator::UnaryOp(UnaryOp::Neg) | SyOperator::HpNeg)
         {
             *num = -num.asarg();
+            Ok(())
         } else {
-            self.push(opr.to_syn());
+            self.push(opr.to_syn())
         }
     }
-    fn make(self) -> Self::Output {
-        MathAst(self.0.into_tree())
+    fn make(self) -> Result<Self::Output, MultipleRoots> {
+        self.0.into_tree().map(|t| MathAst(t))
     }
-    fn push(&mut self, kind: AstNode<N, V, F>) {
+    fn push(&mut self, kind: AstNode<N, V, F>) -> Result<(), NotEnoughOrphans> {
         self.0.push(kind)
     }
     fn pop_arg(&mut self) -> Option<AstNode<N, V, F>> {
@@ -192,6 +202,18 @@ where
     pub(super) func_ident: PhantomData<F>,
 }
 
+impl<'a, 'b, N, V, F, S, C> SyNumberOutput<'a, 'b, N, V, F, S, C>
+where
+    N: Number,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+    S: VariableStore<N, V>,
+    C: Fn(F) -> FunctionPointer<'a, N>,
+{
+    fn args_pop(&mut self) -> Result<N, NotEnoughOrphans> {
+        self.args.pop().ok_or(NotEnoughOrphans)
+    }
+}
 impl<'a, 'b, N, V, F, S, C> ShuntingYardOutput<N, V, F> for SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
     N: Number,
@@ -202,32 +224,36 @@ where
 {
     type Output = N;
 
-    fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>) {
+    fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>) -> Result<(), NotEnoughOrphans> {
         let res = match operator_stack.pop().unwrap() {
             SyOperator::BinaryOp(opr) => {
-                let rhs = self.args.pop().unwrap();
-                opr.eval(self.args.pop().unwrap().asarg(), rhs.asarg())
+                let rhs = self.args_pop()?;
+                opr.eval(self.args_pop()?.asarg(), rhs.asarg())
             }
-            SyOperator::UnaryOp(opr) => opr.eval(self.args.pop().unwrap().asarg()),
-            SyOperator::HpNeg => -self.args.pop().unwrap(),
+            SyOperator::UnaryOp(opr) => opr.eval(self.args_pop()?.asarg()),
+            SyOperator::HpNeg => -self.args_pop()?,
             _ => panic!(),
         };
         self.args.push(res);
+        Ok(())
     }
-    fn make(mut self) -> Self::Output {
-        debug_assert_eq!(self.args.len(), 1);
-        self.args.pop().unwrap()
+    fn make(mut self) -> Result<Self::Output, MultipleRoots> {
+        if self.args.len() > 1 {
+            Err(MultipleRoots)
+        } else {
+            Ok(self.args.pop().unwrap())
+        }
     }
-    fn push(&mut self, node: AstNode<N, V, F>) {
+    fn push(&mut self, node: AstNode<N, V, F>) -> Result<(), NotEnoughOrphans> {
         // FIX: unwrap in one place
         let res = match node {
             AstNode::Number(num) => num,
             AstNode::Variable(var) => self.variable_store.get(var).to_owned(),
             AstNode::Function(FunctionType::Native(nf), args) => match nf.as_pointer::<N>() {
-                NFPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
+                NFPointer::Single(func) => func(self.args_pop()?.asarg()),
                 NFPointer::Dual(func) => {
-                    let rhs = self.args.pop().unwrap();
-                    func(self.args.pop().unwrap().asarg(), rhs.asarg())
+                    let rhs = self.args_pop()?;
+                    func(self.args_pop()?.asarg(), rhs.asarg())
                 }
                 NFPointer::Flexible(func) => {
                     let res = func(&self.args[self.args.len() - args as usize..]);
@@ -236,30 +262,30 @@ where
                 }
             },
             AstNode::Function(FunctionType::Custom(cf), args) => match (self.cf2pointer)(cf) {
-                FunctionPointer::Single(func) => func(self.args.pop().unwrap().asarg()),
+                FunctionPointer::Single(func) => func(self.args_pop()?.asarg()),
                 FunctionPointer::Dual(func) => {
-                    let rhs = self.args.pop().unwrap();
-                    func(self.args.pop().unwrap().asarg(), rhs.asarg())
+                    let rhs = self.args_pop()?;
+                    func(self.args_pop()?.asarg(), rhs.asarg())
                 }
                 FunctionPointer::Triple(func) => {
-                    let a3 = self.args.pop().unwrap();
-                    let a2 = self.args.pop().unwrap();
-                    func(self.args.pop().unwrap().asarg(), a2.asarg(), a3.asarg())
+                    let a3 = self.args_pop()?;
+                    let a2 = self.args_pop()?;
+                    func(self.args_pop()?.asarg(), a2.asarg(), a3.asarg())
                 }
                 FunctionPointer::Flexible(func) => {
                     let res = func(&self.args[self.args.len() - args as usize..]);
                     self.args.truncate(self.args.len() - args as usize);
                     res
                 }
-                FunctionPointer::DynSingle(func) => func(self.args.pop().unwrap().asarg()),
+                FunctionPointer::DynSingle(func) => func(self.args_pop()?.asarg()),
                 FunctionPointer::DynDual(func) => {
-                    let rhs = self.args.pop().unwrap();
-                    func(self.args.pop().unwrap().asarg(), rhs.asarg())
+                    let rhs = self.args_pop()?;
+                    func(self.args_pop()?.asarg(), rhs.asarg())
                 }
                 FunctionPointer::DynTriple(func) => {
-                    let a3 = self.args.pop().unwrap();
-                    let a2 = self.args.pop().unwrap();
-                    func(self.args.pop().unwrap().asarg(), a2.asarg(), a3.asarg())
+                    let a3 = self.args_pop()?;
+                    let a2 = self.args_pop()?;
+                    func(self.args_pop()?.asarg(), a2.asarg(), a3.asarg())
                 }
                 FunctionPointer::DynFlexible(func) => {
                     let res = func(&self.args[self.args.len() - args as usize..]);
@@ -270,6 +296,7 @@ where
             AstNode::BinaryOp(_) | AstNode::UnaryOp(_) => panic!(),
         };
         self.args.push(res);
+        Ok(())
     }
     fn pop_arg(&mut self) -> Option<AstNode<N, V, F>> {
         self.args.pop().map(|num| AstNode::Number(num))
@@ -582,7 +609,7 @@ where
             .next(token, &operator_stack)
             .map_err(|e| clarify_err(e, pos))?;
         if implied_mult {
-            output_queue.push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
+            output_queue.push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack)?;
         }
         match token {
             Token::Number(num) => output_queue.push(
@@ -590,18 +617,18 @@ where
                     .parse::<N>()
                     .map(AstNode::Number)
                     .map_err(|_| SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos))?,
-            ),
+            )?,
             Token::Operator(opr) => {
                 let opr = *opr;
                 if opr == OprToken::Minus && last_state == ExprState::Prefix {
                     if was_pow {
-                        output_queue.push_opr(SyOperator::HpNeg, &mut operator_stack)
+                        output_queue.push_opr(SyOperator::HpNeg, &mut operator_stack)?;
                     } else {
                         output_queue
-                            .push_opr(SyOperator::UnaryOp(UnaryOp::Neg), &mut operator_stack)
+                            .push_opr(SyOperator::UnaryOp(UnaryOp::Neg), &mut operator_stack)?;
                     }
                 } else if opr != OprToken::Plus || last_state != ExprState::Prefix {
-                    output_queue.push_opr(opr.into(), &mut operator_stack)
+                    output_queue.push_opr(opr.into(), &mut operator_stack)?;
                 }
             }
             Token::Variable(var) => {
@@ -614,7 +641,7 @@ where
                     .map(|c| AstNode::Number(c))
                     .or_else(|| custom_variable_parser(var).map(|var| AstNode::Variable(var)))
                 {
-                    output_queue.push(node)
+                    output_queue.push(node)?;
                 } else if let Some(segments) =
                     segment_variable(var, &custom_constant_parser, &custom_variable_parser)
                 {
@@ -623,12 +650,12 @@ where
                         output_queue.push(match seg {
                             Segment::Constant(c) => AstNode::Number(c),
                             Segment::Variable(v) => AstNode::Variable(v),
-                        });
+                        })?;
                         if first {
                             first = false;
                         } else {
                             output_queue
-                                .push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
+                                .push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack)?;
                         }
                     }
                 } else {
@@ -662,9 +689,9 @@ where
                         output_queue.push(match seg {
                             Segment::Constant(c) => AstNode::Number(c),
                             Segment::Variable(v) => AstNode::Variable(v),
-                        });
+                        })?;
                         output_queue
-                            .push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
+                            .push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack)?;
                     }
                     operator_stack.push(SyOperator::Function(func, 1));
                 } else if let Some(segments) =
@@ -674,9 +701,9 @@ where
                         output_queue.push(match seg {
                             Segment::Constant(c) => AstNode::Number(c),
                             Segment::Variable(v) => AstNode::Variable(v),
-                        });
+                        })?;
                         output_queue
-                            .push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack);
+                            .push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack)?;
                     }
                     operator_stack.push(SyOperator::Parentheses);
                 } else {
@@ -687,7 +714,7 @@ where
                 operator_stack.push(SyOperator::Parentheses);
             }
             Token::Comma => {
-                output_queue.flush(&mut operator_stack);
+                output_queue.flush(&mut operator_stack)?;
                 match operator_stack.last_mut() {
                     Some(SyOperator::Function(_, args)) => {
                         *args += 1;
@@ -701,7 +728,7 @@ where
                 }
             }
             Token::CloseParen => {
-                output_queue.flush(&mut operator_stack);
+                output_queue.flush(&mut operator_stack)?;
                 match operator_stack.pop() {
                     Some(SyOperator::Function(SyFunction::PipeAbs, _)) => {
                         let opening = find_opening_pipe(&tokens[..pos]).unwrap();
@@ -729,14 +756,14 @@ where
                                 }
                                 _ => (),
                             }
-                            output_queue.push(AstNode::Function(nf.into(), args));
+                            output_queue.push(AstNode::Function(nf.into(), args))?;
                             Ok(())
                         } else if args < nf.min_args() {
                             Err(SyntaxErrorKind::NotEnoughArguments)
                         } else if nf.max_args().is_some_and(|m| args > m) {
                             Err(SyntaxErrorKind::TooManyArguments)
                         } else {
-                            output_queue.push(AstNode::Function(nf.into(), args));
+                            output_queue.push(AstNode::Function(nf.into(), args))?;
                             Ok(())
                         }
                         .map_err(|e| {
@@ -751,7 +778,7 @@ where
                     } else if max_args.is_some_and(|m| args > m) {
                         Err(SyntaxErrorKind::TooManyArguments)
                     } else {
-                        output_queue.push(AstNode::Function(FunctionType::Custom(cf), args));
+                        output_queue.push(AstNode::Function(FunctionType::Custom(cf), args))?;
                         Ok(())
                     }
                     .map_err(|e| {
@@ -768,7 +795,7 @@ where
             }
             Token::Pipe => {
                 if inside_pipe_abs(&operator_stack) {
-                    output_queue.flush(&mut operator_stack);
+                    output_queue.flush(&mut operator_stack)?;
                     if let Some(SyOperator::Function(SyFunction::PipeAbs, args)) =
                         operator_stack.pop()
                         && args > 1
@@ -785,7 +812,7 @@ where
                             opening_pipe..=pos,
                         ));
                     }
-                    output_queue.push(AstNode::Function(NativeFunction::Abs.into(), 1));
+                    output_queue.push(AstNode::Function(NativeFunction::Abs.into(), 1))?;
                 } else {
                     operator_stack.push(SyOperator::Function(SyFunction::PipeAbs, 1));
                 }
@@ -805,7 +832,7 @@ where
     } else {
         return Err(SyntaxError(SyntaxErrorKind::EmptyInput, 0..=0));
     }
-    output_queue.flush(&mut operator_stack);
+    output_queue.flush(&mut operator_stack)?;
     match operator_stack.last() {
         Some(SyOperator::Function(SyFunction::PipeAbs, _)) => {
             let opening = find_opening_pipe(tokens).unwrap();
@@ -821,7 +848,7 @@ where
                 unclosed_paren_pos..=unclosed_paren_pos,
             ))
         }
-        _ => Ok(output_queue.make()),
+        _ => Ok(output_queue.make()?),
     }
 }
 

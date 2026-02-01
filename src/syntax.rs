@@ -6,6 +6,7 @@ use std::mem;
 use std::ops::RangeInclusive;
 
 use crate::number::{NFPointer, NativeFunction, Number};
+use crate::postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans};
 use crate::postfix_tree::tree_iterators::NodeEdge;
 use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
 use crate::tokenizer::Token;
@@ -90,6 +91,7 @@ pub enum SyntaxErrorKind {
     PipeAbsNotClosed,
     NameTooLong,
     UnexpectedToken,
+    UnknownError,
 }
 
 fn token_range_to_str_range<S: AsRef<str>>(
@@ -145,8 +147,21 @@ impl SyntaxError {
                 SyntaxErrorKind::NameTooLong => ParsingErrorKind::NameTooLong,
                 SyntaxErrorKind::UnexpectedToken => ParsingErrorKind::UnexpectedCharacter,
                 SyntaxErrorKind::EmptyPipeAbs => ParsingErrorKind::EmptyPipeAbs,
+                SyntaxErrorKind::UnknownError => ParsingErrorKind::UnknownError,
             },
         }
+    }
+}
+
+impl From<NotEnoughOrphans> for SyntaxError {
+    fn from(value: NotEnoughOrphans) -> Self {
+        SyntaxError(SyntaxErrorKind::UnknownError, 0..=0)
+    }
+}
+
+impl From<MultipleRoots> for SyntaxError {
+    fn from(value: MultipleRoots) -> Self {
+        SyntaxError(SyntaxErrorKind::UnknownError, 0..=0)
     }
 }
 
@@ -435,7 +450,7 @@ where
         }
         let (s0_idx, s0_sign) = symbols[0].unwrap();
         debug_assert!(symbol_space.is_empty());
-        symbol_space.push(AstNode::Number(lhs));
+        symbol_space.push(AstNode::Number(lhs)).unwrap();
         if let Some((s1_idx, s1_sign)) = symbols[1] {
             let mut symbol_indices = [s0_idx, s1_idx];
             if s0_sign == negative && s1_sign == positive {
@@ -448,17 +463,17 @@ where
                 positive
             } else {
                 negative
-            }));
+            })).unwrap();
             symbol_space.push(AstNode::BinaryOp(
                 if s0_sign == negative && s1_sign == negative {
                     negative
                 } else {
                     positive
                 },
-            ));
+            )).unwrap();
         } else {
             symbol_space.extend_from_tree(&self.0, s0_idx);
-            symbol_space.push(AstNode::BinaryOp(s0_sign));
+            symbol_space.push(AstNode::BinaryOp(s0_sign)).unwrap();
         }
         self.0
             .replace_from_sc_move(head_idx, symbol_space, symbol_space.len() - 1);
@@ -1001,7 +1016,6 @@ mod tests {
                 AstNode::UnaryOp(UnaryOp::Neg),
             ])
         );
-        println!("CASE START");
         assert_eq!(
             syntaxify("2^-1"),
             Ok(vec![
