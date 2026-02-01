@@ -10,8 +10,11 @@ use strum::EnumIter;
 
 use crate::{
     FunctionIdentifier,
-    quick_expr::{CtxFuncPtr, FunctionSource, MarkedFunc},
+    quick_expr::{CtxFuncPtr, MarkedFunc},
 };
+
+#[cfg(debug_assertions)]
+use crate::quick_expr::FunctionSource;
 
 #[derive(Debug, Clone, Copy, Hash)]
 pub enum NFPointer<N: Number> {
@@ -116,16 +119,19 @@ impl NativeFunction {
             NFPointer::Single(func) => MarkedFunc {
                 func: CtxFuncPtr::Single(func),
                 _src: PhantomData,
+                #[cfg(debug_assertions)]
                 src: FunctionSource::NativeFunction(self),
             },
             NFPointer::Dual(func) => MarkedFunc {
                 func: CtxFuncPtr::Dual(func),
                 _src: PhantomData,
+                #[cfg(debug_assertions)]
                 src: FunctionSource::NativeFunction(self),
             },
             NFPointer::Flexible(func) => MarkedFunc {
                 func: CtxFuncPtr::Flexible(func, argc),
                 _src: PhantomData,
+                #[cfg(debug_assertions)]
                 src: FunctionSource::NativeFunction(self),
             },
         }

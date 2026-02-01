@@ -184,7 +184,7 @@ where
         #[cfg(debug_assertions)]
         dbg.field(&self.src);
         #[cfg(not(debug_assertions))]
-        dbg.field(&self.ptr);
+        dbg.field(&self.func);
         dbg.finish()
     }
 }
@@ -496,7 +496,7 @@ where
 {
 }
 
-#[cfg(test)]
+#[cfg(all(debug_assertions, test))]
 mod tests {
     use crate::tokenizer::TokenStream;
 
