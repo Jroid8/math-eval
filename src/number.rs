@@ -1,18 +1,26 @@
 use std::{
     f64::consts::{E, PI, TAU},
     fmt::{Debug, Display},
+    marker::PhantomData,
     ops::{Add, Div, Mul, Neg, Sub},
     str::FromStr,
 };
 
+use strum::EnumIter;
+
+use crate::{
+    FunctionIdentifier,
+    quick_expr::{CtxFuncPtr, FunctionSource, MarkedFunc},
+};
+
 #[derive(Debug, Clone, Copy, Hash)]
-pub enum NFPointer<N: MathEvalNumber> {
+pub enum NFPointer<N: Number> {
     Single(for<'a> fn(N::AsArg<'a>) -> N),
-    Dual(for<'a> fn(N::AsArg<'a>, N::AsArg<'a>) -> N),
+    Dual(for<'a, 'b> fn(N::AsArg<'a>, N::AsArg<'b>) -> N),
     Flexible(fn(&[N]) -> N),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, EnumIter)]
 pub enum NativeFunction {
     Sin,
     Cos,
@@ -55,6 +63,8 @@ impl NativeFunction {
             "log2" => Some(NativeFunction::Log2),
             "log10" => Some(NativeFunction::Log10),
             "ln" => Some(NativeFunction::Ln),
+            "lg" => Some(NativeFunction::Log10),
+            "lb" => Some(NativeFunction::Log2),
             "exp" => Some(NativeFunction::Exp),
             "floor" => Some(NativeFunction::Floor),
             "ceil" => Some(NativeFunction::Ceil),
@@ -70,7 +80,7 @@ impl NativeFunction {
             _ => None,
         }
     }
-    pub fn to_pointer<N: MathEvalNumber>(self) -> NFPointer<N> {
+    pub fn as_pointer<N: Number>(self) -> NFPointer<N> {
         match self {
             NativeFunction::Sin => NFPointer::Single(N::sin),
             NativeFunction::Cos => NFPointer::Single(N::cos),
@@ -96,6 +106,28 @@ impl NativeFunction {
             NativeFunction::Cbrt => NFPointer::Single(N::cbrt),
             NativeFunction::Max => NFPointer::Flexible(N::max),
             NativeFunction::Min => NFPointer::Flexible(N::min),
+        }
+    }
+    pub fn as_markedfunc<N: Number, F: FunctionIdentifier>(
+        self,
+        argc: u8,
+    ) -> MarkedFunc<'static, N, F> {
+        match self.as_pointer::<N>() {
+            NFPointer::Single(func) => MarkedFunc {
+                func: CtxFuncPtr::Single(func),
+                _src: PhantomData,
+                src: FunctionSource::NativeFunction(self),
+            },
+            NFPointer::Dual(func) => MarkedFunc {
+                func: CtxFuncPtr::Dual(func),
+                _src: PhantomData,
+                src: FunctionSource::NativeFunction(self),
+            },
+            NFPointer::Flexible(func) => MarkedFunc {
+                func: CtxFuncPtr::Flexible(func, argc),
+                _src: PhantomData,
+                src: FunctionSource::NativeFunction(self),
+            },
         }
     }
     pub fn is_fixed(self) -> bool {
@@ -167,7 +199,7 @@ impl<T> Reborrow for &'_ T {
     }
 }
 
-pub trait MathEvalNumber:
+pub trait Number:
     Add<Output = Self>
     + Sub<Output = Self>
     + Mul<Output = Self>
@@ -185,6 +217,7 @@ pub trait MathEvalNumber:
         + for<'b> Sub<Self::AsArg<'b>, Output = Self>
         + for<'b> Mul<Self::AsArg<'b>, Output = Self>
         + for<'b> Div<Self::AsArg<'b>, Output = Self>
+        + for<'b> Neg<Output = Self>
         + for<'b> Reborrow<This<'b> = Self::AsArg<'b>>
         + PartialEq
         + Neg<Output = Self>
@@ -219,10 +252,11 @@ pub trait MathEvalNumber:
     fn max(value: &[Self]) -> Self;
     fn min(value: &[Self]) -> Self;
     fn factorial(value: Self::AsArg<'_>) -> Self;
+    fn double_factorial(value: Self::AsArg<'_>) -> Self;
     fn asarg(&self) -> Self::AsArg<'_>;
 }
 
-impl MathEvalNumber for f64 {
+impl Number for f64 {
     type AsArg<'a> = f64;
 
     fn pow(value: Self, rhs: Self) -> Self {
@@ -255,6 +289,7 @@ impl MathEvalNumber for f64 {
     }
 
     fn cot(value: Self) -> Self {
+        // FIX: replace with a more accurate version
         let (sin, cos) = value.sin_cos();
         cos / sin
     }
@@ -284,7 +319,7 @@ impl MathEvalNumber for f64 {
     }
 
     fn log10(value: Self) -> Self {
-        value.log2()
+        value.log10()
     }
 
     fn ln(value: Self) -> Self {
@@ -347,9 +382,28 @@ impl MathEvalNumber for f64 {
     }
 
     fn factorial(value: Self) -> Self {
+        // FIX: replace with gamma function
+        if value.is_infinite() || value < 0.0 || value >= u32::MAX as f64 || value.is_nan() {
+            return f64::NAN;
+        }
         let mut result = 1.0;
-        for v in 2..=(value as u32) {
-            result *= v as f64;
+        let mut k = value as u32;
+        while k > 1 {
+            result *= k as f64;
+            k -= 1;
+        }
+        result
+    }
+
+    fn double_factorial(value: Self) -> Self {
+        if value.is_infinite() || value < 0.0 || value >= u32::MAX as f64 || value.is_nan() {
+            return f64::NAN;
+        }
+        let mut result = 1.0;
+        let mut k = value as u32;
+        while k > 1 {
+            result *= k as f64;
+            k -= 2;
         }
         result
     }

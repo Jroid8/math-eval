@@ -1,135 +1,76 @@
+use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
+use std::marker::PhantomData;
+use std::mem;
 use std::ops::RangeInclusive;
 
-use crate::asm::{CFPointer, MathAssembly, Stack};
-use crate::number::{MathEvalNumber, NFPointer, NativeFunction};
-use crate::token_tree::{TokenNode, TokenTree};
-use crate::tree_utils::{construct, Tree};
-use crate::{FunctionIdentifier, ParsingError, ParsingErrorKind, VariableIdentifier};
-use indextree::{NodeEdge, NodeId};
+use crate::number::{NFPointer, NativeFunction, Number};
+use crate::postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans};
+use crate::postfix_tree::tree_iterators::NodeEdge;
+use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
+use crate::tokenizer::Token;
+use crate::{
+    Associativity, BinaryOp, FunctionIdentifier, FunctionPointer, ParsingError, ParsingErrorKind,
+    UnaryOp, VariableIdentifier, VariableStore,
+};
+use shunting_yard::{SyAstOutput, SyNumberOutput, parse_or_eval};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum UnOperation {
-    Fac,
-    Neg,
+mod shunting_yard;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FunctionType<F: FunctionIdentifier> {
+    Native(NativeFunction),
+    Custom(F),
 }
 
-impl UnOperation {
-    pub fn parse(input: char) -> Option<Self> {
-        match input {
-            '!' => Some(UnOperation::Fac),
-            '-' => Some(UnOperation::Neg),
-            _ => None,
-        }
-    }
-
-    pub fn eval<N: MathEvalNumber>(self, value: N::AsArg<'_>) -> N {
-        match self {
-            UnOperation::Fac => N::factorial(value),
-            UnOperation::Neg => -value,
-        }
-    }
-
-    pub fn as_char(&self) -> char {
-        match self {
-            UnOperation::Fac => '!',
-            UnOperation::Neg => '-',
-        }
+impl<F: FunctionIdentifier> From<NativeFunction> for FunctionType<F> {
+    fn from(value: NativeFunction) -> Self {
+        Self::Native(value)
     }
 }
 
-impl Display for UnOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_char())
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BiOperation {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Pow,
-    Mod,
-}
-
-const ALL_BIOPERATION_ORDERED: [BiOperation; 6] = [
-    BiOperation::Add,
-    BiOperation::Sub,
-    BiOperation::Mul,
-    BiOperation::Div,
-    BiOperation::Mod,
-    BiOperation::Pow,
-];
-
-impl BiOperation {
-    pub fn parse(input: char) -> Option<BiOperation> {
-        match input {
-            '+' => Some(BiOperation::Add),
-            '-' => Some(BiOperation::Sub),
-            '*' => Some(BiOperation::Mul),
-            '/' => Some(BiOperation::Div),
-            '^' => Some(BiOperation::Pow),
-            '%' => Some(BiOperation::Mod),
-            _ => None,
-        }
-    }
-    pub fn eval<N: MathEvalNumber>(self, lhs: N::AsArg<'_>, rhs: N::AsArg<'_>) -> N {
-        match self {
-            BiOperation::Add => lhs + rhs,
-            BiOperation::Sub => lhs - rhs,
-            BiOperation::Mul => lhs * rhs,
-            BiOperation::Div => lhs / rhs,
-            BiOperation::Pow => N::pow(lhs, rhs),
-            BiOperation::Mod => N::modulo(lhs, rhs),
-        }
-    }
-    pub fn as_char(self) -> char {
-        match self {
-            BiOperation::Add => '+',
-            BiOperation::Sub => '-',
-            BiOperation::Mul => '*',
-            BiOperation::Div => '/',
-            BiOperation::Pow => '^',
-            BiOperation::Mod => '%',
-        }
-    }
-    pub fn is_commutative(self) -> bool {
-        matches!(self, BiOperation::Add | BiOperation::Mul)
-    }
-    pub fn precedence(self) -> u8 {
-        match self {
-            BiOperation::Add => 0,
-            BiOperation::Sub => 0,
-            BiOperation::Mul => 1,
-            BiOperation::Div => 1,
-            BiOperation::Mod => 1,
-            BiOperation::Pow => 2,
-        }
-    }
-}
-
-impl Display for BiOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_char())
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum SyntaxNode<N, V, F>
+impl<F> Display for FunctionType<F>
 where
-    N: MathEvalNumber,
+    F: FunctionIdentifier + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FunctionType::Native(nf) => <NativeFunction as Display>::fmt(nf, f),
+            FunctionType::Custom(cf) => <F as Display>::fmt(cf, f),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AstNode<N, V, F>
+where
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
     Number(N),
     Variable(V),
-    BiOperation(BiOperation),
-    UnOperation(UnOperation),
-    NativeFunction(NativeFunction),
-    CustomFunction(F),
+    BinaryOp(BinaryOp),
+    UnaryOp(UnaryOp),
+    Function(FunctionType<F>, u8),
+}
+
+impl<N, V, F> Node for AstNode<N, V, F>
+where
+    N: Number,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    fn children(&self) -> usize {
+        match self {
+            AstNode::Number(_) | AstNode::Variable(_) => 0,
+            AstNode::BinaryOp(_) => 2,
+            AstNode::UnaryOp(_) => 1,
+            AstNode::Function(_, argc) => *argc,
+        }
+        .into()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -140,73 +81,49 @@ pub enum SyntaxErrorKind {
     UnknownFunction,
     NotEnoughArguments,
     TooManyArguments,
-    MisplacedToken,
     EmptyParenthesis,
+    EmptyArgument,
+    EmptyInput,
+    EmptyPipeAbs,
+    MissingOpeningParenthesis,
+    MissingClosingParenthesis,
+    CommaOutsideFunction,
+    PipeAbsNotClosed,
+    NameTooLong,
+    UnexpectedToken,
+    UnknownError,
 }
 
-fn tokennode2range(
+fn token_range_to_str_range<S: AsRef<str>>(
     input: &str,
-    token_tree: &TokenTree<'_>,
-    target: NodeId,
+    tokens: &[Token<S>],
+    token_range: RangeInclusive<usize>,
 ) -> RangeInclusive<usize> {
-    if target.ancestors(&token_tree.0.arena).nth(1).is_none() {
-        panic!("Attempted to report the root node as the cause of error")
-    }
+    let mut start = 0;
     let mut index = 0;
-    macro_rules! count_space {
-        () => {
-            while input.chars().nth(index).unwrap().is_whitespace() {
-                index += 1
-            }
-        };
-    }
-    for node in token_tree.0.root.traverse(&token_tree.0.arena).skip(1) {
-        match node {
-            NodeEdge::Start(node) => {
-                if *token_tree.0.arena[node].get() != TokenNode::Argument {
-                    count_space!();
-                }
-                let old = index;
-                index += match token_tree.0.arena[node].get() {
-                    TokenNode::Number(s) | TokenNode::Variable(s) => s.len(),
-                    TokenNode::Operation(_) => 1,
-                    TokenNode::Parentheses => 1,
-                    TokenNode::Function(f) => f.len() + 1,
-                    TokenNode::Argument => 0,
-                };
-                if node == target {
-                    return old..=index - 1;
-                }
-            }
-            NodeEdge::End(node) => match token_tree.0.arena[node].get() {
-                TokenNode::Argument => {
-                    if node
-                        .following_siblings(&token_tree.0.arena)
-                        .nth(1)
-                        .is_some()
-                    {
-                        count_space!();
-                        index += 1;
-                    }
-                }
-                TokenNode::Parentheses | TokenNode::Function(_) => {
-                    count_space!();
-                    index += 1
-                }
-                _ => (),
-            },
+    for (tk_idx, token) in tokens[..=*token_range.end()].iter().enumerate() {
+        while input.chars().nth(index).unwrap().is_whitespace() {
+            index += 1
         }
+        if tk_idx == *token_range.start() {
+            start = index;
+        }
+        index += token.length();
     }
-    unreachable!()
+    start..=index - 1
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SyntaxError(SyntaxErrorKind, NodeId);
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyntaxError(SyntaxErrorKind, RangeInclusive<usize>);
 
 impl SyntaxError {
-    pub fn to_general(self, input: &str, token_tree: &TokenTree<'_>) -> ParsingError {
+    pub fn to_general<S: AsRef<str>>(self, input: &str, tokens: &[Token<S>]) -> ParsingError {
         ParsingError {
-            at: tokennode2range(input, token_tree, self.1),
+            at: if self.0 == SyntaxErrorKind::EmptyInput {
+                0..=0
+            } else {
+                token_range_to_str_range(input, tokens, self.1)
+            },
             kind: match self.0 {
                 SyntaxErrorKind::NumberParsingError => ParsingErrorKind::NumberParsingError,
                 SyntaxErrorKind::MisplacedOperator => ParsingErrorKind::MisplacedOperator,
@@ -216,599 +133,475 @@ impl SyntaxError {
                 SyntaxErrorKind::UnknownFunction => ParsingErrorKind::UnknownFunction,
                 SyntaxErrorKind::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
                 SyntaxErrorKind::TooManyArguments => ParsingErrorKind::TooManyArguments,
-                SyntaxErrorKind::MisplacedToken => ParsingErrorKind::MisplacedToken,
                 SyntaxErrorKind::EmptyParenthesis => ParsingErrorKind::EmptyParenthesis,
+                SyntaxErrorKind::EmptyArgument => ParsingErrorKind::EmptyArgument,
+                SyntaxErrorKind::MissingOpeningParenthesis => {
+                    ParsingErrorKind::MissingOpenParenthesis
+                }
+                SyntaxErrorKind::MissingClosingParenthesis => {
+                    ParsingErrorKind::MissingCloseParenthesis
+                }
+                SyntaxErrorKind::CommaOutsideFunction => ParsingErrorKind::CommaOutsideFunction,
+                SyntaxErrorKind::EmptyInput => ParsingErrorKind::EmptyInput,
+                SyntaxErrorKind::PipeAbsNotClosed => ParsingErrorKind::PipeAbsNotClosed,
+                SyntaxErrorKind::NameTooLong => ParsingErrorKind::NameTooLong,
+                SyntaxErrorKind::UnexpectedToken => ParsingErrorKind::UnexpectedCharacter,
+                SyntaxErrorKind::EmptyPipeAbs => ParsingErrorKind::EmptyPipeAbs,
+                SyntaxErrorKind::UnknownError => ParsingErrorKind::UnknownError,
             },
         }
+    }
+}
+
+impl From<NotEnoughOrphans> for SyntaxError {
+    fn from(value: NotEnoughOrphans) -> Self {
+        SyntaxError(SyntaxErrorKind::UnknownError, 0..=0)
+    }
+}
+
+impl From<MultipleRoots> for SyntaxError {
+    fn from(value: MultipleRoots) -> Self {
+        SyntaxError(SyntaxErrorKind::UnknownError, 0..=0)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyntaxTree<N: MathEvalNumber, V: VariableIdentifier, F: FunctionIdentifier>(
-    pub Tree<SyntaxNode<N, V, F>>,
+pub struct MathAst<N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
+    PostfixTree<AstNode<N, V, F>>,
 );
 
-impl<V, N, F> SyntaxTree<N, V, F>
+impl<V, N, F> MathAst<N, V, F>
 where
-    N: MathEvalNumber,
+    N: Number,
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    pub fn new(
-        token_tree: &TokenTree<'_>,
+    pub fn new<S: AsRef<str>>(
+        tokens: impl AsRef<[Token<S>]>,
         custom_constant_parser: impl Fn(&str) -> Option<N>,
         custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
         custom_variable_parser: impl Fn(&str) -> Option<V>,
-    ) -> Result<SyntaxTree<N, V, F>, SyntaxError> {
-        let (arena, root) = (&token_tree.0.arena, token_tree.0.root);
-        construct::<(NodeId, Option<usize>, Option<usize>), SyntaxNode<N, V, F>, SyntaxError>(
-            (root, None, None),
-            |(token_node, start, end), call_stack| {
-                let children_count = token_node.children(arena).count();
-                if children_count == 0 {
-                    return Err(SyntaxError(SyntaxErrorKind::EmptyParenthesis, token_node));
-                }
-                let start = start.unwrap_or(0);
-                let end = end.unwrap_or(children_count - 1);
-                let children = || {
-                    token_node
-                        .reverse_children(arena)
-                        .enumerate()
-                        .map(|(i, n)| (children_count - 1 - i, n))
-                        .skip(children_count - 1 - end)
-                        .take(end - start + 1)
-                };
-                if start == end {
-                    let current_node = token_node.children(arena).nth(start).unwrap();
-                    match arena[current_node].get() {
-                        TokenNode::Number(num) => num
-                            .parse::<N>()
-                            .map(|n| Some(SyntaxNode::Number(n)))
-                            .map_err(|_| SyntaxErrorKind::NumberParsingError),
-                        TokenNode::Operation(_) => Err(SyntaxErrorKind::MisplacedOperator), // operations shouldn't end up here
-                        TokenNode::Variable(var) => N::parse_constant(var)
-                            .map(|c| SyntaxNode::Number(c))
-                            .or_else(|| custom_constant_parser(var).map(|c| SyntaxNode::Number(c)))
-                            .or_else(|| {
-                                custom_variable_parser(var).map(|v| SyntaxNode::Variable(v))
-                            })
-                            .map(Some)
-                            .ok_or(SyntaxErrorKind::UnknownVariableOrConstant),
-                        TokenNode::Parentheses => {
-                            call_stack.push((current_node, None, None));
-                            Ok(None)
-                        }
-                        TokenNode::Function(func) => match NativeFunction::parse(func)
-                            .map(|nf| {
-                                (
-                                    SyntaxNode::NativeFunction(nf),
-                                    // An exception for log. substitute_log will correct it
-                                    if nf == NativeFunction::Log {
-                                        1
-                                    } else {
-                                        nf.min_args()
-                                    },
-                                    nf.max_args(),
-                                )
-                            })
-                            .or_else(|| {
-                                custom_function_parser(func)
-                                    .map(|cf| (SyntaxNode::CustomFunction(cf.0), cf.1, cf.2))
-                            }) {
-                            Some((f, min_args, max_args)) => {
-                                let arg_count = current_node.children(arena).count();
-                                if arg_count < min_args as usize {
-                                    Err(SyntaxErrorKind::NotEnoughArguments)
-                                } else if arg_count > 255
-                                    || max_args.is_some_and(|ma| arg_count as u8 > ma)
-                                {
-                                    Err(SyntaxErrorKind::TooManyArguments)
-                                } else {
-                                    call_stack.extend(
-                                        current_node.children(arena).map(|id| (id, None, None)),
-                                    );
-                                    Ok(Some(f))
-                                }
-                            }
-                            None => Err(SyntaxErrorKind::UnknownFunction),
-                        },
-                        TokenNode::Argument => unreachable!(),
-                    }
-                    .map_err(|e| SyntaxError(e, current_node))
-                } else {
-                    for opr in ALL_BIOPERATION_ORDERED {
-                        // for detecting implied multiplications (e.g. 2pi,3x)
-                        if opr == BiOperation::Mul {
-                            let mut iter = children();
-                            let mut last = iter.next().unwrap().1;
-                            for (index, token) in iter {
-                                if !matches!(arena[last].get(), TokenNode::Operation(_))
-                                    && !matches!(arena[token].get(), TokenNode::Operation(_))
-                                {
-                                    call_stack.push((token_node, Some(start), Some(index)));
-                                    call_stack.push((token_node, Some(index + 1), Some(end)));
-                                    return Ok(Some(SyntaxNode::BiOperation(BiOperation::Mul)));
-                                }
-                                last = token;
-                            }
-                        }
-                        // in a syntax tree, the top item is the evaluated first, so it should be the last in the order of operations.
-                        // rev() is used to pick last operation so the constructed tree has the correct order
-                        if let Some((index, node)) =
-                            children().find(|(i, c)| match arena[*c].get() {
-                                TokenNode::Operation(oprchar) => {
-                                    *oprchar == opr.as_char()
-                                        && !(*oprchar == '-'
-                                            && *i > start
-                                            && matches!(
-                                                c.preceding_siblings(arena)
-                                                    .nth(1)
-                                                    .map(|n| arena[n].get()),
-                                                Some(TokenNode::Operation(o))
-                                                    if UnOperation::parse(*o)
-                                                    .filter(|o| *o != UnOperation::Neg).is_none()
-                                            ))
-                                }
-                                _ => false,
-                            })
-                        {
-                            return if index == start {
-                                match opr {
-                                    BiOperation::Add => {
-                                        call_stack.push((token_node, Some(start + 1), Some(end)));
-                                        Ok(None)
-                                    }
-                                    BiOperation::Sub => {
-                                        call_stack.push((token_node, Some(start + 1), Some(end)));
-                                        Ok(Some(SyntaxNode::UnOperation(UnOperation::Neg)))
-                                    }
-                                    _ => Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, node)),
-                                }
-                            } else if index == end {
-                                Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, node))
-                            } else {
-                                call_stack.push((token_node, Some(start), Some(index - 1)));
-                                call_stack.push((token_node, Some(index + 1), Some(end)));
-                                Ok(Some(SyntaxNode::BiOperation(opr)))
-                            };
-                        }
-                    }
-                    if start + 1 == end
-                        && *arena[token_node.children(arena).nth(end).unwrap()].get()
-                            == TokenNode::Operation('!')
-                    {
-                        call_stack.push((token_node, Some(start), Some(end - 1)));
-                        Ok(Some(SyntaxNode::UnOperation(UnOperation::Fac)))
-                    } else {
-                        Err(SyntaxError(
-                            SyntaxErrorKind::MisplacedToken,
-                            token_node.children(arena).nth(start).unwrap(),
-                        ))
-                    }
-                }
-            },
-            None,
+    ) -> Result<MathAst<N, V, F>, SyntaxError> {
+        parse_or_eval(
+            SyAstOutput(SubtreeCollection::new()),
+            tokens,
+            custom_constant_parser,
+            custom_function_parser,
+            custom_variable_parser,
         )
-        .map(|tree| SyntaxTree(tree).substitute_log())
+    }
+
+    pub fn parse_and_eval<'a, 'b, S: VariableStore<N, V>, A: AsRef<str>>(
+        tokens: impl AsRef<[Token<A>]>,
+        custom_constant_parser: impl Fn(&str) -> Option<N>,
+        custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
+        custom_variable_parser: impl Fn(&str) -> Option<V>,
+        variable_values: &'a S,
+        function_to_pointer: impl Fn(F) -> FunctionPointer<'b, N>,
+    ) -> Result<N, SyntaxError> {
+        parse_or_eval(
+            SyNumberOutput {
+                args: Vec::new(),
+                variable_store: variable_values,
+                cf2pointer: function_to_pointer,
+                var_ident: PhantomData,
+                func_ident: PhantomData,
+            },
+            tokens,
+            custom_constant_parser,
+            custom_function_parser,
+            custom_variable_parser,
+        )
+    }
+
+    pub fn from_nodes(nodes: impl IntoIterator<Item = AstNode<N, V, F>>) -> Self {
+        MathAst(PostfixTree::from_nodes(nodes))
+    }
+
+    pub fn as_tree(&self) -> &PostfixTree<AstNode<N, V, F>> {
+        &self.0
+    }
+
+    pub fn into_tree(self) -> PostfixTree<AstNode<N, V, F>> {
+        self.0
+    }
+
+    fn eval_stack_capacity<'a>(tree: impl IntoIterator<Item = &'a AstNode<N, V, F>>) -> usize {
+        let mut stack_capacity = 0usize;
+        let mut stack_len = 0i64;
+        for node in tree {
+            stack_len += match node {
+                AstNode::Number(_) | AstNode::Variable(_) => 1,
+                AstNode::BinaryOp(_) => -1,
+                AstNode::UnaryOp(_) => 0,
+                AstNode::Function(_, args) => -(*args as i64) + 1,
+            };
+            if stack_len as usize > stack_capacity {
+                stack_capacity = stack_len as usize;
+            }
+        }
+        stack_capacity
     }
 
     pub fn eval<'a>(
         &self,
-        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
+        function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
         variable_values: &impl crate::VariableStore<N, V>,
     ) -> N {
-        let mut stack: Stack<N> = Stack::new();
-        let is_fixed_input = |node: Option<NodeId>| match node.map(|id| self.0.arena[id].get()) {
-            Some(SyntaxNode::BiOperation(_) | SyntaxNode::UnOperation(_)) => true,
-            Some(SyntaxNode::NativeFunction(nf)) => nf.is_fixed(),
-            Some(SyntaxNode::CustomFunction(cf)) => {
-                !matches!(function_to_pointer(*cf), CFPointer::Flexible(_))
-            }
-            _ => false,
-        };
+        Self::_eval(
+            self.0.postorder_iter(),
+            function_to_pointer,
+            variable_values,
+            &mut Vec::with_capacity(Self::eval_stack_capacity(self.0.postorder_iter())),
+        )
+        .unwrap()
+    }
 
-        for current in self.0.root.traverse(&self.0.arena).filter_map(|n| match n {
-            NodeEdge::Start(_) => None,
-            NodeEdge::End(id) => Some(id),
-        }) {
-            let mut argnum = stack.len();
-            macro_rules! get {
-                ($node: expr) => {
-                    match self.0.arena[$node.unwrap()].get() {
-                        SyntaxNode::Number(num) => num.asarg(),
-                        SyntaxNode::Variable(var) => variable_values.get(*var),
-                        _ => {
-                            argnum -= 1;
-                            stack[argnum].asarg()
-                        }
-                    }
-                };
-            }
-
-            let mut children = current.children(&self.0.arena);
-            let parent = current.ancestors(&self.0.arena).nth(1);
-
-            let result = match self.0.arena[current].get() {
-                SyntaxNode::Number(num) => {
-                    if is_fixed_input(parent) {
-                        continue;
-                    } else {
-                        num.clone()
-                    }
+    fn _eval<'a, 'b>(
+        tree: impl IntoIterator<Item = &'a AstNode<N, V, F>>,
+        functibn_to_pointer: impl Fn(F) -> FunctionPointer<'b, N>,
+        variable_values: &impl crate::VariableStore<N, V>,
+        stack: &mut Vec<N>,
+    ) -> Result<N, usize> {
+        for (idx, node) in tree.into_iter().enumerate() {
+            let mut pop = || stack.pop().ok_or(idx);
+            let result: N = match node {
+                AstNode::Number(num) => num.clone(),
+                AstNode::Variable(var) => variable_values.get(*var).to_owned(),
+                AstNode::BinaryOp(opr) => {
+                    let rhs = pop()?;
+                    opr.eval(pop()?.asarg(), rhs.asarg())
                 }
-                SyntaxNode::Variable(var) => {
-                    if is_fixed_input(parent) {
-                        continue;
-                    } else {
-                        variable_values.get(*var).to_owned()
+                AstNode::UnaryOp(opr) => opr.eval(pop()?.asarg()),
+                AstNode::Function(FunctionType::Native(nf), argc) => match nf.as_pointer() {
+                    NFPointer::Single(func) => func(pop()?.asarg()),
+                    NFPointer::Dual(func) => {
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg())
                     }
-                }
-                SyntaxNode::UnOperation(opr) => opr.eval(get!(children.next())),
-                SyntaxNode::BiOperation(opr) => {
-                    opr.eval(get!(children.next()), get!(children.next()))
-                }
-                SyntaxNode::NativeFunction(nf) => match nf.to_pointer() {
-                    NFPointer::Single(func) => func(get!(children.next())),
-                    NFPointer::Dual(func) => func(get!(children.next()), get!(children.next())),
                     NFPointer::Flexible(func) => {
-                        argnum -= children.count();
-                        func(&stack[argnum..])
+                        let new_len = stack.len() - *argc as usize;
+                        let res = func(&stack[new_len..]);
+                        stack.truncate(new_len);
+                        res
                     }
                 },
-                SyntaxNode::CustomFunction(cf) => match function_to_pointer(*cf) {
-                    CFPointer::Single(func) => func(get!(children.next())),
-                    CFPointer::Dual(func) => func(get!(children.next()), get!(children.next())),
-                    CFPointer::Triple(func) => func(
-                        get!(children.next()),
-                        get!(children.next()),
-                        get!(children.next()),
-                    ),
-                    CFPointer::Flexible(func) => {
-                        argnum -= children.count();
-                        func(&stack[argnum..])
+                AstNode::Function(FunctionType::Custom(cf), argc) => match functibn_to_pointer(*cf)
+                {
+                    FunctionPointer::Single(func) => func(pop()?.asarg()),
+                    FunctionPointer::Dual(func) => {
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg())
+                    }
+                    FunctionPointer::Triple(func) => {
+                        let arg3 = pop()?;
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg(), arg3.asarg())
+                    }
+                    FunctionPointer::Flexible(func) => {
+                        let new_len = stack.len() - *argc as usize;
+                        let res = func(&stack[new_len..]);
+                        stack.truncate(new_len);
+                        res
+                    }
+                    FunctionPointer::DynSingle(func) => func(pop()?.asarg()),
+                    FunctionPointer::DynDual(func) => {
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg())
+                    }
+                    FunctionPointer::DynTriple(func) => {
+                        let arg3 = pop()?;
+                        let arg2 = pop()?;
+                        func(pop()?.asarg(), arg2.asarg(), arg3.asarg())
+                    }
+                    FunctionPointer::DynFlexible(func) => {
+                        let new_len = stack.len() - *argc as usize;
+                        let res = func(&stack[new_len..]);
+                        stack.truncate(new_len);
+                        res
                     }
                 },
             };
-            stack.truncate(argnum);
             stack.push(result);
         }
-        stack.pop().unwrap()
+        stack.pop().ok_or(0)
     }
 
-    pub fn to_asm<'a>(
-        &self,
-        function_to_pointer: impl Fn(F) -> CFPointer<'a, N>,
-        variable_order: &[V],
-    ) -> MathAssembly<'a, N, F> {
-        MathAssembly::new(
-            &self.0.arena,
-            self.0.root,
-            function_to_pointer,
-            variable_order,
-        )
-    }
-
-    pub fn aot_evaluation<'a>(&mut self, function_to_pointer: impl Fn(F) -> CFPointer<'a, N>) {
-        let mut examin: Vec<NodeId> = Vec::new();
-        for node in self.0.root.traverse(&self.0.arena) {
-            if let NodeEdge::End(node) = node {
-                match self.0.arena[node].get() {
-                    SyntaxNode::Number(_) | SyntaxNode::Variable(_) => (),
-                    _ => examin.push(node),
+    pub fn aot_evaluation<'a>(
+        &mut self,
+        function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
+    ) {
+        let mut varless: Vec<bool> = Vec::with_capacity(self.0.len());
+        for (idx, node) in self.0.postorder_iter().enumerate() {
+            let res = match node {
+                AstNode::Number(_) => true,
+                AstNode::Variable(_) => false,
+                _ => self.0.children_iter(idx).all(|(_, i)| varless[i]),
+            };
+            varless.push(res);
+        }
+        let mut idx = self.0.len();
+        let mut stack: Vec<N> = Vec::with_capacity(0);
+        while idx > 0 {
+            idx -= 1;
+            if varless[idx] && !matches!(self.0[idx], AstNode::Number(_)) {
+                let required_capacity =
+                    Self::eval_stack_capacity(self.0.postorder_subtree_iter(idx));
+                if required_capacity > stack.capacity() {
+                    stack.reserve(required_capacity - stack.capacity());
                 }
+                let result = Self::_eval(
+                    self.0.postorder_subtree_iter(idx),
+                    &function_to_pointer,
+                    &(),
+                    &mut stack,
+                )
+                .unwrap();
+                let start = self.0.subtree_start(idx);
+                self.0
+                    .replace(mem::replace(&mut idx, start), [AstNode::Number(result)]);
             }
         }
-        for node in examin {
-            if node.children(&self.0.arena).all(|c| self.is_number(c)) {
-                let answer = MathAssembly::new(&self.0.arena, node, &function_to_pointer, &[])
-                    .eval(&[], &mut crate::asm::Stack::new());
-                *self.0.arena[node].get_mut() = SyntaxNode::Number(answer);
-                while let Some(c) = self.0.arena[node].first_child() {
-                    c.remove(&mut self.0.arena);
-                }
-            }
-        }
-    }
-
-    fn is_number(&self, node: NodeId) -> bool {
-        matches!(self.0.arena[node].get(), SyntaxNode::Number(_))
     }
 
     pub fn displacing_simplification(&mut self) {
-        self._displacing_simplification(BiOperation::Add, BiOperation::Sub, 0.into());
-        self._displacing_simplification(BiOperation::Mul, BiOperation::Div, 1.into());
+        fn can_simplify(head: BinaryOp, arm: BinaryOp) -> bool {
+            matches!(
+                (head, arm),
+                (BinaryOp::Add | BinaryOp::Sub, BinaryOp::Add | BinaryOp::Sub)
+                    | (BinaryOp::Mul | BinaryOp::Div, BinaryOp::Mul | BinaryOp::Div)
+            )
+        }
+        let mut symbol_space: SubtreeCollection<AstNode<N, V, F>> =
+            SubtreeCollection::from_alloc(Vec::with_capacity(0));
+        let mut idx = 4;
+        while idx < self.0.len() {
+            if let AstNode::BinaryOp(head) = self.0[idx]
+                && self
+                    .0
+                    .children_iter(idx)
+                    .any(|(arm, _)| matches!(arm, AstNode::BinaryOp(_)))
+                && self
+                    .0
+                    .children_iter(idx)
+                    .map(|(node, idx)| match node {
+                        AstNode::Number(_) => 1,
+                        AstNode::BinaryOp(_) => self
+                            .0
+                            .children_iter(idx)
+                            .map(|(n, _)| matches!(n, AstNode::Number(_)) as u8)
+                            .sum(),
+                        _ => 0,
+                    })
+                    .sum::<u8>()
+                    >= 2
+                && !self.0.children_iter(idx).any(
+                    |(arm, _)| matches!(arm, AstNode::BinaryOp(arm) if !can_simplify(head, *arm)),
+                )
+            {
+                self._displacing_simplification(idx, head, &mut symbol_space);
+            }
+            idx += 1;
+        }
     }
 
-    fn _displacing_simplification(&mut self, pos: BiOperation, neg: BiOperation, inital_value: N) {
-        let is_targeting_opr = |node: NodeId| matches!(self.0.arena[node].get(), SyntaxNode::BiOperation(opr) if *opr == pos || *opr == neg);
-        let mut found: Vec<NodeId> = Vec::new();
-        let mul_opr = |target: BiOperation, side: usize, parent: BiOperation| {
-            if side == 0 {
-                parent
-            } else if target == parent {
-                pos
+    fn _displacing_simplification(
+        &mut self,
+        head_idx: usize,
+        head_opr: BinaryOp,
+        symbol_space: &mut SubtreeCollection<AstNode<N, V, F>>,
+    ) {
+        let (positive, negative, mut lhs) = match head_opr {
+            BinaryOp::Add | BinaryOp::Sub => (BinaryOp::Add, BinaryOp::Sub, N::from(0)),
+            BinaryOp::Mul | BinaryOp::Div => (BinaryOp::Mul, BinaryOp::Div, N::from(1)),
+            _ => return,
+        };
+        let apply_pos = |parent: BinaryOp, pos: usize| -> BinaryOp {
+            if pos == 0 && parent == negative {
+                negative
             } else {
-                neg
+                positive
             }
         };
-        for node in self.0.root.traverse(&self.0.arena) {
-            if let NodeEdge::End(upper) = node {
-                if is_targeting_opr(upper)
-                    && upper.children(&self.0.arena).all(|lower| {
-                        is_targeting_opr(lower)
-                            && lower
-                                .children(&self.0.arena)
-                                .any(|lowest| self.is_number(lowest))
-                            || self.is_number(lower)
-                    })
-                {
-                    found.push(upper);
-                }
-            }
-        }
-        for upper in found {
-            let SyntaxNode::BiOperation(upper_opr) = self.0.arena[upper].get() else {
-                panic!();
-            };
-            let mut symbols: [Option<(NodeId, bool)>; 2] = [None, None];
-            let mut lhs = inital_value.clone();
-            for (upper_side, lower) in upper.children(&self.0.arena).enumerate() {
-                match self.0.arena[lower].get() {
-                    SyntaxNode::BiOperation(lower_opr) => {
-                        for (lower_side, lowest) in lower.children(&self.0.arena).enumerate() {
-                            let opr = mul_opr(
-                                *lower_opr,
-                                lower_side,
-                                if upper_side == 0 { pos } else { *upper_opr },
-                            );
-                            match self.0.arena[lowest].get() {
-                                SyntaxNode::Number(value) => {
-                                    lhs = opr.eval(lhs.asarg(), value.asarg())
-                                }
-                                _ => {
-                                    symbols[symbols[0].is_some() as usize] =
-                                        Some((lowest, opr == neg))
-                                }
+        let multiply_oprs = |head: BinaryOp, arm: BinaryOp| -> BinaryOp {
+            if head == arm { positive } else { negative }
+        };
+        let mut symbols: [Option<(usize, BinaryOp)>; 2] = [None, None];
+        for (arm_pos, (arm, arm_idx)) in self.0.children_iter(head_idx).enumerate() {
+            let sign = apply_pos(head_opr, arm_pos);
+            match arm {
+                AstNode::Number(num) => lhs = sign.eval(lhs.asarg(), num.asarg()),
+                AstNode::BinaryOp(arm_opr) => {
+                    for (tail_pos, (tail, tail_idx)) in self.0.children_iter(arm_idx).enumerate() {
+                        let sign = multiply_oprs(
+                            apply_pos(head_opr, arm_pos),
+                            apply_pos(*arm_opr, tail_pos),
+                        );
+                        match tail {
+                            AstNode::Number(num) => {
+                                lhs = sign.eval(lhs.asarg(), num.asarg());
                             }
+                            _ => symbols[symbols[0].is_some() as usize] = Some((tail_idx, sign)),
                         }
                     }
-                    SyntaxNode::Number(value) => {
-                        lhs =
-                            (mul_opr(*upper_opr, upper_side, pos)).eval(lhs.asarg(), value.asarg())
-                    }
-                    _ => panic!(),
                 }
+                _ => symbols[symbols[0].is_some() as usize] = Some((arm_idx, sign)),
             }
-            let symb1 = symbols[0].unwrap();
-            symb1.0.detach(&mut self.0.arena);
-            if let Some((sym, _)) = symbols[1] {
-                sym.detach(&mut self.0.arena);
+        }
+        let (s0_idx, s0_sign) = symbols[0].unwrap();
+        debug_assert!(symbol_space.is_empty());
+        symbol_space.push(AstNode::Number(lhs)).unwrap();
+        if let Some((s1_idx, s1_sign)) = symbols[1] {
+            let mut symbol_indices = [s0_idx, s1_idx];
+            if s0_sign == negative && s1_sign == positive {
+                symbol_indices.reverse();
             }
-            while let Some(child) = upper.children(&self.0.arena).next() {
-                child.remove_subtree(&mut self.0.arena);
+            for idx in symbol_indices {
+                symbol_space.extend_from_tree(&self.0, idx);
             }
-            upper.append_value(SyntaxNode::Number(lhs), &mut self.0.arena);
-            if let Some(symb2) = symbols[1] {
-                if symb1.1 == symb2.1 {
-                    *self.0.arena[upper].get_mut() =
-                        SyntaxNode::BiOperation(if symb1.1 { neg } else { pos });
-                    let lower = upper.append_value(SyntaxNode::BiOperation(pos), &mut self.0.arena);
-                    lower.append(symb1.0, &mut self.0.arena);
-                    lower.append(symb2.0, &mut self.0.arena);
-                } else {
-                    *self.0.arena[upper].get_mut() = SyntaxNode::BiOperation(pos);
-                    let lower = upper.append_value(SyntaxNode::BiOperation(neg), &mut self.0.arena);
-                    if symb2.1 {
-                        lower.append(symb1.0, &mut self.0.arena);
-                        lower.append(symb2.0, &mut self.0.arena);
-                    } else {
-                        lower.append(symb2.0, &mut self.0.arena);
-                        lower.append(symb1.0, &mut self.0.arena);
-                    }
-                }
+            symbol_space.push(AstNode::BinaryOp(if s0_sign == s1_sign {
+                positive
             } else {
-                *self.0.arena[upper].get_mut() =
-                    SyntaxNode::BiOperation(if symb1.1 { neg } else { pos });
-                upper.append(symb1.0, &mut self.0.arena);
-            }
+                negative
+            })).unwrap();
+            symbol_space.push(AstNode::BinaryOp(
+                if s0_sign == negative && s1_sign == negative {
+                    negative
+                } else {
+                    positive
+                },
+            )).unwrap();
+        } else {
+            symbol_space.extend_from_tree(&self.0, s0_idx);
+            symbol_space.push(AstNode::BinaryOp(s0_sign)).unwrap();
         }
-    }
-
-    fn substitute_log(mut self) -> Self {
-        let mut matched_logs: Vec<(NodeId, u8)> = Vec::with_capacity(0);
-        for node in self.0.root.traverse(&self.0.arena) {
-            if let NodeEdge::Start(node) = node {
-                if let SyntaxNode::NativeFunction(NativeFunction::Log) = *self.0.arena[node].get() {
-                    matched_logs.push((
-                        node,
-                        match node.children(&self.0.arena).nth(1) {
-                            Some(base) => match self.0.arena[base].get() {
-                                SyntaxNode::Number(num) => {
-                                    if *num == N::from(10) {
-                                        10
-                                    } else if *num == N::from(2) {
-                                        2
-                                    } else {
-                                        continue;
-                                    }
-                                }
-                                _ => continue,
-                            },
-                            None => 10,
-                        },
-                    ));
-                }
-            }
-        }
-        for (node, base) in matched_logs {
-            *self.0.arena[node].get_mut() = SyntaxNode::NativeFunction(match base {
-                10 => NativeFunction::Log10,
-                2 => NativeFunction::Log2,
-                _ => unreachable!(),
-            });
-            if let Some(base) = node.children(&self.0.arena).nth(1) {
-                base.remove(&mut self.0.arena)
-            }
-        }
-        self
-    }
-    fn verify(
-        arena: &indextree::Arena<SyntaxNode<N, V, F>>,
-        root: NodeId,
-        cf_bounds: impl Fn(F) -> (u8, Option<u8>),
-    ) -> bool {
-        macro_rules! short {
-            ($res: expr) => {
-                if !($res) {
-                    return false;
-                }
-            };
-        }
-
-        for id in root.traverse(arena).filter_map(|e| match e {
-            NodeEdge::Start(_) => None,
-            NodeEdge::End(id) => Some(id),
-        }) {
-            let child_count = id.children(arena).count();
-            match arena[id].get() {
-                SyntaxNode::Number(_) | SyntaxNode::Variable(_) => short!(child_count == 0),
-                SyntaxNode::BiOperation(_) => short!(child_count == 2),
-                SyntaxNode::UnOperation(_) => short!(child_count == 1),
-                SyntaxNode::NativeFunction(nf) => short!(
-                    child_count >= nf.min_args() as usize
-                        && nf.max_args().is_none_or(|m| child_count <= m as usize)
-                ),
-                SyntaxNode::CustomFunction(cf) => {
-                    let (min, max) = cf_bounds(*cf);
-                    short!(
-                        child_count >= min as usize
-                            && max.is_none_or(|m| child_count <= m as usize)
-                    )
-                }
-            }
-        }
-        true
+        self.0
+            .replace_from_sc_move(head_idx, symbol_space, symbol_space.len() - 1);
     }
 }
 
-impl<V, N, F> Display for SyntaxTree<N, V, F>
+fn parenthesis_required<N, V, F>(
+    tree: &PostfixTree<AstNode<N, V, F>>,
+    parent: usize,
+    target: usize,
+) -> bool
 where
-    N: MathEvalNumber + Display,
+    N: Number,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+{
+    match (&tree[parent], &tree[target]) {
+        (AstNode::BinaryOp(head), AstNode::BinaryOp(arm)) => {
+            match head.precedence().cmp(&arm.precedence()) {
+                // Without the parenthesis around y-z in x-(y-z) the order of operations
+                // would be the opposite of what's intended.
+                Ordering::Equal => match head.associativity() {
+                    Associativity::Both => false,
+                    // parent is left associative and child is on the right
+                    Associativity::Left => tree.nth_child(parent, 1) == Some(target),
+                    // parent is right associative and child is on the left
+                    Associativity::Right => tree.nth_child(parent, 0) == Some(target),
+                },
+                Ordering::Less => false,
+                Ordering::Greater => true,
+            }
+        }
+        // Not only does multiplication, division and exponentiation take precedence over negation,
+        // wrapping parenthesis around negation removes ambiguity when paired with addition and subtraction.
+        (AstNode::BinaryOp(_), AstNode::UnaryOp(UnaryOp::Neg)) => true,
+        // Negation takes precedence over addition and subtraction.
+        (AstNode::UnaryOp(UnaryOp::Neg), AstNode::BinaryOp(opr)) => opr.precedence() == 0,
+        // Factorial always takes precedence over binary operations.
+        (AstNode::UnaryOp(UnaryOp::Fac | UnaryOp::DoubleFac), AstNode::BinaryOp(_)) => true,
+        (AstNode::BinaryOp(_), AstNode::UnaryOp(UnaryOp::Fac | UnaryOp::DoubleFac)) => false,
+        // Parenthesis is required for -(-x) and (x!)!, not just when the child's precedence is lower.
+        (AstNode::UnaryOp(parent), AstNode::UnaryOp(current)) => {
+            current.precedence() <= parent.precedence()
+        }
+        // Functions, variables and numbers take precedence over operators.
+        (
+            AstNode::BinaryOp(_) | AstNode::UnaryOp(_),
+            AstNode::Function(_, _) | AstNode::Number(_) | AstNode::Variable(_),
+        ) => false,
+        // Function arguments are clearly separated with commas.
+        (AstNode::Function(_, _), _) => false,
+        // Numbers and variables shouldn't have a child.
+        (AstNode::Number(_) | AstNode::Variable(_), _) => unreachable!(),
+    }
+}
+
+impl<V, N, F> Display for MathAst<N, V, F>
+where
+    N: Number + Display,
     V: VariableIdentifier + Display,
     F: FunctionIdentifier + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let arena = &self.0.arena;
-        for edge in self.0.root.traverse(arena) {
-            match edge {
-                NodeEdge::Start(node) => match arena[node].get() {
-                    SyntaxNode::Number(num) => Display::fmt(num, f)?,
-                    SyntaxNode::Variable(var) => Display::fmt(&var, f)?,
-                    SyntaxNode::BiOperation(opr) => {
-                        if matches!(
-                            node.ancestors(arena).nth(1).map(|p| arena[p].get()),
-                            Some(SyntaxNode::BiOperation(paopr))
-                                if opr.precedence() < paopr.precedence()
-                                || !paopr.is_commutative() && opr.precedence() <= paopr.precedence()
-                        ) {
-                            f.write_str("(")?;
-                        }
-                    }
-                    SyntaxNode::UnOperation(UnOperation::Neg) => {
-                        // parent is BiOperation, and Neg is the rhs
-                        if node
-                            .ancestors(arena)
-                            .nth(1)
-                            .filter(|p| matches!(arena[*p].get(), SyntaxNode::BiOperation(_)))
-                            .map(|p| p.children(arena).nth(1))
-                            .is_some()
-                        {
-                            f.write_str("(")?;
-                        }
-                        Display::fmt(&UnOperation::Neg, f)?;
-                    }
-                    SyntaxNode::NativeFunction(nf) => {
-                        Display::fmt(nf, f)?;
-                        f.write_str("(")?
-                    }
-                    SyntaxNode::CustomFunction(cf) => {
-                        Display::fmt(&cf, f)?;
-                        f.write_str("(")?
-                    }
-                    _ => (),
-                },
-                NodeEdge::End(node) => {
-                    match arena[node].get() {
-                        SyntaxNode::BiOperation(opr) => {
-                            if matches!(
-                                node.ancestors(arena).nth(1).map(|p| arena[p].get()),
-                                Some(SyntaxNode::BiOperation(paopr))
-                                    if opr.precedence() < paopr.precedence()
-                                    || !paopr.is_commutative() && opr.precedence() <= paopr.precedence()
-                            ) {
-                                f.write_str(")")?
-                            }
-                        }
-                        SyntaxNode::UnOperation(UnOperation::Neg) => {
-                            if node
-                                .ancestors(arena)
-                                .nth(1)
-                                .filter(|p| matches!(arena[*p].get(), SyntaxNode::BiOperation(_)))
-                                .map(|p| p.children(arena).nth(1))
-                                .is_some()
-                            {
-                                f.write_str(")")?;
-                            }
-                        }
-                        SyntaxNode::UnOperation(UnOperation::Fac) => {
-                            f.write_str("!")?;
-                        }
-                        SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_) => {
-                            f.write_str(")")?
-                        }
-                        _ => (),
-                    };
-                    if node.following_siblings(arena).nth(1).is_some() {
-                        match node.ancestors(arena).nth(1).map(|p| arena[p].get()) {
-                            Some(SyntaxNode::NativeFunction(_) | SyntaxNode::CustomFunction(_)) => {
-                                f.write_str(", ")?
-                            }
-                            Some(SyntaxNode::BiOperation(opr))
-                                if *opr == BiOperation::Add || *opr == BiOperation::Sub =>
-                            {
-                                write!(f, " {} ", opr.as_char())?;
-                            }
-                            Some(SyntaxNode::BiOperation(opr)) => Display::fmt(&opr, f)?,
-                            _ => (),
-                        }
-                    }
+        for edge in self.0.euler_tour() {
+            if let Some(p) = self.0.parent(edge.index())
+                && parenthesis_required(&self.0, p, edge.index())
+            {
+                match edge {
+                    NodeEdge::Start(_, _) => f.write_str("(")?,
+                    NodeEdge::End(_, _) => f.write_str(")")?,
                 }
-            };
+            }
+            match edge {
+                NodeEdge::Start(AstNode::Number(num), _) => <N as Display>::fmt(num, f)?,
+                NodeEdge::Start(AstNode::Variable(var), _) => <V as Display>::fmt(var, f)?,
+                NodeEdge::Start(AstNode::UnaryOp(UnaryOp::Neg), _) => f.write_str("-")?,
+                NodeEdge::Start(AstNode::Function(func, _), _) => write!(f, "{func}(")?,
+                NodeEdge::End(AstNode::UnaryOp(UnaryOp::Fac), idx) => f.write_str("!")?,
+                NodeEdge::End(AstNode::Function(_, _), _) => f.write_str(")")?,
+                _ => (),
+            }
+            if let NodeEdge::End(_, idx) = edge
+                && let Some((AstNode::BinaryOp(opr), p)) =
+                    self.0.parent(idx).map(|p| (&self.0[p], p))
+                && self.0.nth_child(p, 0) == Some(idx)
+            {
+                if matches!(opr, BinaryOp::Add | BinaryOp::Sub) {
+                    write!(f, " {opr} ")?;
+                } else {
+                    write!(f, "{opr}")?;
+                }
+            }
+            if let NodeEdge::End(_, idx) = edge
+                && let Some((AstNode::Function(func, argc), p)) =
+                    self.0.parent(idx).map(|p| (&self.0[p], p))
+                && self.0.nth_child(p, *argc as usize - 1).unwrap() != idx
+            {
+                f.write_str(", ")?;
+            }
         }
         Ok(())
     }
 }
 
 #[cfg(test)]
-mod test {
-    use indextree::Arena;
+mod tests {
+    use std::f64::consts::*;
 
     use super::*;
-    use crate::{token_stream::TokenStream, token_tree::TokenTree};
-    use crate::tree_utils::VecTree::{self, Leaf};
     use crate::VariableStore;
-
-    macro_rules! branch {
-        ($node:expr, $($children:expr),+ $(,)?) => {
-            VecTree::Branch($node,vec![$($children),+])
-        };
-    }
+    use crate::tokenizer::TokenStream;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     enum TestVar {
         X,
         Y,
         T,
+    }
+
+    impl TestVar {
+        fn parse(input: &str) -> Option<Self> {
+            match input {
+                "x" => Some(TestVar::X),
+                "y" => Some(TestVar::Y),
+                "t" => Some(TestVar::T),
+                _ => None,
+            }
+        }
     }
 
     impl Display for TestVar {
@@ -821,12 +614,59 @@ mod test {
         }
     }
 
+    struct TestVarStore;
+
+    impl VariableStore<f64, TestVar> for TestVarStore {
+        fn get(&self, var: TestVar) -> f64 {
+            match var {
+                TestVar::X => 1.0,
+                TestVar::Y => 5.0,
+                TestVar::T => 0.1,
+            }
+        }
+    }
+
+    fn parse_constant(input: &str) -> Option<f64> {
+        match input {
+            "c" => Some(299792458.0),
+            _ => None,
+        }
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum TestFunc {
         Deg2Rad,
         ExpD,
         Clamp,
         Digits,
+    }
+
+    impl TestFunc {
+        fn parse(input: &str) -> Option<(Self, u8, Option<u8>)> {
+            match input {
+                "deg2rad" => Some((TestFunc::Deg2Rad, 1, Some(1))),
+                "expd" => Some((TestFunc::ExpD, 2, Some(2))),
+                "clamp" => Some((TestFunc::Clamp, 3, Some(3))),
+                "digits" => Some((TestFunc::Digits, 1, None)),
+                _ => None,
+            }
+        }
+        fn as_pointer(self) -> FunctionPointer<'static, f64> {
+            match self {
+                TestFunc::Deg2Rad => FunctionPointer::Single(|x: f64| x.to_radians()),
+                TestFunc::ExpD => FunctionPointer::Dual(|l: f64, x: f64| l.powf(-l * x)),
+                TestFunc::Clamp => {
+                    FunctionPointer::Triple(|x: f64, min: f64, max: f64| x.min(max).max(min))
+                }
+                TestFunc::Digits => FunctionPointer::Flexible(|values: &[f64]| {
+                    values
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &v)| 10f64.powi(i as i32) * v)
+                        .sum()
+                }),
+            }
+        }
     }
 
     impl Display for TestFunc {
@@ -840,455 +680,884 @@ mod test {
         }
     }
 
-    fn parse(input: &str) -> Result<SyntaxTree<f64, TestVar, TestFunc>, ParsingError> {
-        let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-        let token_tree =
-            TokenTree::new(&token_stream).map_err(|e| e.to_general(input, &token_stream))?;
-        SyntaxTree::new(
-            &token_tree,
-            |inp| match inp {
-                "c" => Some(299792458.0),
-                _ => None,
-            },
-            |input| match input {
-                "deg2rad" => Some((TestFunc::Deg2Rad, 1, Some(1))),
-                "expd" => Some((TestFunc::ExpD, 2, Some(2))),
-                "clamp" => Some((TestFunc::Clamp, 3, Some(3))),
-                "digits" => Some((TestFunc::Digits, 1, None)),
-                _ => None,
-            },
-            |input| match input {
-                "x" => Some(TestVar::X),
-                "y" => Some(TestVar::Y),
-                "t" => Some(TestVar::T),
-                _ => None,
-            },
-        )
-        .map_err(|e| e.to_general(input, &token_tree))
+    fn parse(input: &str) -> Result<MathAst<f64, TestVar, TestFunc>, ParsingError> {
+        let tokens = TokenStream::new(input).map_err(|e| e.to_general())?.0;
+        MathAst::new(&tokens, parse_constant, TestFunc::parse, TestVar::parse)
+            .map_err(|e| e.to_general(input, &tokens))
     }
 
     #[test]
-    fn test_syntaxify() {
-        fn syntaxify(
-            input: &str,
-        ) -> Result<VecTree<SyntaxNode<f64, TestVar, TestFunc>>, ParsingError> {
-            parse(input).map(|st| VecTree::new(&st.0.arena, st.0.root))
+    fn parse_to_ast() {
+        fn syntaxify(input: &str) -> Result<Vec<AstNode<f64, TestVar, TestFunc>>, ParsingError> {
+            parse(input).map(|st| {
+                st.0.into_inner()
+                    .into_iter()
+                    .map(|e| e.into_inner())
+                    .collect::<Vec<_>>()
+            })
         }
-        assert_eq!(syntaxify("0"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(syntaxify("(0)"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(syntaxify("((0))"), Ok(Leaf(SyntaxNode::Number(0.0))));
-        assert_eq!(
-            syntaxify("pi"),
-            Ok(Leaf(SyntaxNode::Number(std::f64::consts::PI)))
-        );
+        assert_eq!(syntaxify("0"), Ok(vec![AstNode::Number(0.0)]));
+        assert_eq!(syntaxify("(0)"), Ok(vec![AstNode::Number(0.0)]));
+        assert_eq!(syntaxify("((0))"), Ok(vec![AstNode::Number(0.0)]));
+        assert_eq!(syntaxify("pi"), Ok(vec![AstNode::Number(PI)]));
         assert_eq!(
             syntaxify("1+1"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
-                Leaf(SyntaxNode::Number(1.0)),
-                Leaf(SyntaxNode::Number(1.0))
-            ))
+            Ok(vec![
+                AstNode::Number(1.0),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ])
         );
+        assert_eq!(syntaxify("-0.5"), Ok(vec![AstNode::Number(-0.5)]));
         assert_eq!(
-            syntaxify("-12"),
-            Ok(branch!(
-                SyntaxNode::UnOperation(UnOperation::Neg),
-                Leaf(SyntaxNode::Number(12.0))
-            ))
+            syntaxify("5-3"),
+            Ok(vec![
+                AstNode::Number(5.0),
+                AstNode::Number(3.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ])
         );
         assert_eq!(
             syntaxify("-y!"),
-            Ok(branch!(
-                SyntaxNode::UnOperation(UnOperation::Neg),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Fac),
-                    Leaf(SyntaxNode::Variable(TestVar::Y))
-                )
-            ))
+            Ok(vec![
+                AstNode::Variable(TestVar::Y),
+                AstNode::UnaryOp(UnaryOp::Fac),
+                AstNode::UnaryOp(UnaryOp::Neg),
+            ])
+        );
+        assert_eq!(
+            syntaxify("t!!"),
+            Ok(vec![
+                AstNode::Variable(TestVar::T),
+                AstNode::UnaryOp(UnaryOp::DoubleFac)
+            ])
         );
         assert_eq!(
             syntaxify("8*3+1"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
-                    Leaf(SyntaxNode::Number(8.0)),
-                    Leaf(SyntaxNode::Number(3.0))
-                ),
-                Leaf(SyntaxNode::Number(1.0))
-            ))
+            Ok(vec![
+                AstNode::Number(8.0),
+                AstNode::Number(3.0),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ])
         );
         assert_eq!(
             syntaxify("12/3/2"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Div),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Div),
-                    Leaf(SyntaxNode::Number(12.0)),
-                    Leaf(SyntaxNode::Number(3.0))
-                ),
-                Leaf(SyntaxNode::Number(2.0))
-            ))
+            Ok(vec![
+                AstNode::Number(12.0),
+                AstNode::Number(3.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ])
         );
         assert_eq!(
             syntaxify("8*(3+1)"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Mul),
-                Leaf(SyntaxNode::Number(8.0)),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Add),
-                    Leaf(SyntaxNode::Number(3.0)),
-                    Leaf(SyntaxNode::Number(1.0))
-                )
-            ))
+            Ok(vec![
+                AstNode::Number(8.0),
+                AstNode::Number(3.0),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ])
         );
         assert_eq!(
-            syntaxify("8*3^2+1"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
-                    Leaf(SyntaxNode::Number(8.0)),
-                    branch!(
-                        SyntaxNode::BiOperation(BiOperation::Pow),
-                        Leaf(SyntaxNode::Number(3.0)),
-                        Leaf(SyntaxNode::Number(2.0))
-                    )
-                ),
-                Leaf(SyntaxNode::Number(1.0))
-            ))
+            syntaxify("8*3^2-1"),
+            Ok(vec![
+                AstNode::Number(8.0),
+                AstNode::Number(3.0),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ])
         );
         assert_eq!(
             syntaxify("2x"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Mul),
-                Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            Ok(vec![
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ])
         );
         assert_eq!(
             syntaxify("sin(14)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sin),
-                Leaf(SyntaxNode::Number(14.0))
-            ))
+            Ok(vec![
+                AstNode::Number(14.0),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+            ])
         );
         assert_eq!(
             syntaxify("deg2rad(80)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Deg2Rad),
-                Leaf(SyntaxNode::Number(80.0))
-            ))
+            Ok(vec![
+                AstNode::Number(80.0),
+                AstNode::Function(FunctionType::Custom(TestFunc::Deg2Rad), 1),
+            ])
         );
         assert_eq!(
             syntaxify("expd(0.2, x)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::ExpD),
-                Leaf(SyntaxNode::Number(0.2)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            Ok(vec![
+                AstNode::Number(0.2),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(FunctionType::Custom(TestFunc::ExpD), 2),
+            ])
         );
         assert_eq!(
             syntaxify("clamp(t, y, x)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Clamp),
-                Leaf(SyntaxNode::Variable(TestVar::T)),
-                Leaf(SyntaxNode::Variable(TestVar::Y)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            Ok(vec![
+                AstNode::Variable(TestVar::T),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(FunctionType::Custom(TestFunc::Clamp), 3),
+            ])
         );
         assert_eq!(
             syntaxify("digits(3, 1, 5, 7, 2, x)"),
-            Ok(branch!(
-                SyntaxNode::CustomFunction(TestFunc::Digits),
-                Leaf(SyntaxNode::Number(3.0)),
-                Leaf(SyntaxNode::Number(1.0)),
-                Leaf(SyntaxNode::Number(5.0)),
-                Leaf(SyntaxNode::Number(7.0)),
-                Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            Ok(vec![
+                AstNode::Number(3.0),
+                AstNode::Number(1.0),
+                AstNode::Number(5.0),
+                AstNode::Number(7.0),
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(FunctionType::Custom(TestFunc::Digits), 6),
+            ])
         );
         assert_eq!(
-            syntaxify("log2(8)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Log2),
-                Leaf(SyntaxNode::Number(8.0))
-            ))
+            syntaxify("lb(8)"),
+            Ok(vec![
+                AstNode::Number(8.0),
+                AstNode::Function(NativeFunction::Log2.into(), 1),
+            ])
         );
         assert_eq!(
             syntaxify("log(100)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Log10),
-                Leaf(SyntaxNode::Number(100.0))
-            ))
+            Ok(vec![
+                AstNode::Number(100.0),
+                AstNode::Function(NativeFunction::Log10.into(), 1),
+            ])
         );
         assert_eq!(
             syntaxify("sin(cos(0))"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sin),
-                branch!(
-                    SyntaxNode::NativeFunction(NativeFunction::Cos),
-                    Leaf(SyntaxNode::Number(0.0))
-                )
-            ))
+            Ok(vec![
+                AstNode::Number(0.0),
+                AstNode::Function(NativeFunction::Cos.into(), 1),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+            ])
         );
         assert_eq!(
             syntaxify("x^2 + sin(y)"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Pow),
-                    Leaf(SyntaxNode::Variable(TestVar::X)),
-                    Leaf(SyntaxNode::Number(2.0))
-                ),
-                branch!(
-                    SyntaxNode::NativeFunction(NativeFunction::Sin),
-                    Leaf(SyntaxNode::Variable(TestVar::Y))
-                )
-            ))
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ])
         );
         assert_eq!(
             syntaxify("sqrt(max(4, 9))"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sqrt),
-                branch!(
-                    SyntaxNode::NativeFunction(NativeFunction::Max),
-                    Leaf(SyntaxNode::Number(4.0)),
-                    Leaf(SyntaxNode::Number(9.0))
-                )
-            ))
+            Ok(vec![
+                AstNode::Number(4.0),
+                AstNode::Number(9.0),
+                AstNode::Function(NativeFunction::Max.into(), 2),
+                AstNode::Function(NativeFunction::Sqrt.into(), 1),
+            ])
         );
         assert_eq!(
-            syntaxify("max(2, x, 8y, x*y+1)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Max),
-                Leaf(SyntaxNode::Number(2.0)),
-                Leaf(SyntaxNode::Variable(TestVar::X)),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
-                    Leaf(SyntaxNode::Number(8.0)),
-                    Leaf(SyntaxNode::Variable(TestVar::Y))
-                ),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Add),
-                    branch!(
-                        SyntaxNode::BiOperation(BiOperation::Mul),
-                        Leaf(SyntaxNode::Variable(TestVar::X)),
-                        Leaf(SyntaxNode::Variable(TestVar::Y))
-                    ),
-                    Leaf(SyntaxNode::Number(1.0))
-                )
-            ))
-        );
-        assert_eq!(
-            syntaxify("-5+3"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
-                    Leaf(SyntaxNode::Number(5.0))
-                ),
-                Leaf(SyntaxNode::Number(3.0))
-            ))
+            syntaxify("max(2, x, 8y, xy+1)"),
+            Ok(vec![
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(8.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Variable(TestVar::X),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::Function(NativeFunction::Max.into(), 4),
+            ])
         );
         assert_eq!(
             syntaxify("2*x + 3*y"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Add),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
-                    Leaf(SyntaxNode::Number(2.0)),
-                    Leaf(SyntaxNode::Variable(TestVar::X))
-                ),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Mul),
-                    Leaf(SyntaxNode::Number(3.0)),
-                    Leaf(SyntaxNode::Variable(TestVar::Y))
-                )
-            ))
-        );
-        assert_eq!(
-            syntaxify("tan(45)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Tan),
-                Leaf(SyntaxNode::Number(45.0))
-            ))
+            Ok(vec![
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(3.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ])
         );
         assert_eq!(
             syntaxify("log10(1000)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Log10),
-                Leaf(SyntaxNode::Number(1000.0))
-            ))
+            Ok(vec![
+                AstNode::Number(1000.0),
+                AstNode::Function(NativeFunction::Log10.into(), 1),
+            ])
         );
         assert_eq!(
             syntaxify("1/(2+3)"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Div),
-                Leaf(SyntaxNode::Number(1.0)),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Add),
-                    Leaf(SyntaxNode::Number(2.0)),
-                    Leaf(SyntaxNode::Number(3.0))
-                )
-            ))
+            Ok(vec![
+                AstNode::Number(1.0),
+                AstNode::Number(2.0),
+                AstNode::Number(3.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ])
         );
         assert_eq!(
             syntaxify("e^x"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Pow),
-                Leaf(SyntaxNode::Number(std::f64::consts::E)),
-                Leaf(SyntaxNode::Variable(TestVar::X))
-            ))
+            Ok(vec![
+                AstNode::Number(E),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Pow),
+            ])
         );
         assert_eq!(
             syntaxify("x * -2"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Mul),
-                Leaf(SyntaxNode::Variable(TestVar::X)),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
-                    Leaf(SyntaxNode::Number(2.0))
-                )
-            ))
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(-2.0),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ])
         );
         assert_eq!(
-            syntaxify("4/(-2)"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Div),
-                Leaf(SyntaxNode::Number(4.0)),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
-                    Leaf(SyntaxNode::Number(2.0))
-                )
-            ))
+            syntaxify("4/-1.33"),
+            Ok(vec![
+                AstNode::Number(4.0),
+                AstNode::Number(-1.33),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ])
         );
         assert_eq!(
             syntaxify("sqrt(16)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sqrt),
-                Leaf(SyntaxNode::Number(16.0))
-            ))
+            Ok(vec![
+                AstNode::Number(16.0),
+                AstNode::Function(NativeFunction::Sqrt.into(), 1),
+            ])
         );
         assert_eq!(
             syntaxify("abs(-5)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Abs),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
-                    Leaf(SyntaxNode::Number(5.0))
-                )
-            ))
-        );
-        assert_eq!(
-            syntaxify("x/y"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Div),
-                Leaf(SyntaxNode::Variable(TestVar::X)),
-                Leaf(SyntaxNode::Variable(TestVar::Y))
-            ))
+            Ok(vec![
+                AstNode::Number(-5.0),
+                AstNode::Function(NativeFunction::Abs.into(), 1),
+            ])
         );
         assert_eq!(
             syntaxify("x^2 - y^2"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Sub),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Pow),
-                    Leaf(SyntaxNode::Variable(TestVar::X)),
-                    Leaf(SyntaxNode::Number(2.0))
-                ),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Pow),
-                    Leaf(SyntaxNode::Variable(TestVar::Y)),
-                    Leaf(SyntaxNode::Number(2.0))
-                )
-            ))
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ])
         );
         assert_eq!(
-            syntaxify("log2(32)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Log2),
-                Leaf(SyntaxNode::Number(32.0))
-            ))
+            syntaxify("|x|"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Abs.into(), 1),
+            ])
+        );
+        assert_eq!(
+            syntaxify("|-x|"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::UnaryOp(UnaryOp::Neg),
+                AstNode::Function(NativeFunction::Abs.into(), 1),
+            ])
         );
         assert_eq!(
             syntaxify("4*-x"),
-            Ok(branch!(
-                SyntaxNode::BiOperation(BiOperation::Mul),
-                Leaf(SyntaxNode::Number(4.0)),
-                branch!(
-                    SyntaxNode::UnOperation(UnOperation::Neg),
-                    Leaf(SyntaxNode::Variable(TestVar::X))
-                )
-            ))
+            Ok(vec![
+                AstNode::Number(4.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::UnaryOp(UnaryOp::Neg),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ])
         );
         assert_eq!(
-            syntaxify("3!"),
-            Ok(branch!(
-                SyntaxNode::UnOperation(UnOperation::Fac),
-                Leaf(SyntaxNode::Number(3.0))
-            ))
+            syntaxify("8.3 + -1"),
+            Ok(vec![
+                AstNode::Number(8.3),
+                AstNode::Number(-1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ])
+        );
+        assert_eq!(syntaxify("++1"), Ok(vec![AstNode::Number(1.0)]));
+        assert_eq!(syntaxify("+-1"), Ok(vec![AstNode::Number(-1.0)]));
+        assert_eq!(syntaxify("--1"), Ok(vec![AstNode::Number(1.0)]));
+        assert_eq!(syntaxify("---1"), Ok(vec![AstNode::Number(-1.0)]));
+        assert_eq!(syntaxify("----1"), Ok(vec![AstNode::Number(1.0)]));
+        assert_eq!(
+            syntaxify("x + +1"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ])
+        );
+        assert_eq!(
+            syntaxify("-1^2"),
+            Ok(vec![
+                AstNode::Number(1.0),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::UnaryOp(UnaryOp::Neg),
+            ])
+        );
+        assert_eq!(
+            syntaxify("2^-1"),
+            Ok(vec![
+                AstNode::Number(2.0),
+                AstNode::Number(-1.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+            ])
+        );
+        assert_eq!(
+            syntaxify("2^-(x+2)"),
+            Ok(vec![
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::UnaryOp(UnaryOp::Neg),
+                AstNode::BinaryOp(BinaryOp::Pow),
+            ])
+        );
+        assert_eq!(
+            syntaxify("x!y"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::UnaryOp(UnaryOp::Fac),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ])
         );
         assert_eq!(
             syntaxify("sin(x!-1)"),
-            Ok(branch!(
-                SyntaxNode::NativeFunction(NativeFunction::Sin),
-                branch!(
-                    SyntaxNode::BiOperation(BiOperation::Sub),
-                    branch!(
-                        SyntaxNode::UnOperation(UnOperation::Fac),
-                        Leaf(SyntaxNode::Variable(TestVar::X))
-                    ),
-                    Leaf(SyntaxNode::Number(1.0))
-                )
-            ))
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::UnaryOp(UnaryOp::Fac),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+            ])
         );
-        // temporary. must make more
         assert_eq!(
-            syntaxify("x*()").map_err(|e| *e.kind()),
-            Err(ParsingErrorKind::EmptyParenthesis)
+            syntaxify("3|x-1|/2 + 1"),
+            Ok(vec![
+                AstNode::Number(3.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Function(NativeFunction::Abs.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ])
+        );
+        assert_eq!(
+            syntaxify("x(-1)"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(-1.0),
+                AstNode::BinaryOp(BinaryOp::Mul)
+            ])
+        );
+        assert_eq!(
+            syntaxify(""),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyInput,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("sin(x)+ja"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::UnknownVariableOrConstant,
+                at: 7..=8
+            })
+        );
+        assert_eq!(
+            syntaxify("x*()"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyParenthesis,
+                at: 2..=3
+            })
+        );
+        assert_eq!(
+            syntaxify("5+pi*sinj(x)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::UnknownFunction,
+                at: 5..=9
+            })
+        );
+        assert_eq!(
+            syntaxify("1+expd(2y)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::NotEnoughArguments,
+                at: 2..=9
+            })
+        );
+        assert_eq!(
+            syntaxify("5(1+clamp(2y, 1))"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::NotEnoughArguments,
+                at: 4..=15
+            })
+        );
+        assert_eq!(
+            syntaxify("deg2rad(1, pi)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::TooManyArguments,
+                at: 0..=13
+            })
+        );
+        assert_eq!(
+            syntaxify("-expd(1, pi, sin(x))"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::TooManyArguments,
+                at: 1..=19
+            })
+        );
+        assert_eq!(
+            syntaxify("9t-clamp(1, pi, sin(x), 15tan(y))"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::TooManyArguments,
+                at: 3..=32
+            })
+        );
+        assert_eq!(
+            syntaxify("x*sin()"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyArgument,
+                at: 2..=6
+            })
+        );
+        assert_eq!(
+            syntaxify("x*log(y,)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyArgument,
+                at: 7..=8
+            })
+        );
+        assert_eq!(
+            syntaxify("x*expd(,5y)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyArgument,
+                at: 2..=7
+            })
+        );
+        assert_eq!(
+            syntaxify("x*clamp(x,,5y)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::EmptyArgument,
+                at: 9..=10
+            })
+        );
+        assert_eq!(
+            syntaxify("x)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingOpenParenthesis,
+                at: 1..=1
+            })
+        );
+        assert_eq!(
+            syntaxify("(x"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingCloseParenthesis,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("(x + 1)*sin(y"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingCloseParenthesis,
+                at: 8..=11
+            })
+        );
+        assert_eq!(
+            syntaxify("(x + (y)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingCloseParenthesis,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("(10) * y) + 4x"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingOpenParenthesis,
+                at: 8..=8
+            })
+        );
+        assert_eq!(
+            syntaxify("*10 2"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("(*x 2)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 1..=1
+            })
+        );
+        assert_eq!(
+            syntaxify("1+(x 2-)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 6..=6
+            })
+        );
+        assert_eq!(
+            syntaxify("(+)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 1..=1
+            })
+        );
+        assert_eq!(
+            syntaxify("(!)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 1..=1
+            })
+        );
+        assert_eq!(
+            syntaxify("|x"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::PipeAbsNotClosed,
+                at: 0..=0
+            })
+        );
+        assert_eq!(
+            syntaxify("3+|(|y|+1)/2"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::PipeAbsNotClosed,
+                at: 2..=2
+            })
+        );
+        assert_eq!(
+            syntaxify("|sin(|x)|"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::PipeAbsNotClosed,
+                at: 5..=5
+            })
+        );
+        assert_eq!(
+            syntaxify("x*"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 1..=1
+            })
+        );
+    }
+
+    #[test]
+    fn parse_to_number() {
+        fn evaluate(input: &str) -> f64 {
+            MathAst::parse_and_eval(
+                &TokenStream::new(input).unwrap().0,
+                parse_constant,
+                TestFunc::parse,
+                TestVar::parse,
+                &TestVarStore,
+                TestFunc::as_pointer,
+            )
+            .unwrap()
+        }
+        assert_eq!(evaluate("1"), 1.0);
+        assert_eq!(evaluate("-0.5"), -0.5);
+        assert_eq!(evaluate("857-999"), -142.0);
+        assert_eq!(evaluate("8*19"), 152.0);
+        assert_eq!(evaluate("-4!"), -24.0);
+        assert_eq!(evaluate("y!!"), 15.0);
+        assert_eq!(evaluate("1-27/9"), -2.0);
+        assert_eq!(evaluate("121/11/t"), 110.0);
+        assert_eq!(evaluate("y*(x+11)"), 60.0);
+        assert_eq!(evaluate("8*2^y-t"), 255.9);
+        assert_eq!(evaluate("18x"), 18.0);
+        assert_eq!(evaluate("sin(pi/2)"), 1.0);
+        assert_eq!(evaluate("log(243, 3)"), 5.0 - 1e-15);
+        assert_eq!(evaluate("min(-13,x,y,0)"), -13.0);
+        assert_eq!(evaluate("deg2rad(90)"), FRAC_PI_2);
+        assert_eq!(evaluate("expd(0.5, 2)"), 2.0);
+        assert_eq!(evaluate("clamp(x, 0, 2)"), 1.0);
+        assert_eq!(evaluate("digits(x, y, t, 9)/1000"), 9.061);
+        assert_eq!(evaluate("lb(2048)"), 11.0);
+        assert_eq!(evaluate("log(1000000)"), 6.0);
+        assert_eq!(evaluate("lg(0.0001)"), -4.0);
+        assert_eq!(evaluate("ln(e^23)"), 23.0);
+        assert_eq!(evaluate("ln(cos(0))"), 0.0);
+        assert_eq!(evaluate("y * -2"), -10.0);
+        assert_eq!(evaluate("sin(pi/-2)"), -1.0);
+        assert_eq!(evaluate("+-+75"), -75.0);
+        assert_eq!(evaluate("----7"), 7.0);
+        assert_eq!(evaluate("|x|"), 1.0);
+        assert_eq!(evaluate("|-x|"), 1.0);
+        assert_eq!(evaluate("x^2 + y^2"), 26.0);
+        assert_eq!(evaluate("y*-0.5"), -2.5);
+        assert_eq!(evaluate("sin(pix/2)*t-cos(pix)*t"), 0.2);
+    }
+
+    #[test]
+    fn aot_evaluation() {
+        let simplify = |nodes: &[AstNode<f64, TestVar, TestFunc>]| {
+            let mut ast = MathAst::from_nodes(nodes.iter().copied());
+            ast.aot_evaluation(TestFunc::as_pointer);
+            ast.0.postorder_iter().cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(16.0),
+                AstNode::Number(8.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(11.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ]),
+            vec![AstNode::Number(13.0)]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(9.0),
+                AstNode::Function(NativeFunction::Sqrt.into(), 1),
+            ]),
+            vec![AstNode::Number(3.0)]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(1.0),
+                AstNode::Number(8.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Variable(TestVar::T),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+            ]),
+            vec![
+                AstNode::Number(0.125),
+                AstNode::Variable(TestVar::T),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(80.0),
+                AstNode::Number(5.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::Number(1.0),
+                AstNode::Number(0.0),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+                AstNode::Function(NativeFunction::Min.into(), 2),
+                AstNode::Function(NativeFunction::Max.into(), 3),
+                AstNode::Number(121.0),
+                AstNode::Function(NativeFunction::Sqrt.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Add)
+            ]),
+            vec![
+                AstNode::Number(16.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::BinaryOp(BinaryOp::Pow),
+                AstNode::Number(0.0),
+                AstNode::Function(NativeFunction::Max.into(), 3),
+                AstNode::Number(11.0),
+                AstNode::BinaryOp(BinaryOp::Add)
+            ]
+        );
+    }
+
+    #[test]
+    fn displacing_simplification() {
+        let simplify = |nodes: &[AstNode<f64, TestVar, TestFunc>]| {
+            let mut ast = MathAst::from_nodes(nodes.iter().copied());
+            ast.displacing_simplification();
+            ast.0.postorder_iter().cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(
+            simplify(&[
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(1.0),
+                AstNode::Number(8.0),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]),
+            vec![
+                AstNode::Number(8.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(16.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(8.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]),
+            vec![
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(-2.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Number(17.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ]),
+            vec![
+                AstNode::Number(15.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(1.0),
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]),
+            vec![
+                AstNode::Number(0.5),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(125.0),
+                AstNode::Variable(TestVar::T),
+                AstNode::Number(5.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::BinaryOp(BinaryOp::Sub)
+            ]),
+            vec![
+                AstNode::Number(120.0),
+                AstNode::Variable(TestVar::T),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(17.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(NativeFunction::Log.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Number(10.0),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]),
+            vec![
+                AstNode::Number(8.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(NativeFunction::Log.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(7.0),
+                AstNode::Variable(TestVar::T),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]),
+            vec![
+                AstNode::Number(3.5),
+                AstNode::Variable(TestVar::T),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(5.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::Number(7.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Div),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ]),
+            vec![
+                AstNode::Number(35.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::BinaryOp(BinaryOp::Div),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(81.0),
+                AstNode::Number(3.0),
+                AstNode::Function(NativeFunction::Log.into(), 2),
+                AstNode::Number(8.9),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Number(1.4),
+                AstNode::Number(5.993),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Max.into(), 3),
+                AstNode::Number(3.9),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]),
+            vec![
+                AstNode::Number(-5.0),
+                AstNode::Number(81.0),
+                AstNode::Number(3.0),
+                AstNode::Function(NativeFunction::Log.into(), 2),
+                AstNode::Number(1.4),
+                AstNode::Number(5.993),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Max.into(), 3),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ]
         )
     }
 
     #[test]
-    fn test_aot_evaluation() {
-        macro_rules! compare {
-            ($i1:literal, $i2:literal) => {
-                let mut syn1 = parse($i1).unwrap();
-                syn1.aot_evaluation(|_| CFPointer::Single(&|_| 0.0));
-                let syn2 = parse($i2).unwrap();
-                assert_eq!(format!("{}", syn1), format!("{}", syn2));
-            };
-        }
-        compare!("16/8+11", "13");
-        compare!("sqrt(0)", "0");
-        compare!("sin(1/8+t)", "sin(0.125+t)");
-        compare!(
-            "max(80/5, x^2, min(1,sin(0)))+sqrt(121)",
-            "max(16, x^2, 0)+11"
-        );
-    }
-
-    #[test]
-    fn test_displacing_simplification() {
-        macro_rules! compare {
-            ($i1:literal, $i2:literal) => {
-                let mut syn1 = parse($i1).unwrap();
-                syn1.displacing_simplification();
-                assert_eq!(format!("{}", syn1), $i2);
-            };
-        }
-        compare!("x/1/8", "0.125*x");
-        compare!("(x/16)/(y*4)", "0.015625*x/y");
-        compare!("(7/x)/(y/2)", "14/(x*y)");
-        compare!("(x/4)/(4/y)", "0.0625*x*y");
-        compare!("10-x+12", "22 - x");
-        compare!("x*pi*2", "6.283185307179586*x");
-    }
-
-    #[test]
-    fn test_syntax_display() {
+    fn syntax_display() {
         let cases = [
             "x",
             "-y!",
@@ -1304,7 +1573,8 @@ mod test {
             "x - y!",
             "x/(-y)",
             "x/y!",
-            "(7/x)/(y/2)",
+            "(x^2)^y",
+            "7/x/(y/2)",
             "(t^2 + 3*t + 2)/(t + 1)",
             "sin(x)",
             "x/sin(x + 1)",
@@ -1315,158 +1585,38 @@ mod test {
         ];
 
         for c in cases {
-            assert_eq!(c, parse(c).unwrap().to_string());
-        }
-    }
-
-    fn random_syntax_tree(branch_count: usize) -> SyntaxTree<f64, TestVar, TestFunc> {
-        const BRANCH_NODES: [(SyntaxNode<f64, TestVar, TestFunc>, RangeInclusive<u8>); 14] = [
-            (SyntaxNode::BiOperation(BiOperation::Add), 2..=2),
-            (SyntaxNode::BiOperation(BiOperation::Sub), 2..=2),
-            (SyntaxNode::BiOperation(BiOperation::Mul), 2..=2),
-            (SyntaxNode::BiOperation(BiOperation::Div), 2..=2),
-            (SyntaxNode::UnOperation(UnOperation::Neg), 1..=1),
-            (SyntaxNode::UnOperation(UnOperation::Fac), 1..=1),
-            (SyntaxNode::NativeFunction(NativeFunction::Sin), 1..=1),
-            (SyntaxNode::NativeFunction(NativeFunction::Sqrt), 1..=1),
-            (SyntaxNode::NativeFunction(NativeFunction::Log), 2..=2),
-            (SyntaxNode::NativeFunction(NativeFunction::Max), 2..=10),
-            (SyntaxNode::CustomFunction(TestFunc::Deg2Rad), 1..=1),
-            (SyntaxNode::CustomFunction(TestFunc::ExpD), 2..=2),
-            (SyntaxNode::CustomFunction(TestFunc::Clamp), 3..=3),
-            (SyntaxNode::CustomFunction(TestFunc::Digits), 2..=10),
-        ];
-
-        let mut arena: Arena<SyntaxNode<f64, TestVar, TestFunc>> = Arena::new();
-        let mut dangling_branches: Vec<(NodeId, RangeInclusive<u8>)> = {
-            let root = fastrand::choice(BRANCH_NODES).unwrap();
-            vec![(arena.new_node(root.0), root.1)]
-        };
-        let root = dangling_branches[0].0;
-        while arena.count() < branch_count {
-            let (node, child_range) =
-                dangling_branches.swap_remove(fastrand::usize(0..dangling_branches.len()));
-            for _ in 0..fastrand::u8(child_range) {
-                let (new_node, child_range) = fastrand::choice(BRANCH_NODES).unwrap();
-                let id = node.append_value(new_node, &mut arena);
-                dangling_branches.push((id, child_range));
-            }
-        }
-        for (node, child_range) in dangling_branches {
-            for _ in 0..fastrand::u8(child_range) {
-                node.append_value(
-                    if fastrand::bool() {
-                        SyntaxNode::Variable(
-                            fastrand::choice([TestVar::X, TestVar::Y, TestVar::T]).unwrap(),
-                        )
-                    } else {
-                        SyntaxNode::Number(fastrand::i16(i16::MIN..i16::MAX) as f64 / 128.0)
-                    },
-                    &mut arena,
-                );
-            }
-        }
-        assert!(SyntaxTree::verify(&arena, root, |cf| match cf {
-            TestFunc::Deg2Rad => (1, Some(1)),
-            TestFunc::ExpD => (2, Some(2)),
-            TestFunc::Clamp => (3, Some(3)),
-            TestFunc::Digits => (2, None),
-        }));
-        SyntaxTree(Tree { arena, root })
-    }
-
-    #[test]
-    #[ignore]
-    fn test_syntax_display_random() {
-        for size in [1, 10, 50] {
-            for _ in 0..200 {
-                let original_ast = random_syntax_tree(size);
-                let expr = original_ast.to_string();
-                let parsed_ast = parse(&expr).unwrap();
-                let expr2 = parsed_ast.to_string();
-                assert_eq!(expr, expr2, "\noriginal syntax tree: {:?}\nparsed syntax tree: {:?}", original_ast.0, parsed_ast.0);
-            }
+            assert_eq!(parse(c).unwrap().to_string(), c);
         }
     }
 
     #[test]
-    fn test_tokennode2range() {
-        let input = " max(1, -18) * sin(pi)";
-        let ts = TokenStream::new(input).unwrap();
-        let tt = TokenTree::new(&ts).unwrap();
-        assert_eq!(
-            tokennode2range(
-                input,
-                &tt,
-                tt.0.root.descendants(&tt.0.arena).nth(3).unwrap()
-            ),
-            5..=5
-        );
-        assert_eq!(
-            tokennode2range(
-                input,
-                &tt,
-                tt.0.root.descendants(&tt.0.arena).nth(6).unwrap()
-            ),
-            9..=10
-        );
-        assert_eq!(
-            tokennode2range(input, &tt, tt.0.root.children(&tt.0.arena).nth(1).unwrap()),
-            13..=13
-        );
-        assert_eq!(
-            tokennode2range(
-                input,
-                &tt,
-                tt.0.root.descendants(&tt.0.arena).nth(10).unwrap()
-            ),
-            19..=20
-        );
+    fn ast_eval() {
+        fn eval(input: &str) -> f64 {
+            parse(input)
+                .unwrap()
+                .eval(TestFunc::as_pointer, &TestVarStore)
+        }
+
+        assert_eq!(eval("1"), 1.0);
+        assert_eq!(eval("x*3"), 3.0);
+        assert_eq!(eval("3!"), 6.0);
+        assert_eq!(eval("-t"), -0.1);
+        assert_eq!(eval("y+100*t"), 15.0);
+        assert_eq!(eval("sin(pi*t)"), 0.3090169943749474);
+        assert_eq!(eval("log(6561, 3)"), 8.0);
+        assert_eq!(eval("max(x, y, -18)*t"), 0.5);
+        assert_eq!(eval("clamp(x + y, -273.15, t)"), 0.1);
+        assert_eq!(eval("digits(y, 1)"), 15.0);
+        assert_eq!(eval("digits(5, 4, 9)*t"), 94.5);
     }
 
     #[test]
-    #[ignore]
-    fn test_ast_eval() {
-        struct VarStore;
-
-        impl VariableStore<f64, TestVar> for VarStore {
-            fn get(&self, var: TestVar) -> f64 {
-                match var {
-                    TestVar::X => 1.0,
-                    TestVar::Y => 5.0,
-                    TestVar::T => 0.1,
-                }
-            }
-        }
-
-        let cf2p = |cf: TestFunc| -> CFPointer<'_, f64> {
-            match cf {
-                TestFunc::Deg2Rad => CFPointer::Single(&|x: f64| x.to_radians()),
-                TestFunc::ExpD => CFPointer::Dual(&|l: f64, x: f64| l * (-l * x).exp()),
-                TestFunc::Clamp => {
-                    CFPointer::Triple(&|x: f64, min: f64, max: f64| x.min(max).max(min))
-                }
-                TestFunc::Digits => CFPointer::Flexible(&|values: &[f64]| {
-                    values.iter().enumerate().map(|(i, &v)| i as f64 *v).sum()
-                }),
-            }
-        };
-        macro_rules! assert_eval {
-            ($expr: literal, $res: literal) => {
-                assert_eq!(parse($expr).unwrap().eval(cf2p, &VarStore), $res);
-            };
-        }
-
-        assert_eval!("1", 1.0);
-        assert_eval!("x*3", 3.0);
-        assert_eval!("3!", 6.0);
-        assert_eval!("-t", -0.1);
-        assert_eval!("y+100*t", 15.0);
-        assert_eval!("sin(pi*t)", 0.3090169943749474);
-        assert_eval!("log(6561, 3)", 8.0);
-        assert_eval!("max(x, y, -18)*t", 0.5);
-        assert_eval!("clamp(x + y, -273.15, t)", 0.1);
-        assert_eval!("dist(1, 3, 4, 7)/y", 1.0);
-        assert_eval!("digits(y, 1)", 15.0);
+    fn token2range() {
+        let input = " max(pi, 1, -4)*3";
+        let ts = TokenStream::new(input).unwrap().0;
+        assert_eq!(token_range_to_str_range(input, &ts, 0..=0), 1..=4);
+        assert_eq!(token_range_to_str_range(input, &ts, 1..=1), 5..=6);
+        assert_eq!(token_range_to_str_range(input, &ts, 2..=2), 7..=7);
+        assert_eq!(token_range_to_str_range(input, &ts, 3..=3), 9..=9);
     }
 }

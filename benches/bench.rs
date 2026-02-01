@@ -1,7 +1,7 @@
 use criterion::{
     Bencher, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
-use math_eval::{EvalBuilder, token_stream::TokenStream};
+use math_eval::{EvalBuilder, tokenizer::TokenStream};
 use meval::{Context, Expr};
 use std::{cmp::min, time::Duration};
 
@@ -33,8 +33,8 @@ fn meval_bencher(b: &mut Bencher<'_>, input: &str) {
 }
 
 fn matheval_bencher(b: &mut Bencher<'_>, input: &str) {
-    let mut expr = EvalBuilder::new()
-        .add_fn2("dist", &dist)
+    let mut expr = EvalBuilder::<'_, f64>::new()
+        .add_fn2("dist", dist)
         .add_variable("x")
         .add_variable("y")
         .add_variable("t")
@@ -68,7 +68,7 @@ const MATH_EXPRESSIONS: [(&str, &str); 9] = [
 ];
 
 fn get_throughput(input: &str) -> u64 {
-    TokenStream::new(input).unwrap().get().len() as u64
+    TokenStream::new(input).unwrap().as_ref().len() as u64
 }
 
 fn hardcoded(crit: &mut Criterion) {
