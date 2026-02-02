@@ -597,7 +597,7 @@ where
                 _ => SyntaxError(kind, pos..=pos),
             }
         } else {
-            return SyntaxError(kind, pos..=pos);
+            SyntaxError(kind, pos..=pos)
         }
     };
     let mut state = ExprState::new();

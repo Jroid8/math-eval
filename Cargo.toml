@@ -14,7 +14,6 @@ fastrand = "2.0.1"
 meval = "0.2.0"
 
 [lints.clippy]
-redundant_closure_call = "allow"
 type_complexity = "allow"
 
 [lints.rust]
