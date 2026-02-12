@@ -1,14 +1,17 @@
-use std::{any::Any, fmt::Display, panic};
+use std::{any::Any, panic};
 
 use math_eval::{
-    FunctionPointer, VariableStore,
     number::NativeFunction,
     syntax::MathAst,
     tokenizer::{OprToken, Token, TokenStream},
 };
-use strum::{EnumIter, IntoEnumIterator};
+use strum::IntoEnumIterator;
 
-fn gen_random_f64() -> f64 {
+use crate::common::{MyFunc, MyStore, MyVar, rand_ast};
+
+mod common;
+
+fn rand_f64() -> f64 {
     (fastrand::f64() - 0.5) * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
 }
 
@@ -27,98 +30,11 @@ fn fuzz_tokenizer() {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
-enum MyVar {
-    X,
-    Y,
-    Z,
-    Theta,
-}
-
-impl MyVar {
-    fn parse(input: &str) -> Option<Self> {
-        match input {
-            "x" => Some(Self::X),
-            "y" => Some(Self::Y),
-            "z" => Some(Self::Z),
-            "theta" | "Θ" => Some(Self::Theta),
-            _ => None,
-        }
-    }
-}
-
-impl Display for MyVar {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MyVar::X => f.write_str("x"),
-            MyVar::Y => f.write_str("y"),
-            MyVar::Z => f.write_str("z"),
-            MyVar::Theta => f.write_str("Θ"),
-        }
-    }
-}
-
-struct MyStore([f64; 4]);
-
-impl VariableStore<f64, MyVar> for MyStore {
-    fn get(&self, var: MyVar) -> f64 {
-        match var {
-            MyVar::X => self.0[0],
-            MyVar::Y => self.0[1],
-            MyVar::Z => self.0[2],
-            MyVar::Theta => self.0[3],
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
-enum MyFunc {
-    Deg2Rad,
-    Clamp,
-    Digits,
-}
-
-impl MyFunc {
-    fn parse(input: &str) -> Option<(Self, u8, Option<u8>)> {
-        match input {
-            "deg2rad" => Some((MyFunc::Deg2Rad, 1, Some(1))),
-            "clamp" => Some((MyFunc::Clamp, 3, Some(3))),
-            "digits" => Some((MyFunc::Digits, 1, None)),
-            _ => None,
-        }
-    }
-    fn as_pointer(self) -> FunctionPointer<'static, f64> {
-        match self {
-            MyFunc::Deg2Rad => FunctionPointer::Single(|x: f64| x.to_radians()),
-            MyFunc::Clamp => {
-                FunctionPointer::Triple(|x: f64, min: f64, max: f64| x.min(max).max(min))
-            }
-            MyFunc::Digits => FunctionPointer::Flexible(|values: &[f64]| {
-                values
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &v)| 10f64.powi(i as i32) * v)
-                    .sum()
-            }),
-        }
-    }
-}
-
-impl Display for MyFunc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MyFunc::Deg2Rad => f.write_str("deg2rad"),
-            MyFunc::Clamp => f.write_str("clamp"),
-            MyFunc::Digits => f.write_str("digits"),
-        }
-    }
-}
-
 #[test]
 fn fuzz_parser() {
     fn rand_token() -> Token<String> {
         match fastrand::u8(0..8) {
-            0 => Token::Number(gen_random_f64().to_string()),
+            0 => Token::Number(rand_f64().to_string()),
             1 => Token::Operator(fastrand::choice(OprToken::iter()).unwrap()),
             2 => Token::Variable(fastrand::choice(MyVar::iter()).unwrap().to_string()),
             3 => Token::Function(if fastrand::u8(0..100) < 80 {
