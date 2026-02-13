@@ -22,7 +22,7 @@ fn fuzz_tokenizer() {
         let noise: String = (0..fastrand::u8(8..100))
             .map(|_| fastrand::char('\x00'..char::MAX))
             .collect();
-        if let Err(err) = std::panic::catch_unwind(|| {
+        if let Err(err) = panic::catch_unwind(|| {
             let _ = TokenStream::new(&noise);
         }) {
             println!("input: {noise:?}");
@@ -53,7 +53,7 @@ fn fuzz_parser() {
         }
     }
     fn tryinput(input: &[Token<String>]) -> Result<(), Box<dyn Any + Send + 'static>> {
-        std::panic::catch_unwind(|| {
+        panic::catch_unwind(|| {
             let _ = MathAst::new(&input, |_| None::<f64>, MyFunc::parse, MyVar::parse);
             let _ = MathAst::parse_and_eval(
                 &input,
@@ -79,13 +79,20 @@ fn fuzz_parser() {
 }
 
 #[test]
-fn fuzz_compile() {
+fn fuzz_quickexpr() {
     for size in 1..=3usize {
-        for _ in 0..1000 {
-            let input = rand_ast(5usize.pow(size as u32));
-            if let Err(pan) =
-                std::panic::catch_unwind(|| QuickExpr::new(input.clone(), MyFunc::as_pointer))
-            {
+        for _ in 0..700 {
+            let input = rand_ast(4usize.pow(size as u32));
+            if let Err(pan) = std::panic::catch_unwind(|| {
+                let expr = QuickExpr::new(input.clone(), MyFunc::as_pointer);
+                let Ok(stack_cap) = expr.stack_req_capacity() else {
+                    return;
+                };
+                let _ = expr.eval(
+                    MyStore([rand_f64(), rand_f64(), rand_f64(), rand_f64()]),
+                    &mut Vec::with_capacity(stack_cap),
+                );
+            }) {
                 eprintln!("input: {}", input);
                 eprintln!(
                     "input (debug format): {:?}",
