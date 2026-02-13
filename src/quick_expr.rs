@@ -456,6 +456,9 @@ where
                     CtxFuncPtr::Triple(func) => func(arg!(), arg!(), arg!()),
                     CtxFuncPtr::Flexible(func, argc) => {
                         // FIX: account for zero argc
+                        if stack.len() < argc as usize {
+                            return Err(OptExprEvalError::NotEnoughArgumentsInStack);
+                        }
                         removed += argc;
                         func(&stack[stack.len() - argc as usize..])
                     }
@@ -463,6 +466,9 @@ where
                     CtxFuncPtr::DynDual(func) => func(arg!(), arg!()),
                     CtxFuncPtr::DynTriple(func) => func(arg!(), arg!(), arg!()),
                     CtxFuncPtr::DynFlexible(func, argc) => {
+                        if stack.len() < argc as usize {
+                            return Err(OptExprEvalError::NotEnoughArgumentsInStack);
+                        }
                         removed += argc;
                         func(&stack[stack.len() - argc as usize..])
                     }
