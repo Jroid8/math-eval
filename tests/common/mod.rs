@@ -8,8 +8,6 @@ use math_eval::{
 };
 use strum::{EnumIter, IntoEnumIterator};
 
-use crate::rand_f64;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 pub(crate) enum MyVar {
     X,

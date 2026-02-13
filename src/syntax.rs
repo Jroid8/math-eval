@@ -395,6 +395,14 @@ where
                     })
                     .sum::<u8>()
                     >= 2
+                && self.0.children_iter(idx).any(|(node, idx)| match node {
+                    AstNode::Number(_) => false,
+                    AstNode::BinaryOp(_) => self
+                        .0
+                        .children_iter(idx)
+                        .any(|(n, _)| !matches!(n, AstNode::Number(_))),
+                    _ => true,
+                })
                 && !self.0.children_iter(idx).any(
                     |(arm, _)| matches!(arm, AstNode::BinaryOp(arm) if !can_simplify(head, *arm)),
                 )
@@ -459,18 +467,22 @@ where
             for idx in symbol_indices {
                 symbol_space.extend_from_tree(&self.0, idx);
             }
-            symbol_space.push(AstNode::BinaryOp(if s0_sign == s1_sign {
-                positive
-            } else {
-                negative
-            })).unwrap();
-            symbol_space.push(AstNode::BinaryOp(
-                if s0_sign == negative && s1_sign == negative {
-                    negative
-                } else {
+            symbol_space
+                .push(AstNode::BinaryOp(if s0_sign == s1_sign {
                     positive
-                },
-            )).unwrap();
+                } else {
+                    negative
+                }))
+                .unwrap();
+            symbol_space
+                .push(AstNode::BinaryOp(
+                    if s0_sign == negative && s1_sign == negative {
+                        negative
+                    } else {
+                        positive
+                    },
+                ))
+                .unwrap();
         } else {
             symbol_space.extend_from_tree(&self.0, s0_idx);
             symbol_space.push(AstNode::BinaryOp(s0_sign)).unwrap();
@@ -1552,6 +1564,22 @@ mod tests {
                 AstNode::Function(NativeFunction::Max.into(), 3),
                 AstNode::BinaryOp(BinaryOp::Sub),
                 AstNode::BinaryOp(BinaryOp::Add),
+            ]
+        );
+        assert_eq!(
+            simplify(&[
+                AstNode::Number(0.6),
+                AstNode::Number(0.4),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Number(0.6),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]),
+            vec![
+                AstNode::Number(0.6),
+                AstNode::Number(0.4),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Number(0.6),
+                AstNode::BinaryOp(BinaryOp::Sub),
             ]
         )
     }
