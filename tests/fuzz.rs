@@ -103,3 +103,22 @@ fn fuzz_quickexpr() {
         }
     }
 }
+
+#[test]
+fn fuzz_displacing_simplification() {
+    for size in 1..=3usize {
+        for _ in 0..1000 {
+            let expr = rand_ast(4usize.pow(size as u32));
+            if let Err(pan) = std::panic::catch_unwind(|| {
+                expr.clone().displacing_simplification();
+            }) {
+                eprintln!("input: {}", expr);
+                eprintln!(
+                    "input (debug format): {:?}",
+                    expr.into_tree().postorder_iter().collect::<Vec<_>>()
+                );
+                panic::resume_unwind(pan);
+            }
+        }
+    }
+}
