@@ -78,13 +78,22 @@ fn fuzz_parser() {
     }
 }
 
+fn report_ast_panic(input: MathAst<f64, MyVar, MyFunc>, pan: Box<dyn Any + Send + 'static>) -> ! {
+    eprintln!("input: {}", input);
+    eprintln!(
+        "input (debug format): {:?}",
+        input.into_tree().postorder_iter().collect::<Vec<_>>()
+    );
+    panic::resume_unwind(pan);
+}
+
 #[test]
 fn fuzz_quickexpr() {
     for size in 1..=3usize {
         for _ in 0..700 {
-            let input = rand_ast(4usize.pow(size as u32));
+            let expr = rand_ast(4usize.pow(size as u32));
             if let Err(pan) = std::panic::catch_unwind(|| {
-                let expr = QuickExpr::new(input.clone(), MyFunc::as_pointer);
+                let expr = QuickExpr::new(expr.clone(), MyFunc::as_pointer);
                 let Ok(stack_cap) = expr.stack_req_capacity() else {
                     return;
                 };
@@ -93,12 +102,7 @@ fn fuzz_quickexpr() {
                     &mut Vec::with_capacity(stack_cap),
                 );
             }) {
-                eprintln!("input: {}", input);
-                eprintln!(
-                    "input (debug format): {:?}",
-                    input.into_tree().postorder_iter().collect::<Vec<_>>()
-                );
-                panic::resume_unwind(pan);
+                report_ast_panic(expr, pan);
             }
         }
     }
@@ -112,12 +116,21 @@ fn fuzz_displacing_simplification() {
             if let Err(pan) = std::panic::catch_unwind(|| {
                 expr.clone().displacing_simplification();
             }) {
-                eprintln!("input: {}", expr);
-                eprintln!(
-                    "input (debug format): {:?}",
-                    expr.into_tree().postorder_iter().collect::<Vec<_>>()
-                );
-                panic::resume_unwind(pan);
+                report_ast_panic(expr, pan);
+            }
+        }
+    }
+}
+
+#[test]
+fn fuzz_aot_evaluation() {
+    for size in 1..=3usize {
+        for _ in 0..1000 {
+            let expr = rand_ast(4usize.pow(size as u32));
+            if let Err(pan) = std::panic::catch_unwind(|| {
+                expr.clone().aot_evaluation(MyFunc::as_pointer);
+            }) {
+                report_ast_panic(expr, pan);
             }
         }
     }
