@@ -135,3 +135,20 @@ fn fuzz_aot_evaluation() {
         }
     }
 }
+
+#[test]
+fn fuzz_ast_eval() {
+    for size in 1..=3usize {
+        for _ in 0..1000 {
+            let expr = rand_ast(4usize.pow(size as u32));
+            if let Err(pan) = std::panic::catch_unwind(|| {
+                expr.eval(
+                    MyFunc::as_pointer,
+                    &MyStore([rand_f64(), rand_f64(), rand_f64(), rand_f64()]),
+                );
+            }) {
+                report_ast_panic(expr, pan);
+            }
+        }
+    }
+}
