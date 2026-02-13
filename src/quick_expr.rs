@@ -287,6 +287,7 @@ where
         let mut args: Vec<InstrArg<N, V>> = Vec::new();
         let mut must_push = must_push.into_iter();
         for node in ast.into_tree().into_postorder_iter() {
+            let arg_stack = !matches!(node, AstNode::Number(_) | AstNode::Variable(_));
             let mut arg_cons = 0;
             match node {
                 AstNode::Number(num) => {
@@ -361,6 +362,8 @@ where
                         }
                     }
                 }
+            }
+            if arg_stack {
                 args.push(InstrArg::Stack);
             }
         }
@@ -703,6 +706,21 @@ mod tests {
                     Instr::Calculate(BinaryOp::Pow.into()),
                     Instr::Calculate(NativeFunction::Sin.as_markedfunc(0)),
                     Instr::Calculate(BinaryOp::Add.into())
+                ]
+            }
+        );
+        assert_eq!(
+            convert("min(5, t, 3) + 2"),
+            QuickExpr {
+                param_sources: vec![Source::Stack(0), Source::Literal,],
+                literals: vec![5.0, 3.0, 2.0],
+                variables: vec![TestVar::T],
+                instructions: vec![
+                    Instr::Push(Source::Literal),
+                    Instr::Push(Source::Variable),
+                    Instr::Push(Source::Literal),
+                    Instr::Calculate(NativeFunction::Min.as_markedfunc(3)),
+                    Instr::Calculate(BinaryOp::Add.into()),
                 ]
             }
         )
