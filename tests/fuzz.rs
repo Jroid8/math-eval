@@ -2,6 +2,7 @@ use std::{any::Any, panic};
 
 use math_eval::{
     number::NativeFunction,
+    quick_expr::QuickExpr,
     syntax::MathAst,
     tokenizer::{OprToken, Token, TokenStream},
 };
@@ -65,10 +66,31 @@ fn fuzz_parser() {
         })
     }
     for s in [1, 30, 100] {
-        for _ in 0..10000/s {
-            let input: Vec<Token<_>> = (0..fastrand::u16(s..s + 10)).map(|_| rand_token()).collect();
+        for _ in 0..1000 {
+            let input: Vec<Token<_>> = (0..fastrand::u16(s..s + 10))
+                .map(|_| rand_token())
+                .collect();
             if let Err(pan) = tryinput(&input) {
                 eprintln!("input: {input:?}");
+                panic::resume_unwind(pan);
+            }
+        }
+    }
+}
+
+#[test]
+fn fuzz_compile() {
+    for size in 1..=3usize {
+        for _ in 0..1000 {
+            let input = rand_ast(5usize.pow(size as u32));
+            if let Err(pan) =
+                std::panic::catch_unwind(|| QuickExpr::new(input.clone(), MyFunc::as_pointer))
+            {
+                eprintln!("input: {}", input);
+                eprintln!(
+                    "input (debug format): {:?}",
+                    input.into_tree().postorder_iter().collect::<Vec<_>>()
+                );
                 panic::resume_unwind(pan);
             }
         }

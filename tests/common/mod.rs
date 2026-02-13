@@ -183,12 +183,12 @@ impl AstGen {
         }
     }
 
-    fn rand_branch(&self) -> AstNode<f64, MyVar, MyFunc> {
+    fn rand_branch(&self, exclude_uniary: bool) -> AstNode<f64, MyVar, MyFunc> {
         let cap = self.orphans.min(CHILD_COUNT_WEIGHTS.len()) as usize;
-        let selection = if self.rem_nodes > 0 {
-            &CHILD_COUNT_WEIGHTS[..cap]
-        } else {
+        let selection = if exclude_uniary {
             &CHILD_COUNT_WEIGHTS[1..cap]
+        } else {
+            &CHILD_COUNT_WEIGHTS[..cap]
         };
         match *weighted_choice(selection).unwrap() {
             1 => match fastrand::u8(0..10) {
@@ -247,7 +247,7 @@ impl Iterator for AstGen {
         if self.rem_nodes > 0 {
             self.rem_nodes -= 1;
             if fastrand::f32() < self.branch_chance() {
-                let node = self.rand_branch();
+                let node = self.rand_branch(false);
                 self.orphans -= node.children() - 1;
                 Some(node)
             } else {
@@ -256,7 +256,7 @@ impl Iterator for AstGen {
             }
         } else {
             if self.orphans > 1 {
-                let node = self.rand_branch();
+                let node = self.rand_branch(true);
                 self.orphans -= node.children() - 1;
                 Some(node)
             } else {
