@@ -8,12 +8,15 @@ use math_eval::{
 };
 use strum::{EnumIter, IntoEnumIterator};
 
+pub fn rand_f64() -> f64 {
+    (fastrand::f64() - 0.5) * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 pub(crate) enum MyVar {
     X,
     Y,
-    Z,
-    T,
+    Sigma,
 }
 
 impl MyVar {
@@ -21,8 +24,7 @@ impl MyVar {
         match input {
             "x" => Some(Self::X),
             "y" => Some(Self::Y),
-            "z" => Some(Self::Z),
-            "t" => Some(Self::T),
+            "σ" => Some(Self::Sigma),
             _ => None,
         }
     }
@@ -33,21 +35,33 @@ impl Display for MyVar {
         match self {
             MyVar::X => f.write_str("x"),
             MyVar::Y => f.write_str("y"),
-            MyVar::Z => f.write_str("z"),
-            MyVar::T => f.write_str("t"),
+            MyVar::Sigma => f.write_str("σ"),
         }
     }
 }
 
-pub(crate) struct MyStore(pub(crate) [f64; 4]);
+pub(crate) struct MyStore {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) sigma: f64,
+}
+
+impl MyStore {
+    pub(crate) fn randomize() -> MyStore {
+        MyStore {
+            x: rand_f64(),
+            y: rand_f64(),
+            sigma: rand_f64(),
+        }
+    }
+}
 
 impl VariableStore<f64, MyVar> for MyStore {
     fn get(&self, var: MyVar) -> f64 {
         match var {
-            MyVar::X => self.0[0],
-            MyVar::Y => self.0[1],
-            MyVar::Z => self.0[2],
-            MyVar::T => self.0[3],
+            MyVar::X => self.x,
+            MyVar::Y => self.y,
+            MyVar::Sigma => self.sigma,
         }
     }
 }

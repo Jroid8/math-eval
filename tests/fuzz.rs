@@ -8,13 +8,9 @@ use math_eval::{
 };
 use strum::IntoEnumIterator;
 
-use crate::common::{MyFunc, MyStore, MyVar, rand_ast};
+use crate::common::{MyFunc, MyStore, MyVar, rand_ast, rand_f64};
 
 mod common;
-
-fn rand_f64() -> f64 {
-    (fastrand::f64() - 0.5) * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
-}
 
 #[test]
 fn fuzz_tokenizer() {
@@ -60,7 +56,7 @@ fn fuzz_parser() {
                 |_| None::<f64>,
                 MyFunc::parse,
                 MyVar::parse,
-                &MyStore([3., 5., 1., 0.8]),
+                &MyStore::randomize(),
                 MyFunc::as_pointer,
             );
         })
@@ -97,10 +93,7 @@ fn fuzz_quickexpr() {
                 let Ok(stack_cap) = expr.stack_req_capacity() else {
                     return;
                 };
-                let _ = expr.eval(
-                    MyStore([rand_f64(), rand_f64(), rand_f64(), rand_f64()]),
-                    &mut Vec::with_capacity(stack_cap),
-                );
+                let _ = expr.eval(MyStore::randomize(), &mut Vec::with_capacity(stack_cap));
             }) {
                 report_ast_panic(expr, pan);
             }
@@ -142,10 +135,7 @@ fn fuzz_ast_eval() {
         for _ in 0..1000 {
             let expr = rand_ast(4usize.pow(size as u32));
             if let Err(pan) = std::panic::catch_unwind(|| {
-                expr.eval(
-                    MyFunc::as_pointer,
-                    &MyStore([rand_f64(), rand_f64(), rand_f64(), rand_f64()]),
-                );
+                expr.eval(MyFunc::as_pointer, &MyStore::randomize());
             }) {
                 report_ast_panic(expr, pan);
             }
