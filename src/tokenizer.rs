@@ -135,12 +135,12 @@ fn recognize(input: char) -> Option<CharNotion> {
         '^' => Some(CharNotion::Operation(OprChar::Power)),
         '%' => Some(CharNotion::Operation(OprChar::Percent)),
         '!' => Some(CharNotion::Operation(OprChar::Exclamation)),
-        'a'..='z' | 'A'..='Z' => Some(CharNotion::Alphabet),
         '(' | '[' | '{' => Some(CharNotion::OpenParen),
         ')' | ']' | '}' => Some(CharNotion::CloseParen),
         ',' => Some(CharNotion::Comma),
         ' ' | '\x09'..='\x0d' => Some(CharNotion::Space),
         '|' => Some(CharNotion::Pipe),
+        ch if ch.is_alphabetic() => Some(CharNotion::Alphabet),
         _ => None,
     }
 }
@@ -416,11 +416,11 @@ mod tests {
         );
         assert_eq!(TokenStream::new(".5"), Ok(TokenStream(vec![Number(".5")])));
         assert_eq!(
-            TokenStream::new("theta+phi"),
+            TokenStream::new("θ+τ"),
             Ok(TokenStream(vec![
-                Variable("theta"),
+                Variable("θ"),
                 Operator(OprToken::Plus),
-                Variable("phi")
+                Variable("τ")
             ]))
         );
         assert_eq!(
@@ -450,7 +450,6 @@ mod tests {
         assert_eq!(TokenStream::new("="), Err(TokenizationError(0)));
         assert_eq!(TokenStream::new("99$"), Err(TokenizationError(2)));
         assert_eq!(TokenStream::new("@3"), Err(TokenizationError(0)));
-        assert_eq!(TokenStream::new("10+ت"), Err(TokenizationError(3)));
         assert_eq!(TokenStream::new("."), Err(TokenizationError(0)));
     }
 }
