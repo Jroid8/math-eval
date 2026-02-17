@@ -154,13 +154,13 @@ impl SyntaxError {
 }
 
 impl From<NotEnoughOrphans> for SyntaxError {
-    fn from(value: NotEnoughOrphans) -> Self {
+    fn from(_: NotEnoughOrphans) -> Self {
         SyntaxError(SyntaxErrorKind::UnknownError, 0..=0)
     }
 }
 
 impl From<MultipleRoots> for SyntaxError {
-    fn from(value: MultipleRoots) -> Self {
+    fn from(_: MultipleRoots) -> Self {
         SyntaxError(SyntaxErrorKind::UnknownError, 0..=0)
     }
 }
@@ -563,7 +563,7 @@ where
                 NodeEdge::Start(AstNode::Variable(var), _) => <V as Display>::fmt(var, f)?,
                 NodeEdge::Start(AstNode::UnaryOp(UnaryOp::Neg), _) => f.write_str("-")?,
                 NodeEdge::Start(AstNode::Function(func, _), _) => write!(f, "{func}(")?,
-                NodeEdge::End(AstNode::UnaryOp(UnaryOp::Fac), idx) => f.write_str("!")?,
+                NodeEdge::End(AstNode::UnaryOp(UnaryOp::Fac), _) => f.write_str("!")?,
                 NodeEdge::End(AstNode::Function(_, _), _) => f.write_str(")")?,
                 _ => (),
             }
@@ -579,7 +579,7 @@ where
                 }
             }
             if let NodeEdge::End(_, idx) = edge
-                && let Some((AstNode::Function(func, argc), p)) =
+                && let Some((AstNode::Function(_, argc), p)) =
                     self.0.parent(idx).map(|p| (&self.0[p], p))
                 && self.0.nth_child(p, *argc as usize - 1).unwrap() != idx
             {

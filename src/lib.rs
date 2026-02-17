@@ -1,4 +1,3 @@
-#![allow(unused_variables)]
 use std::{
     collections::HashMap,
     fmt::{Debug, Display},

@@ -121,7 +121,7 @@ impl<T: Node> Entry<T> {
     /// `new` expects.
     pub fn calc_descendents(previous: &[Entry<T>], new: &T) -> usize {
         let mut dc = 0;
-        for ac in 0..new.children() {
+        for _ in 0..new.children() {
             dc += previous[previous
                 .len()
                 .checked_sub(dc + 1)
