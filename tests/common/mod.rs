@@ -9,7 +9,7 @@ use math_eval::{
 use strum::{EnumIter, IntoEnumIterator};
 
 pub fn rand_f64() -> f64 {
-    (fastrand::f64() - 0.5) * 10f64.powi(fastrand::i32(0..=f64::MANTISSA_DIGITS as i32))
+    f64::from_bits(fastrand::u64(..))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
