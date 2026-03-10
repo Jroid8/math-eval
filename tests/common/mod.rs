@@ -68,7 +68,7 @@ impl VariableStore<f64, MyVar> for MyStore {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 pub(crate) enum MyFunc {
-    Deg2Rad,
+    Sigmoid,
     Clamp,
     Digits,
 }
@@ -76,7 +76,7 @@ pub(crate) enum MyFunc {
 impl MyFunc {
     pub(crate) fn parse(input: &str) -> Option<(Self, u8, Option<u8>)> {
         match input {
-            "deg2rad" => Some((MyFunc::Deg2Rad, 1, Some(1))),
+            "sigmoid" => Some((MyFunc::Sigmoid, 1, Some(1))),
             "clamp" => Some((MyFunc::Clamp, 3, Some(3))),
             "digits" => Some((MyFunc::Digits, 1, None)),
             _ => None,
@@ -85,7 +85,7 @@ impl MyFunc {
 
     pub(crate) fn as_pointer(self) -> FunctionPointer<'static, f64> {
         match self {
-            MyFunc::Deg2Rad => FunctionPointer::Single(|x: f64| x.to_radians()),
+            MyFunc::Sigmoid => FunctionPointer::Single(|x: f64| 1.0 / (1.0 + (-x).exp())),
             MyFunc::Clamp => {
                 FunctionPointer::Triple(|x: f64, min: f64, max: f64| x.min(max).max(min))
             }
@@ -103,7 +103,7 @@ impl MyFunc {
 impl Display for MyFunc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MyFunc::Deg2Rad => f.write_str("deg2rad"),
+            MyFunc::Sigmoid => f.write_str("sigmoid"),
             MyFunc::Clamp => f.write_str("clamp"),
             MyFunc::Digits => f.write_str("digits"),
         }
@@ -157,10 +157,10 @@ fn rand_nf_1p() -> NativeFunction {
 }
 
 fn rand_unaryop() -> UnaryOp {
-    match fastrand::u8(0..10) {
-        0..6 => UnaryOp::Neg,
-        6..9 => UnaryOp::Fac,
-        9 => UnaryOp::DoubleFac,
+    match fastrand::u8(0..20) {
+        0..16 => UnaryOp::Neg,
+        16..19 => UnaryOp::Fac,
+        19 => UnaryOp::DoubleFac,
         _ => unreachable!(),
     }
 }
@@ -206,7 +206,7 @@ impl AstGen {
             1 => match fastrand::u8(0..10) {
                 0..6 => AstNode::Function(FunctionType::Native(rand_nf_1p()), 1),
                 6..9 => AstNode::UnaryOp(rand_unaryop()),
-                9 => AstNode::Function(FunctionType::Custom(MyFunc::Deg2Rad), 1),
+                9 => AstNode::Function(FunctionType::Custom(MyFunc::Sigmoid), 1),
                 _ => unreachable!(),
             },
             2 => {
