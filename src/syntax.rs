@@ -492,7 +492,7 @@ where
     }
 }
 
-fn parenthesis_required<N, V, F>(
+pub fn parenthesis_required<N, V, F>(
     tree: &PostfixTree<AstNode<N, V, F>>,
     parent: usize,
     target: usize,
@@ -549,27 +549,26 @@ where
     F: FunctionIdentifier + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for edge in self.0.euler_tour() {
-            if let Some(p) = self.0.parent(edge.index())
-                && parenthesis_required(&self.0, p, edge.index())
+        for (node, edge, idx) in self.0.euler_tour() {
+            if let Some(p) = self.0.parent(idx)
+                && parenthesis_required(&self.0, p, idx)
             {
                 match edge {
-                    NodeEdge::Start(_, _) => f.write_str("(")?,
-                    NodeEdge::End(_, _) => f.write_str(")")?,
+                    NodeEdge::Start => f.write_str("(")?,
+                    NodeEdge::End => f.write_str(")")?,
                 }
             }
-            match edge {
-                NodeEdge::Start(AstNode::Number(num), _) => <N as Display>::fmt(num, f)?,
-                NodeEdge::Start(AstNode::Variable(var), _) => <V as Display>::fmt(var, f)?,
-                NodeEdge::Start(AstNode::UnaryOp(UnaryOp::Neg), _) => f.write_str("-")?,
-                NodeEdge::Start(AstNode::Function(func, _), _) => write!(f, "{func}(")?,
-                NodeEdge::End(AstNode::UnaryOp(UnaryOp::Fac), _) => f.write_str("!")?,
-                NodeEdge::End(AstNode::Function(_, _), _) => f.write_str(")")?,
+            match (node, edge) {
+                (AstNode::Number(num), NodeEdge::Start) => <N as Display>::fmt(num, f)?,
+                (AstNode::Variable(var), NodeEdge::Start) => <V as Display>::fmt(var, f)?,
+                (AstNode::UnaryOp(UnaryOp::Neg), NodeEdge::Start) => f.write_str("-")?,
+                (AstNode::Function(func, _), NodeEdge::Start) => write!(f, "{func}(")?,
+                (AstNode::UnaryOp(UnaryOp::Fac), NodeEdge::End) => f.write_str("!")?,
+                (AstNode::Function(_, _), NodeEdge::End) => f.write_str(")")?,
                 _ => (),
             }
-            if let NodeEdge::End(_, idx) = edge
-                && let Some((AstNode::BinaryOp(opr), p)) =
-                    self.0.parent(idx).map(|p| (&self.0[p], p))
+            if let Some((AstNode::BinaryOp(opr), p)) = self.0.parent(idx).map(|p| (&self.0[p], p))
+                && edge == NodeEdge::End
                 && self.0.nth_child(p, 0) == Some(idx)
             {
                 if matches!(opr, BinaryOp::Add | BinaryOp::Sub) {
@@ -578,10 +577,10 @@ where
                     write!(f, "{opr}")?;
                 }
             }
-            if let NodeEdge::End(_, idx) = edge
-                && let Some((AstNode::Function(_, argc), p)) =
-                    self.0.parent(idx).map(|p| (&self.0[p], p))
+            if let Some((AstNode::Function(_, argc), p)) =
+                self.0.parent(idx).map(|p| (&self.0[p], p))
                 && self.0.nth_child(p, *argc as usize - 1).unwrap() != idx
+                && edge == NodeEdge::End
             {
                 f.write_str(", ")?;
             }

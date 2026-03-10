@@ -131,27 +131,9 @@ enum CurrentNodeEdge {
 
 // Inspired by indextree's traverse
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NodeEdge<'a, T: Node> {
-    Start(&'a T, usize),
-    End(&'a T, usize),
-}
-
-impl<'a, T: Node> NodeEdge<'a, T> {
-    #[inline]
-    pub fn node(&self) -> &'a T {
-        match self {
-            NodeEdge::Start(node, _) => node,
-            NodeEdge::End(node, _) => node,
-        }
-    }
-
-    #[inline]
-    pub fn index(&self) -> usize {
-        match self {
-            NodeEdge::Start(_, idx) => *idx,
-            NodeEdge::End(_, idx) => *idx,
-        }
-    }
+pub enum NodeEdge {
+    Start,
+    End,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -174,7 +156,7 @@ impl<'a, T: Node> EulerTour<'a, T> {
 }
 
 impl<'a, T: Node> Iterator for EulerTour<'a, T> {
-    type Item = NodeEdge<'a, T>;
+    type Item = (&'a T, NodeEdge, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         let next = match self.current {
@@ -202,8 +184,8 @@ impl<'a, T: Node> Iterator for EulerTour<'a, T> {
         };
         self.progress += 1;
         match std::mem::replace(&mut self.current, next) {
-            CurrentNodeEdge::Start(idx) => Some(NodeEdge::Start(&self.tree[idx], idx)),
-            CurrentNodeEdge::End(idx) => Some(NodeEdge::End(&self.tree[idx], idx)),
+            CurrentNodeEdge::Start(idx) => Some((&self.tree[idx], NodeEdge::Start, idx)),
+            CurrentNodeEdge::End(idx) => Some((&self.tree[idx], NodeEdge::End, idx)),
             CurrentNodeEdge::Done => None,
         }
     }
@@ -250,65 +232,65 @@ mod tests {
         let collect_tour = |head| tree.euler_tour_subtree(head).collect::<Vec<_>>();
         assert_eq!(
             collect_tour(0),
-            vec![NodeEdge::Start(&0, 0), NodeEdge::End(&0, 0)]
+            vec![(&0, NodeEdge::Start, 0), (&0, NodeEdge::End, 0)]
         );
         assert_eq!(
             collect_tour(3),
             vec![
-                NodeEdge::Start(&2, 3),
-                NodeEdge::Start(&0, 1),
-                NodeEdge::End(&0, 1),
-                NodeEdge::Start(&0, 2),
-                NodeEdge::End(&0, 2),
-                NodeEdge::End(&2, 3),
+                (&2, NodeEdge::Start, 3),
+                (&0, NodeEdge::Start, 1),
+                (&0, NodeEdge::End, 1),
+                (&0, NodeEdge::Start, 2),
+                (&0, NodeEdge::End, 2),
+                (&2, NodeEdge::End, 3),
             ]
         );
         assert_eq!(
             collect_tour(8),
             vec![
-                NodeEdge::Start(&2, 8),
-                NodeEdge::Start(&1, 5),
-                NodeEdge::Start(&0, 4),
-                NodeEdge::End(&0, 4),
-                NodeEdge::End(&1, 5),
-                NodeEdge::Start(&1, 7),
-                NodeEdge::Start(&0, 6),
-                NodeEdge::End(&0, 6),
-                NodeEdge::End(&1, 7),
-                NodeEdge::End(&2, 8),
+                (&2, NodeEdge::Start, 8),
+                (&1, NodeEdge::Start, 5),
+                (&0, NodeEdge::Start, 4),
+                (&0, NodeEdge::End, 4),
+                (&1, NodeEdge::End, 5),
+                (&1, NodeEdge::Start, 7),
+                (&0, NodeEdge::Start, 6),
+                (&0, NodeEdge::End, 6),
+                (&1, NodeEdge::End, 7),
+                (&2, NodeEdge::End, 8),
             ]
         );
         assert_eq!(
             collect_tour(13),
             vec![
-                NodeEdge::Start(&4, 13),
-                NodeEdge::Start(&0, 0),
-                NodeEdge::End(&0, 0),
-                NodeEdge::Start(&2, 3),
-                NodeEdge::Start(&0, 1),
-                NodeEdge::End(&0, 1),
-                NodeEdge::Start(&0, 2),
-                NodeEdge::End(&0, 2),
-                NodeEdge::End(&2, 3),
-                NodeEdge::Start(&2, 8),
-                NodeEdge::Start(&1, 5),
-                NodeEdge::Start(&0, 4),
-                NodeEdge::End(&0, 4),
-                NodeEdge::End(&1, 5),
-                NodeEdge::Start(&1, 7),
-                NodeEdge::Start(&0, 6),
-                NodeEdge::End(&0, 6),
-                NodeEdge::End(&1, 7),
-                NodeEdge::End(&2, 8),
-                NodeEdge::Start(&3, 12),
-                NodeEdge::Start(&0, 9),
-                NodeEdge::End(&0, 9),
-                NodeEdge::Start(&0, 10),
-                NodeEdge::End(&0, 10),
-                NodeEdge::Start(&0, 11),
-                NodeEdge::End(&0, 11),
-                NodeEdge::End(&3, 12),
-                NodeEdge::End(&4, 13),
+                (&4, NodeEdge::Start, 13),
+                (&0, NodeEdge::Start, 0),
+                (&0, NodeEdge::End, 0),
+                (&2, NodeEdge::Start, 3),
+                (&0, NodeEdge::Start, 1),
+                (&0, NodeEdge::End, 1),
+                (&0, NodeEdge::Start, 2),
+                (&0, NodeEdge::End, 2),
+                (&2, NodeEdge::End, 3),
+                (&2, NodeEdge::Start, 8),
+                (&1, NodeEdge::Start, 5),
+                (&0, NodeEdge::Start, 4),
+                (&0, NodeEdge::End, 4),
+                (&1, NodeEdge::End, 5),
+                (&1, NodeEdge::Start, 7),
+                (&0, NodeEdge::Start, 6),
+                (&0, NodeEdge::End, 6),
+                (&1, NodeEdge::End, 7),
+                (&2, NodeEdge::End, 8),
+                (&3, NodeEdge::Start, 12),
+                (&0, NodeEdge::Start, 9),
+                (&0, NodeEdge::End, 9),
+                (&0, NodeEdge::Start, 10),
+                (&0, NodeEdge::End, 10),
+                (&0, NodeEdge::Start, 11),
+                (&0, NodeEdge::End, 11),
+                (&3, NodeEdge::End, 12),
+                (&4, NodeEdge::End, 13),
             ]
         );
     }
