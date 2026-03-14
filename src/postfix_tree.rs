@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    io,
     ops::{Index, Range},
 };
 
@@ -366,6 +367,21 @@ impl<T: Node> PostfixTree<T> {
 
     pub fn next_sibling(&self, idx: usize) -> Option<usize> {
         Entry::find_next_sibling(&self.0, idx)
+    }
+
+    pub fn debug_dot(&self, wtr: &mut impl io::Write) -> io::Result<()> {
+        writeln!(wtr, "graph G {{\n\tnode [shape=\"rect\"]")?;
+        for idx in 0..self.len() {
+            writeln!(wtr, "\t{idx} [label=\"{:?}\"]", self.0[idx].node)?
+        }
+        writeln!(wtr)?;
+        for head in 0..self.len() {
+            for (_, child) in self.children_iter(head) {
+                writeln!(wtr, "\t{head} -- {child}")?;
+            }
+        }
+        write!(wtr, "}}")?;
+        Ok(())
     }
 }
 
