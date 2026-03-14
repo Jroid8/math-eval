@@ -203,7 +203,7 @@ pub enum ParsingErrorKind {
     EmptyInput,
     EmptyPipeAbs,
     NameTooLong,
-    UnknownError
+    UnknownError,
 }
 
 impl Display for ParsingErrorKind {
@@ -228,8 +228,8 @@ impl Display for ParsingErrorKind {
             ParsingErrorKind::NameTooLong => "Identifier exceeds maximum length of 32 characters.",
             ParsingErrorKind::EmptyPipeAbs => {
                 "Pairs of vertical bars for the absolute value shouldn not be empty"
-            },
-            Self::UnknownError => "Unknown error"
+            }
+            Self::UnknownError => "Unknown error",
         })
     }
 }
@@ -351,15 +351,15 @@ pub fn evaluate<'a, 'b, N: Number, V: VariableIdentifier, F: FunctionIdentifier>
     variable_values: &impl VariableStore<N, V>,
 ) -> Result<N, ParsingError> {
     let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
-    match MathAst::new(
+    MathAst::parse_and_eval(
         &token_stream.0,
         custom_constant_parser,
         custom_function_parser,
         custom_variable_parser,
-    ) {
-        Ok(s) => Ok(s.eval(function_to_pointer, variable_values)),
-        Err(e) => Err(e.to_general(input, &token_stream.0)),
-    }
+        variable_values,
+        function_to_pointer,
+    )
+    .map_err(|e| e.to_general(input, &token_stream.0))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
