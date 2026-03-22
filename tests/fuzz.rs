@@ -93,7 +93,7 @@ fn fuzz_quickexpr() {
                 let Ok(stack_cap) = expr.stack_req_capacity() else {
                     return;
                 };
-                let _ = expr.eval(MyStore::randomize(), &mut Vec::with_capacity(stack_cap));
+                let _ = expr.eval(&MyStore::randomize(), &mut Vec::with_capacity(stack_cap));
             }) {
                 report_ast_panic(expr, pan);
             }

@@ -420,7 +420,7 @@ where
 
     pub fn eval(
         &self,
-        variable_values: impl VariableStore<N, V>,
+        variable_values: &impl VariableStore<N, V>,
         stack: &mut Vec<N>,
     ) -> Result<N, OptExprEvalError> {
         let mut param_sources = self.param_sources.iter().copied();
@@ -436,7 +436,7 @@ where
                         .resolve(
                             &mut literals,
                             &mut variables,
-                            &variable_values,
+                            variable_values,
                             &stack,
                             &mut removed,
                         )?
@@ -446,7 +446,7 @@ where
                 Instr::Push(src) => src.resolve_owned(
                     &mut literals,
                     &mut variables,
-                    &variable_values,
+                    variable_values,
                     stack,
                     &mut removed,
                 )?,
@@ -790,7 +790,7 @@ mod tests {
                 variables,
                 instructions,
             }
-            .eval(TestStore, &mut Vec::new())
+            .eval(&TestStore, &mut Vec::new())
             .unwrap()
         }
 

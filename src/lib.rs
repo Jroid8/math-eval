@@ -567,7 +567,7 @@ where
             |idx| self.functions[idx],
         )?;
         let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
-        Ok(move || expr.eval((), &mut stack).unwrap())
+        Ok(move || expr.eval(&(), &mut stack).unwrap())
     }
 }
 
@@ -610,7 +610,7 @@ where
             |idx| self.functions[idx],
         )?;
         let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
-        Ok(move |v0| expr.eval((v0,), &mut stack).unwrap())
+        Ok(move |v0| expr.eval(&(v0,), &mut stack).unwrap())
     }
 }
 
@@ -664,7 +664,7 @@ macro_rules! fn_build_as_function {
                     |idx| self.functions[idx],
                 )?;
                 let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
-                Ok(move |#(v~I,)*| expr.eval([#(v~I,)*], &mut stack).unwrap())
+                Ok(move |#(v~I,)*| expr.eval(&[#(v~I,)*], &mut stack).unwrap())
             }
         });
     };
@@ -782,7 +782,7 @@ where
             |idx| self.functions[idx],
         )?;
         let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
-        Ok(move |vars| expr.eval(vars, &mut stack).unwrap())
+        Ok(move |vars| expr.eval(&vars, &mut stack).unwrap())
     }
 }
 

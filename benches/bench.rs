@@ -95,7 +95,7 @@ fn matheval_calc_bencher(b: &mut Bencher<'_>, ast: &MathAst<f64, MyVar, MyFunc>)
     let mut stack = Vec::with_capacity(qexpr.stack_req_capacity().unwrap());
     let (mut x, mut y, mut t) = (0.0, 0.0, 0.0);
     b.iter(|| {
-        black_box(qexpr.eval(MyStore { x, y, t }, &mut stack).unwrap());
+        black_box(qexpr.eval(&MyStore { x, y, t }, &mut stack).unwrap());
         x += 1.0;
         y -= 1.0;
         t += 0.0625;
