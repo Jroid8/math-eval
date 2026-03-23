@@ -181,10 +181,9 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut dbg = f.debug_tuple("MarkedFunc");
+        dbg.field(&self.func);
         #[cfg(debug_assertions)]
         dbg.field(&self.src);
-        #[cfg(not(debug_assertions))]
-        dbg.field(&self.func);
         dbg.finish()
     }
 }
