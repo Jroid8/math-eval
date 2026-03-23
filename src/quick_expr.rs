@@ -262,7 +262,7 @@ where
     ) -> Self {
         let tree = ast.as_tree();
         let is_flex = |n: usize| match tree[n] {
-            AstNode::Function(FunctionType::Native(nf), _) => !nf.is_fixed(),
+            AstNode::Function(FunctionType::Native(nf), _) => nf.is_flex(),
             AstNode::Function(FunctionType::Custom(cf), _) => matches!(
                 function_to_pointer(cf),
                 FunctionPointer::Flexible(_) | FunctionPointer::DynFlexible(_)
@@ -286,13 +286,15 @@ where
         let mut args: Vec<InstrArg<N, V>> = Vec::new();
         let mut must_push = must_push.into_iter();
         for node in ast.into_tree().into_postorder_iter() {
-            let arg_stack = !matches!(node, AstNode::Number(_) | AstNode::Variable(_));
+            let calculates = !matches!(node, AstNode::Number(_) | AstNode::Variable(_));
+            let mut stack_exclusive = false;
             let mut arg_cons = 0;
             match node {
                 AstNode::Number(num) => {
                     if must_push.next().unwrap() {
                         literals.push(num);
-                        instructions.push(Instr::Push(Source::Literal))
+                        instructions.push(Instr::Push(Source::Literal));
+                        args.push(InstrArg::Stack);
                     } else {
                         args.push(InstrArg::Literal(num));
                     }
@@ -301,6 +303,7 @@ where
                     if must_push.next().unwrap() {
                         variables.push(var);
                         instructions.push(Instr::Push(Source::Variable));
+                        args.push(InstrArg::Stack);
                     } else {
                         args.push(InstrArg::Variable(var));
                     }
@@ -320,9 +323,10 @@ where
                     )));
                 }
                 AstNode::Function(FunctionType::Native(nf), argc) => {
-                    if nf.is_fixed() {
-                        arg_cons = argc;
+                    if nf.is_flex() {
+                        stack_exclusive = true;
                     }
+                    arg_cons = argc;
                     instructions.push(Instr::Calculate(MarkedFunc::new(
                         CtxFuncPtr::from_ptr_args(nf.into(), argc),
                         FunctionSource::NativeFunction(nf),
@@ -330,16 +334,21 @@ where
                 }
                 AstNode::Function(FunctionType::Custom(cf), argc) => {
                     let ptr = function_to_pointer(cf);
-                    if ptr.is_fixed() {
-                        arg_cons = argc;
+                    if ptr.is_flex() {
+                        stack_exclusive = true;
                     }
+                    arg_cons = argc;
                     instructions.push(Instr::Calculate(MarkedFunc::new(
                         CtxFuncPtr::from_ptr_args(ptr, argc),
                         FunctionSource::CustomFunction(cf),
                     )));
                 }
             }
-            if arg_cons > 0 {
+            if stack_exclusive {
+                for _ in 0..arg_cons {
+                    assert!(matches!(args.pop(), Some(InstrArg::Stack)))
+                }
+            } else {
                 let range = args.len() - arg_cons as usize..;
                 let mut stack_offset = args[range.clone()]
                     .iter()
@@ -362,10 +371,11 @@ where
                     }
                 }
             }
-            if arg_stack {
+            if calculates {
                 args.push(InstrArg::Stack);
             }
         }
+        assert_eq!(args.len(), 1);
         QuickExpr {
             param_sources,
             literals,

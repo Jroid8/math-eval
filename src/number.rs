@@ -136,8 +136,8 @@ impl NativeFunction {
             },
         }
     }
-    pub fn is_fixed(self) -> bool {
-        !matches!(self, NativeFunction::Min | NativeFunction::Max)
+    pub fn is_flex(self) -> bool {
+        matches!(self, NativeFunction::Min | NativeFunction::Max)
     }
     pub fn min_args(self) -> u8 {
         match self {

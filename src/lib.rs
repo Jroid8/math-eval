@@ -314,8 +314,8 @@ impl<N: Number> From<UnaryOp> for FunctionPointer<'static, N> {
 }
 
 impl<N: Number> FunctionPointer<'_, N> {
-    fn is_fixed(&self) -> bool {
-        !matches!(
+    fn is_flex(&self) -> bool {
+        matches!(
             self,
             FunctionPointer::Flexible(_) | FunctionPointer::DynFlexible(_)
         )
