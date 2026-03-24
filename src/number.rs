@@ -389,8 +389,11 @@ impl Number for f64 {
 
     fn factorial(value: Self) -> Self {
         // FIX: replace with gamma function
-        if value.is_infinite() || value < 0.0 || value >= u32::MAX as f64 || value.is_nan() {
+        if value.is_infinite() || value < 0.0 || value.is_nan() {
             return f64::NAN;
+        }
+        if value >= 171.0 {
+            return f64::INFINITY;
         }
         let mut result = 1.0;
         let mut k = value as u32;
@@ -402,8 +405,11 @@ impl Number for f64 {
     }
 
     fn double_factorial(value: Self) -> Self {
-        if value.is_infinite() || value < 0.0 || value >= u32::MAX as f64 || value.is_nan() {
+        if value.is_infinite() || value < 0.0 || value.is_nan() {
             return f64::NAN;
+        }
+        if value >= 301.0 {
+            return f64::INFINITY;
         }
         let mut result = 1.0;
         let mut k = value as u32;
