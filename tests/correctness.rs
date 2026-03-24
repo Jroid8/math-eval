@@ -1,13 +1,17 @@
-use std::{f64::consts::PI, ops::RangeInclusive};
+use std::{f64::consts::PI, fmt::Display, ops::RangeInclusive};
 
 use fastrand_contrib::f64_range;
 use math_eval::{
     FunctionPointer, VariableStore, quick_expr::QuickExpr, syntax::MathAst, tokenizer::TokenStream,
 };
 
+use crate::common::{AstGen, rand_f64};
+
+mod common;
+
 #[test]
-fn correctness() {
-    for case in CASES {
+fn correctness_baseline() {
+    for case in BASELINE_CASES {
         case.perform();
     }
 }
@@ -27,6 +31,16 @@ impl MyVar {
             "σ" => Some(MyVar::Sigma),
             _ => None,
         }
+    }
+}
+
+impl Display for MyVar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            MyVar::X => "x",
+            MyVar::Y => "y",
+            MyVar::Sigma => "σ",
+        })
     }
 }
 
@@ -88,6 +102,17 @@ impl MyFunc {
     }
 }
 
+impl Display for MyFunc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            MyFunc::Rad2Deg => "rad2deg",
+            MyFunc::Average => "avg",
+            MyFunc::Random => "rand",
+            MyFunc::Terra => "terra",
+        })
+    }
+}
+
 struct CtxfulMyFuncs {
     rand: Box<dyn Fn(f64) -> f64>,
     terra: Box<dyn Fn(f64, f64) -> f64>,
@@ -143,7 +168,7 @@ fn parse_consts(input: &str) -> Option<f64> {
     }
 }
 
-struct TestCase {
+struct BaselineTestCase {
     rust_func: fn(f64, f64, f64, &CtxfulMyFuncs) -> f64,
     str_expr: &'static str,
     x_range: RangeInclusive<f64>,
@@ -153,7 +178,7 @@ struct TestCase {
 
 const TOLERANCE: f64 = f64::EPSILON * 4.0;
 
-impl TestCase {
+impl BaselineTestCase {
     fn perform(&self) {
         let ast = MathAst::new(
             &TokenStream::new(self.str_expr).unwrap(),
@@ -195,50 +220,50 @@ impl TestCase {
     }
 }
 
-const CASES: [TestCase; 7] = [
-    TestCase {
+const BASELINE_CASES: [BaselineTestCase; 7] = [
+    BaselineTestCase {
         rust_func: expr1,
         str_expr: "cos(x*pi/10*(1.3+sin(σ/10))+sin(y*pi*sin(σ/17)+16*sin(σ))+2σ)+0.05",
         x_range: -1e10..=1e10,
         y_range: -1e10..=1e10,
         sigma_range: -1e10..=1e10,
     },
-    TestCase {
+    BaselineTestCase {
         rust_func: expr2,
         str_expr: "rad2deg(σ - atan(y / x))",
         x_range: 0.0..=1e10,
         y_range: 1e-10..=1e10,
         sigma_range: 0.1..=PI,
     },
-    TestCase {
+    BaselineTestCase {
         rust_func: expr3,
         str_expr: "ceil(x * log10(ceil(σ)))",
         x_range: 0.0..=1e10,
         y_range: 0.0..=0.0,
         sigma_range: 1.1..=1e3,
     },
-    TestCase {
+    BaselineTestCase {
         rust_func: expr4,
         str_expr: "exp(ln(x)+ln(x+1)+ln(x+2)+ln(x+3)+ln(x+4)-(ln(y)+ln(y+1)+ln(y+2)+ln(y+3)+ln(y+4)))",
         x_range: -1e10..=1e10,
         y_range: -1e10..=1e10,
         sigma_range: 0.0..=0.0,
     },
-    TestCase {
+    BaselineTestCase {
         rust_func: expr5,
         str_expr: "2Gx/c^2",
         x_range: 1.0..=1e20,
         y_range: 0.0..=0.0,
         sigma_range: 0.0..=0.0,
     },
-    TestCase {
+    BaselineTestCase {
         rust_func: expr6,
         str_expr: "max(rand(x+wy)/10,terra(2x,2y))",
         x_range: -22.0..=22.0,
         y_range: -22.0..=22.0,
         sigma_range: 0.0..=0.0,
     },
-    TestCase {
+    BaselineTestCase {
         rust_func: expr7,
         str_expr: "5avg(x,y,σ,100rand(x))",
         x_range: -100.0..=100.0,
@@ -279,4 +304,39 @@ fn expr6(x: f64, y: f64, _s: f64, ctx: &CtxfulMyFuncs) -> f64 {
 
 fn expr7(x: f64, y: f64, s: f64, ctx: &CtxfulMyFuncs) -> f64 {
     5.0 * average(&[x, y, s, 100.0 * (ctx.rand)(x)])
+}
+
+#[test]
+fn correctness_alignment() {
+    for i in 4..120 {
+        let ast = MathAst::from_nodes(AstGen::new(
+            i / 2,
+            &[MyVar::X, MyVar::Y, MyVar::Sigma],
+            &[MyFunc::Rad2Deg, MyFunc::Random],
+            &[MyFunc::Average, MyFunc::Terra],
+            &[MyFunc::Average],
+            &[MyFunc::Average],
+        ));
+        let ctxful_funcs = CtxfulMyFuncs::new();
+        let mf2p = |f| MyFunc::to_pointer(f, &ctxful_funcs);
+        let vars = MyStore {
+            x: rand_f64(),
+            y: rand_f64(),
+            sigma: rand_f64(),
+        };
+        let ast_res = ast.eval(mf2p, &vars);
+        let quick = QuickExpr::new(ast.clone(), mf2p);
+        let mut stack = Vec::with_capacity(quick.stack_req_capacity().unwrap());
+        let quick_res = quick.eval(&vars, &mut stack).unwrap();
+        if (ast_res - quick_res).abs() > TOLERANCE {
+            panic!(
+                "evaluation of \"{}\" produced inconsistent results for values x={}, y={}, σ={}.\nast:\t{ast_res}\nquick:\t{quick_res}\nast (debug): {:?}",
+                ast,
+                vars.x,
+                vars.y,
+                vars.sigma,
+                ast.as_tree().postorder_iter().collect::<Vec<_>>()
+            )
+        }
+    }
 }
