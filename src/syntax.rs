@@ -102,13 +102,14 @@ fn token_range_to_str_range<S: AsRef<str>>(
     let mut start = 0;
     let mut index = 0;
     for (tk_idx, token) in tokens[..=*token_range.end()].iter().enumerate() {
-        while input.chars().nth(index).unwrap().is_whitespace() {
-            index += 1
+        while let Some(ws) = Some(input.chars().nth(index).unwrap()).filter(|ch| ch.is_whitespace())
+        {
+            index += ws.len_utf8();
         }
         if tk_idx == *token_range.start() {
             start = index;
         }
-        index += token.length();
+        index += token.byte_len();
     }
     start..=index - 1
 }
@@ -117,12 +118,16 @@ fn token_range_to_str_range<S: AsRef<str>>(
 pub struct SyntaxError(SyntaxErrorKind, RangeInclusive<usize>);
 
 impl SyntaxError {
-    pub fn to_general<S: AsRef<str>>(self, input: &str, tokens: &[Token<S>]) -> ParsingError {
+    pub fn to_general<S: AsRef<str>>(
+        self,
+        input: &str,
+        tokens: impl AsRef<[Token<S>]>,
+    ) -> ParsingError {
         ParsingError {
             at: if self.0 == SyntaxErrorKind::EmptyInput {
                 0..=0
             } else {
-                token_range_to_str_range(input, tokens, self.1)
+                token_range_to_str_range(input, tokens.as_ref(), self.1)
             },
             kind: match self.0 {
                 SyntaxErrorKind::NumberParsingError => ParsingErrorKind::NumberParsingError,

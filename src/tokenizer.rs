@@ -59,10 +59,12 @@ pub enum Token<S: AsRef<str>> {
 }
 
 impl<S: AsRef<str>> Token<S> {
-    pub fn length(&self) -> usize {
+    pub fn byte_len(&self) -> usize {
         match self {
-            // this token captures both the function name and the opening parentheses
-            Token::Function(s) => s.as_ref().len() + 1,
+            Token::Function(s) => {
+                // this token captures both the function name and the opening parentheses
+                s.as_ref().len() + 1
+            }
             Token::Number(s) | Token::Variable(s) => s.as_ref().len(),
             Token::Operator(opr) => opr.length(),
             Token::OpenParen | Token::CloseParen | Token::Comma | Token::Pipe => 1,
