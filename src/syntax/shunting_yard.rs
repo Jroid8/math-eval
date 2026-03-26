@@ -375,16 +375,21 @@ where
     N: Number,
     V: VariableIdentifier,
 {
-    let mut can_segment: Vec<Option<(Option<u8>, Segment<N, V>)>> = vec![None; input.len()];
-    for i in 1..=input.len() {
-        for j in 0..i {
+    let char_count = input.chars().count();
+    let mut can_segment: Vec<Option<(Option<u8>, Segment<N, V>)>> = vec![None; char_count];
+    for (i, ic) in input
+        .char_indices()
+        .enumerate()
+        .map(|(i, (cb, c))| (i + 1, cb + c.len_utf8()))
+    {
+        for (j, (jc, _)) in input[..ic].char_indices().enumerate() {
             if j == 0 || can_segment[j - 1].is_some() {
                 let prev = (j != 0).then(|| j as u8 - 1);
-                let seg = constant_parser(&input[j..i])
-                    .or_else(|| N::parse_constant(&input[j..i]))
+                let seg = constant_parser(&input[jc..ic])
+                    .or_else(|| N::parse_constant(&input[jc..ic]))
                     .map(Segment::Constant)
-                    .or_else(|| variable_parser(&input[j..i]).map(Segment::Variable))
-                    .or_else(|| input[j..i].parse().ok().map(Segment::Constant));
+                    .or_else(|| variable_parser(&input[jc..ic]).map(Segment::Variable))
+                    .or_else(|| input[jc..ic].parse().ok().map(Segment::Constant));
                 if let Some(seg) = seg {
                     can_segment[i - 1] = Some((prev, seg));
                     break;
@@ -392,9 +397,9 @@ where
             }
         }
     }
-    if can_segment[input.len() - 1].is_some() {
+    if can_segment[char_count - 1].is_some() {
         let mut result = Vec::with_capacity(NAME_LIMIT as usize);
-        let mut idx = Some(input.len() as u8 - 1);
+        let mut idx = Some(char_count as u8 - 1);
         while let Some(i) = idx {
             let (prev, seg) = can_segment.swap_remove(i as usize).unwrap();
             result.push(seg);
@@ -420,15 +425,19 @@ where
 {
     let mut can_segment: Vec<Option<(Option<u8>, Segment<N, V>)>> = vec![None; input.len() - 1];
     let mut function: Option<(u8, SyFunction<F>)> = None;
-    for i in 1..input.len() {
-        for j in 0..i {
+    for (i, ic) in input
+        .char_indices()
+        .enumerate()
+        .map(|(i, (cb, c))| (i + 1, cb + c.len_utf8()))
+    {
+        for (j, (jc, _)) in input[..ic].char_indices().enumerate() {
             if j == 0 || can_segment[j - 1].is_some() {
                 let prev = (j != 0).then(|| j as u8 - 1);
-                let seg = constant_parser(&input[j..i])
-                    .or_else(|| N::parse_constant(&input[j..i]))
+                let seg = constant_parser(&input[jc..ic])
+                    .or_else(|| N::parse_constant(&input[jc..ic]))
                     .map(Segment::Constant)
-                    .or_else(|| variable_parser(&input[j..i]).map(Segment::Variable))
-                    .or_else(|| input[j..i].parse().ok().map(Segment::Constant));
+                    .or_else(|| variable_parser(&input[jc..ic]).map(Segment::Variable))
+                    .or_else(|| input[jc..ic].parse().ok().map(Segment::Constant));
                 if let Some(seg) = seg {
                     can_segment[i - 1] = Some((prev, seg));
                     break;
@@ -436,12 +445,12 @@ where
             }
         }
     }
-    for j in 1..input.len() {
+    for (j, (jc, _)) in input.char_indices().enumerate().skip(1) {
         if can_segment[j - 1].is_some() {
-            function = NativeFunction::parse(&input[j..])
+            function = NativeFunction::parse(&input[jc..])
                 .map(SyFunction::NativeFunction)
                 .or_else(|| {
-                    function_parser(&input[j..])
+                    function_parser(&input[jc..])
                         .map(|(cf, min, max)| SyFunction::CustomFunction(cf, min, max))
                 })
                 .map(|func| (j as u8 - 1, func));
@@ -654,8 +663,10 @@ where
                         if first {
                             first = false;
                         } else {
-                            output_queue
-                                .push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack)?;
+                            output_queue.push_opr(
+                                SyOperator::BinaryOp(BinaryOp::Mul),
+                                &mut operator_stack,
+                            )?;
                         }
                     }
                 } else {
@@ -870,6 +881,7 @@ mod tests {
                 &|input| match input {
                     "x" => Some(0),
                     "y" => Some(1),
+                    "σ" => Some(4),
                     "var5" => Some(2),
                     "shallnotbenamed" => Some(3),
                     _ => None,
@@ -926,6 +938,10 @@ mod tests {
                 Segment::Variable(1),
             ])
         );
+        assert_eq!(
+            seg_var("xσ"),
+            Some(vec![Segment::Variable(0), Segment::Variable(4)])
+        );
     }
 
     #[test]
@@ -943,6 +959,7 @@ mod tests {
                     "y" => Some(1),
                     "var5" => Some(2),
                     "shallnotbenamed" => Some(3),
+                    "σ" => Some(4),
                     _ => None,
                 },
                 &|input| match input {
@@ -992,6 +1009,13 @@ mod tests {
                     Segment::Variable(2)
                 ],
                 SyFunction::CustomFunction(2, 0, None)
+            ))
+        );
+        assert_eq!(
+            seg_func("σf2"),
+            Some((
+                vec![Segment::Variable(4)],
+                SyFunction::CustomFunction(1, 0, None)
             ))
         );
     }
