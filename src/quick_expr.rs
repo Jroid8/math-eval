@@ -538,6 +538,7 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
     struct TestStore;
 
     impl VariableStore<f64, TestVar> for TestStore {

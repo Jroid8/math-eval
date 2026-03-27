@@ -234,7 +234,7 @@ impl Display for ParsingErrorKind {
     }
 }
 
-pub trait VariableStore<N: Number, V: VariableIdentifier> {
+pub trait VariableStore<N: Number, V: VariableIdentifier>: Debug {
     fn get<'a>(&'a self, var: V) -> N::AsArg<'a>;
 }
 

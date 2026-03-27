@@ -172,6 +172,7 @@ impl Display for MyVar {
     }
 }
 
+#[derive(Debug)]
 struct MyStore {
     x: f64,
     y: f64,

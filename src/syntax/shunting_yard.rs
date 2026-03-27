@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt::Debug, marker::PhantomData};
 
 use super::{AstNode, FunctionType, MathAst, SyntaxError, SyntaxErrorKind};
 use crate::{
@@ -100,7 +100,7 @@ where
     }
 }
 
-pub(super) trait ShuntingYardOutput<N, V, F>
+pub(super) trait ShuntingYardOutput<N, V, F>: Debug
 where
     N: Number,
     V: VariableIdentifier,
@@ -186,7 +186,7 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(super) struct SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
     N: Number,
@@ -303,6 +303,24 @@ where
     }
     fn last_num<'c>(&'c self) -> Option<N::AsArg<'c>> {
         self.args.last().map(|num| num.asarg())
+    }
+}
+
+impl<'a, 'b, N, V, F, S, C> Debug for SyNumberOutput<'a, 'b, N, V, F, S, C>
+where
+    N: Number,
+    V: VariableIdentifier,
+    F: FunctionIdentifier,
+    S: VariableStore<N, V>,
+    C: Fn(F) -> FunctionPointer<'a, N>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SyNumberOutput")
+            .field("args", &self.args)
+            .field("variable_store", &self.variable_store)
+            .field("var_ident", &self.var_ident)
+            .field("func_ident", &self.func_ident)
+            .finish()
     }
 }
 
