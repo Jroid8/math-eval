@@ -220,7 +220,7 @@ impl BaselineTestCase {
     }
 }
 
-const BASELINE_CASES: [BaselineTestCase; 7] = [
+const BASELINE_CASES: [BaselineTestCase; 10] = [
     BaselineTestCase {
         rust_func: expr1,
         str_expr: "cos(x*pi/10*(1.3+sin(σ/10))+sin(y*pi*sin(σ/17)+16*sin(σ))+2σ)+0.05",
@@ -265,10 +265,31 @@ const BASELINE_CASES: [BaselineTestCase; 7] = [
     },
     BaselineTestCase {
         rust_func: expr7,
-        str_expr: "5avg(x,y,σ,100rand(x))",
+        x_range: -100.0..=100.0,
+        str_expr: "5avg(x,y,σ,100randσ)",
+        y_range: -100.0..=100.0,
+        sigma_range: -100.0..=100.0,
+    },
+    BaselineTestCase {
+        rust_func: expr8,
+        str_expr: "ceil(x)!/(ceil(y)!(ceil(x) - ceil(y))!)",
+        x_range: 50.0..=100.0,
+        y_range: 1.0..=39.9,
+        sigma_range: 0.0..=0.0,
+    },
+    BaselineTestCase {
+        rust_func: expr9,
+        str_expr: "|6x + 8y - σ|/10",
         x_range: -100.0..=100.0,
         y_range: -100.0..=100.0,
         sigma_range: -100.0..=100.0,
+    },
+    BaselineTestCase {
+        rust_func: expr10,
+        str_expr: "|x-y|rand(σ)+min(x,y)",
+        x_range: -1e3..=1e3,
+        y_range: -1e3..=1e3,
+        sigma_range: 0.0..=1.0,
     },
 ];
 
@@ -303,7 +324,20 @@ fn expr6(x: f64, y: f64, _s: f64, ctx: &CtxfulMyFuncs) -> f64 {
 }
 
 fn expr7(x: f64, y: f64, s: f64, ctx: &CtxfulMyFuncs) -> f64 {
-    5.0 * average(&[x, y, s, 100.0 * (ctx.rand)(x)])
+    5.0 * average(&[x, y, s, 100.0 * (ctx.rand)(s)])
+}
+
+fn expr8(x: f64, y: f64, _s: f64, _ctx: &CtxfulMyFuncs) -> f64 {
+    let fact = |x| <f64 as math_eval::number::Number>::factorial(x);
+    fact(x.ceil()) / (fact(y.ceil()) * fact(x.ceil() - y.ceil()))
+}
+
+fn expr9(x: f64, y: f64, s: f64, _ctx: &CtxfulMyFuncs) -> f64 {
+    (6.0 * x + 8.0 * y - s).abs() / 10.0
+}
+
+fn expr10(x: f64, y: f64, s: f64, ctx: &CtxfulMyFuncs) -> f64 {
+    (x - y).abs() * (ctx.rand)(s) + x.min(y)
 }
 
 #[test]

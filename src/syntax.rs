@@ -158,6 +158,18 @@ impl SyntaxError {
     }
 }
 
+impl From<NotEnoughOrphans> for SyntaxErrorKind {
+    fn from(_: NotEnoughOrphans) -> Self {
+        SyntaxErrorKind::UnknownError
+    }
+}
+
+impl From<MultipleRoots> for SyntaxErrorKind {
+    fn from(_: MultipleRoots) -> Self {
+        SyntaxErrorKind::UnknownError
+    }
+}
+
 impl From<NotEnoughOrphans> for SyntaxError {
     fn from(_: NotEnoughOrphans) -> Self {
         SyntaxError(SyntaxErrorKind::UnknownError, 0..=0)
@@ -885,6 +897,27 @@ mod tests {
             ])
         );
         assert_eq!(
+            syntaxify("xy+1"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ])
+        );
+        assert_eq!(
+            syntaxify("ysin(x)+1"),
+            Ok(vec![
+                AstNode::Variable(TestVar::Y),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+            ])
+        );
+        assert_eq!(
             syntaxify("max(2, x, 8y, xy+1)"),
             Ok(vec![
                 AstNode::Number(2.0),
@@ -1059,6 +1092,74 @@ mod tests {
                 AstNode::UnaryOp(UnaryOp::Fac),
                 AstNode::Variable(TestVar::Y),
                 AstNode::BinaryOp(BinaryOp::Mul),
+            ])
+        );
+        assert_eq!(
+            syntaxify("sinx"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+            ])
+        );
+        assert_eq!(
+            syntaxify("xcosy"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(NativeFunction::Cos.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Mul),
+            ])
+        );
+        assert_eq!(
+            syntaxify("ln2x"),
+            Ok(vec![
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Function(FunctionType::Native(NativeFunction::Ln), 1),
+            ])
+        );
+        assert_eq!(
+            syntaxify("sin-x"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::UnaryOp(UnaryOp::Neg),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+            ])
+        );
+        assert_eq!(
+            syntaxify("sinpix"),
+            Ok(vec![
+                AstNode::Number(PI),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Mul),
+                AstNode::Function(NativeFunction::Sin.into(), 1),
+            ])
+        );
+        assert_eq!(
+            syntaxify("lnsqrtx"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Sqrt.into(), 1),
+                AstNode::Function(NativeFunction::Ln.into(), 1),
+            ])
+        );
+        assert_eq!(
+            syntaxify("lnsqrt(x)"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Sqrt.into(), 1),
+                AstNode::Function(NativeFunction::Ln.into(), 1),
+            ])
+        );
+        assert_eq!(
+            syntaxify("sqrt|x-y|"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Function(NativeFunction::Abs.into(), 1),
+                AstNode::Function(NativeFunction::Sqrt.into(), 1),
             ])
         );
         assert_eq!(
@@ -1281,6 +1382,20 @@ mod tests {
             Err(ParsingError {
                 kind: ParsingErrorKind::MisplacedOperator,
                 at: 1..=1
+            })
+        );
+        assert_eq!(
+            syntaxify("lnx)"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MissingOpenParenthesis,
+                at: 3..=3
+            })
+        );
+        assert_eq!(
+            syntaxify("ln/x"),
+            Err(ParsingError {
+                kind: ParsingErrorKind::MisplacedOperator,
+                at: 2..=2
             })
         );
     }
