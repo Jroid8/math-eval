@@ -17,6 +17,7 @@ pub mod quick_expr;
 pub mod syntax;
 pub mod tokenizer;
 pub mod builder;
+pub mod trie;
 
 pub use builder::EvalBuilder;
 

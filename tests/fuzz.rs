@@ -1,4 +1,4 @@
-use std::{any::Any, fmt::Display, panic};
+use std::{any::Any, fmt::Display, iter::repeat_with, panic};
 
 use math_eval::{
     FunctionPointer, VariableStore,
@@ -6,6 +6,7 @@ use math_eval::{
     quick_expr::QuickExpr,
     syntax::MathAst,
     tokenizer::{OprToken, Token, TokenStream},
+    trie::{NameTrie, VecNameTrie},
 };
 use strum::{EnumIter, IntoEnumIterator};
 
@@ -139,6 +140,90 @@ fn fuzz_ast_eval() {
                 expr.eval(MyFunc::as_pointer, &MyStore::randomize());
             }) {
                 report_ast_panic(expr, pan);
+            }
+        }
+    }
+}
+
+#[test]
+fn fuzz_name_trie_new() {
+    for _ in 0..1000 {
+        let names: Vec<String> = repeat_with(|| {
+            repeat_with(|| fastrand::char(..))
+                .take(fastrand::usize(1..30))
+                .collect::<String>()
+        })
+        .take(fastrand::u8(3..100).into())
+        .collect();
+        if let Err(err) = panic::catch_unwind(|| {
+            let mut pairs: Vec<(&str, u8)> = names
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (s.as_str(), i as u8))
+                .collect();
+            let _ = VecNameTrie::new(&mut pairs);
+        }) {
+            println!("names: {names:?}");
+            panic::resume_unwind(err);
+        }
+    }
+}
+
+#[test]
+fn fuzz_name_trie_get() {
+    for _ in 0..1000 {
+        let names: Vec<String> = repeat_with(|| {
+            repeat_with(|| fastrand::char(..))
+                .take(fastrand::usize(1..30))
+                .collect::<String>()
+        })
+        .take(fastrand::u8(3..100).into())
+        .collect();
+        let mut pairs: Vec<(&str, u8)> = names
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.as_str(), i as u8))
+            .collect();
+        let trie = VecNameTrie::new(&mut pairs);
+        for _ in 0..10 {
+            let input = repeat_with(|| fastrand::char(..))
+                .take(fastrand::usize(1..30))
+                .collect::<String>();
+            if let Err(err) = panic::catch_unwind(|| {
+                let _ = trie.exact_match(&input);
+            }) {
+                println!("names: {names:?}\ninput: {input:?}");
+                panic::resume_unwind(err);
+            }
+        }
+    }
+}
+
+#[test]
+fn fuzz_name_trie_get_prefix() {
+    for _ in 0..100 {
+        let names: Vec<String> = repeat_with(|| {
+            repeat_with(|| fastrand::char(..))
+                .take(fastrand::usize(1..30))
+                .collect::<String>()
+        })
+        .take(fastrand::u8(3..100).into())
+        .collect();
+        let mut pairs: Vec<(&str, u8)> = names
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.as_str(), i as u8))
+            .collect();
+        let trie = VecNameTrie::new(&mut pairs);
+        for _ in 0..10 {
+            let input = repeat_with(|| fastrand::char(..))
+                .take(fastrand::usize(1..30))
+                .collect::<String>();
+            if let Err(err) = panic::catch_unwind(|| {
+                let _ = trie.longest_prefix(&input);
+            }) {
+                println!("names: {names:?}\ninput: {input:?}");
+                panic::resume_unwind(err);
             }
         }
     }
