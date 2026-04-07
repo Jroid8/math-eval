@@ -517,6 +517,7 @@ where
 #[cfg(all(debug_assertions, test))]
 mod tests {
     use crate::tokenizer::TokenStream;
+        tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
 
     use super::*;
 
@@ -607,7 +608,7 @@ mod tests {
     #[test]
     fn convert() {
         fn convert(input: &str) -> QuickExpr<'_, f64, TestVar, TestFunc> {
-            let tokens = TokenStream::new(input)
+            let tokens = TokenStream::new::<Sfr>(input)
                 .map_err(|e| e.to_general())
                 .unwrap()
                 .0;

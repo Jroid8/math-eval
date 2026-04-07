@@ -115,21 +115,19 @@ enum OprChar {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CharNotion {
-    Number,
     Operation(OprChar),
     Pipe,
     Alphabet,
+    Number,
     OpenParen,
     CloseParen,
     Comma,
-    Dot,
     Space,
 }
 
 fn recognize(input: char) -> Option<CharNotion> {
     match input {
         '0'..='9' => Some(CharNotion::Number),
-        '.' => Some(CharNotion::Dot),
         '+' => Some(CharNotion::Operation(OprChar::Plus)),
         '-' => Some(CharNotion::Operation(OprChar::Minus)),
         '*' => Some(CharNotion::Operation(OprChar::Star)),
@@ -147,30 +145,53 @@ fn recognize(input: char) -> Option<CharNotion> {
     }
 }
 
+pub trait NumberRecognizer: Sized {
+    fn new(current: char) -> Option<Self>;
+    fn recognize(&mut self, current: char) -> bool;
+}
+
+pub struct StandardFloatRecognizer(bool);
+
+impl NumberRecognizer for StandardFloatRecognizer {
+    fn new(current: char) -> Option<Self> {
+        match current {
+            '0'..='9' => Some(Self(false)),
+            '.' => Some(Self(true)),
+            _ => None,
+        }
+    }
+
+    fn recognize(&mut self, current: char) -> bool {
+        if (current == 'e' || current == '.') && !self.0 {
+            self.0 = true;
+            true
+        } else {
+            matches!(current, '0'..='9')
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TokenStream<S: AsRef<str>>(pub(crate) Vec<Token<S>>);
 
 impl<'a> TokenStream<&'a str> {
-    pub fn new(input: &'a str) -> Result<Self, TokenizationError> {
-        enum Reading {
+    pub fn new<N: NumberRecognizer>(input: &'a str) -> Result<Self, TokenizationError> {
+        enum Reading<N: NumberRecognizer> {
             Nothing,
-            Number(usize, bool),
+            Number(usize, N),
             VarFunc(usize),
             Star,
             Exclamation,
         }
 
         let mut result = Vec::new();
-        let mut state = Reading::Nothing;
+        let mut state: Reading<N> = Reading::Nothing;
         for (pos, cha) in input.char_indices() {
-            let notion = recognize(cha).ok_or(TokenizationError(pos))?;
+            let notion = recognize(cha);
             loop {
-                match state {
+                match &mut state {
                     Reading::Nothing => match notion {
-                        CharNotion::Number | CharNotion::Dot => {
-                            state = Reading::Number(pos, cha == '.')
-                        }
-                        CharNotion::Operation(oc) => match oc {
+                        Some(CharNotion::Operation(oc)) => match oc {
                             OprChar::Plus => result.push(Token::Operator(OprToken::Plus)),
                             OprChar::Minus => result.push(Token::Operator(OprToken::Minus)),
                             OprChar::Slash => result.push(Token::Operator(OprToken::Divide)),
@@ -179,57 +200,48 @@ impl<'a> TokenStream<&'a str> {
                             OprChar::Star => state = Reading::Star,
                             OprChar::Exclamation => state = Reading::Exclamation,
                         },
-                        CharNotion::Alphabet => state = Reading::VarFunc(pos),
-                        CharNotion::OpenParen => result.push(Token::OpenParen),
-                        CharNotion::CloseParen => result.push(Token::CloseParen),
-                        CharNotion::Comma => result.push(Token::Comma),
-                        CharNotion::Pipe => result.push(Token::Pipe),
-                        CharNotion::Space => (),
-                    },
-                    Reading::Number(start, dec) => match notion {
-                        CharNotion::Number => (),
-                        CharNotion::Dot => {
-                            if dec {
-                                return Err(TokenizationError(pos));
+                        Some(CharNotion::Alphabet) => state = Reading::VarFunc(pos),
+                        Some(CharNotion::OpenParen) => result.push(Token::OpenParen),
+                        Some(CharNotion::CloseParen) => result.push(Token::CloseParen),
+                        Some(CharNotion::Comma) => result.push(Token::Comma),
+                        Some(CharNotion::Pipe) => result.push(Token::Pipe),
+                        Some(CharNotion::Space) => (),
+                        None | Some(CharNotion::Number) => {
+                            if let Some(nr) = N::new(cha) {
+                                state = Reading::Number(pos, nr);
                             } else {
-                                state = Reading::Number(start, true);
+                                return Err(TokenizationError(pos));
                             }
                         }
-                        CharNotion::Operation(_)
-                        | CharNotion::Alphabet
-                        | CharNotion::OpenParen
-                        | CharNotion::CloseParen
-                        | CharNotion::Comma
-                        | CharNotion::Pipe
-                        | CharNotion::Space => {
-                            if &input[start..pos] == "." {
-                                return Err(TokenizationError(start));
-                            } else {
-                                result.push(Token::Number(&input[start..pos]))
-                            }
+                    },
+                    Reading::Number(start, nr) => {
+                        if !nr.recognize(cha) {
+                            result.push(Token::Number(&input[*start..pos]));
                             state = Reading::Nothing;
                             continue;
                         }
-                    },
+                    }
                     Reading::VarFunc(start) => match notion {
-                        CharNotion::Alphabet | CharNotion::Number => (),
-                        CharNotion::OpenParen => {
-                            result.push(Token::Function(&input[start..pos]));
+                        Some(CharNotion::Alphabet | CharNotion::Number) => (),
+                        Some(CharNotion::OpenParen) => {
+                            result.push(Token::Function(&input[*start..pos]));
                             state = Reading::Nothing;
                         }
-                        CharNotion::Operation(_)
-                        | CharNotion::CloseParen
-                        | CharNotion::Dot
-                        | CharNotion::Comma
-                        | CharNotion::Pipe
-                        | CharNotion::Space => {
-                            result.push(Token::Variable(&input[start..pos]));
+                        None
+                        | Some(
+                            CharNotion::Operation(_)
+                            | CharNotion::CloseParen
+                            | CharNotion::Comma
+                            | CharNotion::Pipe
+                            | CharNotion::Space,
+                        ) => {
+                            result.push(Token::Variable(&input[*start..pos]));
                             state = Reading::Nothing;
                             continue;
                         }
                     },
                     Reading::Star => {
-                        if notion == CharNotion::Operation(OprChar::Star) {
+                        if notion == Some(CharNotion::Operation(OprChar::Star)) {
                             result.push(Token::Operator(OprToken::DoubleStar));
                             state = Reading::Nothing;
                         } else {
@@ -239,7 +251,7 @@ impl<'a> TokenStream<&'a str> {
                         }
                     }
                     Reading::Exclamation => {
-                        if notion == CharNotion::Operation(OprChar::Exclamation) {
+                        if notion == Some(CharNotion::Operation(OprChar::Exclamation)) {
                             result.push(Token::Operator(OprToken::DoubleFactorial));
                             state = Reading::Nothing;
                         } else {
@@ -254,13 +266,7 @@ impl<'a> TokenStream<&'a str> {
         }
         match state {
             Reading::Nothing => (),
-            Reading::Number(start, _) => {
-                if &input[start..] == "." {
-                    return Err(TokenizationError(start));
-                } else {
-                    result.push(Token::Number(&input[start..]))
-                }
-            }
+            Reading::Number(start, _) => result.push(Token::Number(&input[start..])),
             Reading::VarFunc(start) => result.push(Token::Variable(&input[start..])),
             Reading::Star => result.push(Token::Operator(OprToken::Multiply)),
             Reading::Exclamation => result.push(Token::Operator(OprToken::Factorial)),
@@ -294,29 +300,30 @@ mod tests {
 
     #[test]
     fn tokenizer() {
-        assert_eq!(TokenStream::new("1"), Ok(TokenStream(vec![Number("1")])));
+        let tokenize = |s| TokenStream::new::<StandardFloatRecognizer>(s);
+        assert_eq!(tokenize("1"), Ok(TokenStream(vec![Number("1")])));
         assert_eq!(
-            TokenStream::new("2291"),
+            tokenize("2291"),
             Ok(TokenStream(vec![Number("2291")]))
         );
         assert_eq!(
-            TokenStream::new("-1.0"),
+            tokenize("-1.0"),
             Ok(TokenStream(vec![Operator(OprToken::Minus), Number("1.0")]))
         );
         assert_eq!(
-            TokenStream::new("(11)"),
+            tokenize("(11)"),
             Ok(TokenStream(vec![OpenParen, Number("11"), CloseParen]))
         );
         assert_eq!(
-            TokenStream::new("[11]"),
+            tokenize("[11]"),
             Ok(TokenStream(vec![OpenParen, Number("11"), CloseParen]))
         );
         assert_eq!(
-            TokenStream::new("{11}"),
+            tokenize("{11}"),
             Ok(TokenStream(vec![OpenParen, Number("11"), CloseParen]))
         );
         assert_eq!(
-            TokenStream::new("-(pi)"),
+            tokenize("-(pi)"),
             Ok(TokenStream(vec![
                 Operator(OprToken::Minus),
                 OpenParen,
@@ -325,7 +332,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("10*5"),
+            tokenize("10*5"),
             Ok(TokenStream(vec![
                 Number("10"),
                 Operator(OprToken::Multiply),
@@ -333,7 +340,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("839   *            4"),
+            tokenize("839   *            4"),
             Ok(TokenStream(vec![
                 Number("839"),
                 Operator(OprToken::Multiply),
@@ -341,7 +348,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("7.620-90.001"),
+            tokenize("7.620-90.001"),
             Ok(TokenStream(vec![
                 Number("7.620"),
                 Operator(OprToken::Minus),
@@ -349,7 +356,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("1.10/pi"),
+            tokenize("1.10/pi"),
             Ok(TokenStream(vec![
                 Number("1.10"),
                 Operator(OprToken::Divide),
@@ -357,7 +364,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("x+y"),
+            tokenize("x+y"),
             Ok(TokenStream(vec![
                 Variable("x"),
                 Operator(OprToken::Plus),
@@ -365,7 +372,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("sin(x)"),
+            tokenize("sin(x)"),
             Ok(TokenStream(vec![
                 Function("sin"),
                 Variable("x"),
@@ -373,7 +380,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("log(x, 5)"),
+            tokenize("log(x, 5)"),
             Ok(TokenStream(vec![
                 Function("log"),
                 Variable("x"),
@@ -383,13 +390,13 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("|x|"),
+            tokenize("|x|"),
             Ok(TokenStream(vec![Pipe, Variable("x"), Pipe]))
         );
-        assert_eq!(TokenStream::new(""), Ok(TokenStream(vec![])));
-        assert_eq!(TokenStream::new("   "), Ok(TokenStream(vec![])));
+        assert_eq!(tokenize(""), Ok(TokenStream(vec![])));
+        assert_eq!(tokenize("   "), Ok(TokenStream(vec![])));
         assert_eq!(
-            TokenStream::new("((([{ 3 }])))"),
+            tokenize("((([{ 3 }])))"),
             Ok(TokenStream(vec![
                 OpenParen,
                 OpenParen,
@@ -405,7 +412,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("cos(1+sin(0))"),
+            tokenize("cos(1+sin(0))"),
             Ok(TokenStream(vec![
                 Function("cos"),
                 Number("1"),
@@ -416,9 +423,9 @@ mod tests {
                 CloseParen
             ]))
         );
-        assert_eq!(TokenStream::new(".5"), Ok(TokenStream(vec![Number(".5")])));
+        assert_eq!(tokenize(".5"), Ok(TokenStream(vec![Number(".5")])));
         assert_eq!(
-            TokenStream::new("θ+τ"),
+            tokenize("θ+τ"),
             Ok(TokenStream(vec![
                 Variable("θ"),
                 Operator(OprToken::Plus),
@@ -426,7 +433,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("2^10"),
+            tokenize("2^10"),
             Ok(TokenStream(vec![
                 Number("2"),
                 Operator(OprToken::Power),
@@ -434,7 +441,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("2**10"),
+            tokenize("2**10"),
             Ok(TokenStream(vec![
                 Number("2"),
                 Operator(OprToken::DoubleStar),
@@ -442,16 +449,15 @@ mod tests {
             ]))
         );
         assert_eq!(
-            TokenStream::new("x!!!"),
+            tokenize("x!!!"),
             Ok(TokenStream(vec![
                 Variable("x"),
                 Operator(OprToken::DoubleFactorial),
                 Operator(OprToken::Factorial)
             ]))
         );
-        assert_eq!(TokenStream::new("="), Err(TokenizationError(0)));
-        assert_eq!(TokenStream::new("99$"), Err(TokenizationError(2)));
-        assert_eq!(TokenStream::new("@3"), Err(TokenizationError(0)));
-        assert_eq!(TokenStream::new("."), Err(TokenizationError(0)));
+        assert_eq!(tokenize("="), Err(TokenizationError(0)));
+        assert_eq!(tokenize("99$"), Err(TokenizationError(2)));
+        assert_eq!(tokenize("@3"), Err(TokenizationError(0)));
     }
 }

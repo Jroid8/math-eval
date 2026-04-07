@@ -612,7 +612,7 @@ mod tests {
 
     use super::*;
     use crate::VariableStore;
-    use crate::tokenizer::TokenStream;
+    use crate::tokenizer::{StandardFloatRecognizer as Sfr, TokenStream};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     enum TestVar {
@@ -710,9 +710,9 @@ mod tests {
     }
 
     fn parse(input: &str) -> Result<MathAst<f64, TestVar, TestFunc>, ParsingError> {
-        let tokens = TokenStream::new(input).map_err(|e| e.to_general())?.0;
-        MathAst::new(&tokens, parse_constant, TestFunc::parse, TestVar::parse)
-            .map_err(|e| e.to_general(input, &tokens))
+        let tokens = TokenStream::new::<Sfr>(input)
+            .map_err(|e| e.to_general())?
+            .0;
     }
 
     #[test]
@@ -1404,7 +1404,7 @@ mod tests {
     fn parse_to_number() {
         fn evaluate(input: &str) -> f64 {
             MathAst::parse_and_eval(
-                &TokenStream::new(input).unwrap().0,
+                &TokenStream::new::<Sfr>(input).unwrap().0,
                 parse_constant,
                 TestFunc::parse,
                 TestVar::parse,
@@ -1761,7 +1761,7 @@ mod tests {
     #[test]
     fn token2range() {
         let input = " max(pi, 1, -4)*3";
-        let ts = TokenStream::new(input).unwrap().0;
+        let ts = TokenStream::new::<Sfr>(input).unwrap().0;
         assert_eq!(token_range_to_str_range(input, &ts, 0..=0), 1..=4);
         assert_eq!(token_range_to_str_range(input, &ts, 1..=1), 5..=6);
         assert_eq!(token_range_to_str_range(input, &ts, 2..=2), 7..=7);

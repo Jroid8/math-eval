@@ -3,6 +3,7 @@ use criterion::{
 };
 use math_eval::{
     FunctionPointer, VariableStore, quick_expr::QuickExpr, syntax::MathAst, tokenizer::TokenStream,
+    tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
 };
 use meval::{Context, Expr};
 
@@ -124,7 +125,7 @@ fn calculation(crit: &mut Criterion) {
     let mut group = crit.benchmark_group("Calculation");
     for (input, desc) in exprs {
         let ast = MathAst::new(
-            TokenStream::new(input).unwrap(),
+            TokenStream::new::<Sfr>(input).unwrap(),
             |_| None,
             MyFunc::parse,
             MyVar::parse,

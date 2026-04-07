@@ -332,7 +332,8 @@ pub fn compile<'a, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     custom_variable_parser: impl Fn(&str) -> Option<V>,
     function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
 ) -> Result<QuickExpr<'a, N, V, F>, ParsingError> {
-    let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
+    let token_stream =
+        TokenStream::new::<N::Recognizer>(input).map_err(|e| e.to_general())?;
     let mut syntax_tree = MathAst::new(
         &token_stream.0,
         custom_constant_parser,
@@ -353,7 +354,8 @@ pub fn evaluate<'a, 'b, N: Number, V: VariableIdentifier, F: FunctionIdentifier>
     function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
     variable_values: &impl VariableStore<N, V>,
 ) -> Result<N, ParsingError> {
-    let token_stream = TokenStream::new(input).map_err(|e| e.to_general())?;
+    let token_stream =
+        TokenStream::new::<N::Recognizer>(input).map_err(|e| e.to_general())?;
     MathAst::parse_and_eval(
         &token_stream.0,
         custom_constant_parser,

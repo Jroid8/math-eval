@@ -3,6 +3,7 @@ use std::{f64::consts::PI, fmt::Display, ops::RangeInclusive};
 use fastrand_contrib::f64_range;
 use math_eval::{
     FunctionPointer, VariableStore, quick_expr::QuickExpr, syntax::MathAst, tokenizer::TokenStream,
+    tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
 };
 
 use crate::common::{AstGen, rand_f64};
@@ -181,7 +182,7 @@ const TOLERANCE: f64 = f64::EPSILON * 4.0;
 impl BaselineTestCase {
     fn perform(&self) {
         let ast = MathAst::new(
-            &TokenStream::new(self.str_expr).unwrap(),
+            &TokenStream::new::<Sfr>(self.str_expr).unwrap(),
             parse_consts,
             MyFunc::parse,
             MyVar::parse,
@@ -199,7 +200,7 @@ impl BaselineTestCase {
             let quick_res = quick.eval(&MyStore { x, y, sigma }, &mut stack).unwrap();
             let ast_res = ast.eval(mf2p, &MyStore { x, y, sigma });
             let syno_res = MathAst::parse_and_eval(
-                &TokenStream::new(self.str_expr).unwrap(),
+                &TokenStream::new::<Sfr>(self.str_expr).unwrap(),
                 parse_consts,
                 MyFunc::parse,
                 MyVar::parse,

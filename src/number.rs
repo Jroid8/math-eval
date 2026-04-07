@@ -11,6 +11,7 @@ use strum::EnumIter;
 use crate::{
     FunctionIdentifier,
     quick_expr::{CtxFuncPtr, MarkedFunc},
+    tokenizer::{NumberRecognizer, StandardFloatRecognizer},
 };
 
 #[cfg(debug_assertions)]
@@ -229,6 +230,7 @@ pub trait Number:
         + Neg<Output = Self>
         + Copy
         + Debug;
+    type Recognizer: NumberRecognizer;
 
     fn parse_constant(input: &str) -> Option<Self>;
     fn modulo(value: Self::AsArg<'_>, rhs: Self::AsArg<'_>) -> Self;
@@ -264,6 +266,7 @@ pub trait Number:
 
 impl Number for f64 {
     type AsArg<'a> = f64;
+    type Recognizer = StandardFloatRecognizer;
 
     fn pow(value: Self, rhs: Self) -> Self {
         value.powf(rhs)

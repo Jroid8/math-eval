@@ -5,7 +5,7 @@ use math_eval::{
     number::NativeFunction,
     quick_expr::QuickExpr,
     syntax::MathAst,
-    tokenizer::{OprToken, Token, TokenStream},
+    tokenizer::{OprToken, StandardFloatRecognizer as Sfr, Token, TokenStream},
     trie::{NameTrie, VecNameTrie},
 };
 use strum::{EnumIter, IntoEnumIterator};
@@ -21,7 +21,7 @@ fn fuzz_tokenizer() {
             .map(|_| fastrand::char('\x00'..char::MAX))
             .collect();
         if let Err(err) = panic::catch_unwind(|| {
-            let _ = TokenStream::new(&noise);
+            let _ = TokenStream::new::<Sfr>(&noise);
         }) {
             println!("input: {noise:?}");
             panic::resume_unwind(err);
