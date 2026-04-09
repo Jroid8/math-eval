@@ -6,9 +6,9 @@ use math_eval::{
     quick_expr::QuickExpr,
     syntax::MathAst,
     tokenizer::{OprToken, StandardFloatRecognizer as Sfr, Token, TokenStream},
-    trie::{NameTrie, VecNameTrie},
+    trie::{EmptyNameTrie, NameTrie, TrieNode, VecNameTrie},
 };
-use strum::{EnumIter, IntoEnumIterator};
+use strum::{EnumIter, FromRepr, IntoEnumIterator};
 
 use crate::common::{AstGen, rand_f64};
 
@@ -52,12 +52,13 @@ fn fuzz_parser() {
     }
     fn tryinput(input: &[Token<String>]) -> Result<(), Box<dyn Any + Send + 'static>> {
         panic::catch_unwind(|| {
-            let _ = MathAst::new(&input, |_| None::<f64>, MyFunc::parse, MyVar::parse);
+            let _ =
+                MathAst::<f64, _, _>::new(&input, &EmptyNameTrie, &MyFuncNameTrie, &MyVarNameTrie);
             let _ = MathAst::parse_and_eval(
                 &input,
-                |_| None::<f64>,
-                MyFunc::parse,
-                MyVar::parse,
+                &EmptyNameTrie,
+                &MyFuncNameTrie,
+                &MyVarNameTrie,
                 &MyStore::randomize(),
                 MyFunc::as_pointer,
             );
@@ -199,51 +200,29 @@ fn fuzz_name_trie_get() {
     }
 }
 
-#[test]
-fn fuzz_name_trie_get_prefix() {
-    for _ in 0..100 {
-        let names: Vec<String> = repeat_with(|| {
-            repeat_with(|| fastrand::char(..))
-                .take(fastrand::usize(1..30))
-                .collect::<String>()
-        })
-        .take(fastrand::u8(3..100).into())
-        .collect();
-        let mut pairs: Vec<(&str, u8)> = names
-            .iter()
-            .enumerate()
-            .map(|(i, s)| (s.as_str(), i as u8))
-            .collect();
-        let trie = VecNameTrie::new(&mut pairs);
-        for _ in 0..10 {
-            let input = repeat_with(|| fastrand::char(..))
-                .take(fastrand::usize(1..30))
-                .collect::<String>();
-            if let Err(err) = panic::catch_unwind(|| {
-                let _ = trie.longest_prefix(&input);
-            }) {
-                println!("names: {names:?}\ninput: {input:?}");
-                panic::resume_unwind(err);
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, FromRepr)]
+#[repr(u8)]
 enum MyVar {
     X,
     Y,
     Sigma,
 }
 
-impl MyVar {
-    fn parse(input: &str) -> Option<Self> {
-        match input {
-            "x" => Some(Self::X),
-            "y" => Some(Self::Y),
-            "σ" => Some(Self::Sigma),
-            _ => None,
-        }
+struct MyVarNameTrie;
+
+impl NameTrie<MyVar> for MyVarNameTrie {
+    fn nodes(&self) -> &[TrieNode] {
+        &[
+            TrieNode::Branch('x', 1),
+            TrieNode::Leaf(1),
+            TrieNode::Branch('y', 1),
+            TrieNode::Leaf(1),
+            TrieNode::Branch('σ', 1),
+            TrieNode::Leaf(1),
+        ]
+    }
+    fn leaf_to_value(&self, leaf: u32) -> MyVar {
+        MyVar::from_repr(leaf as u8).unwrap()
     }
 }
 
@@ -300,7 +279,8 @@ fn digits(values: &[f64]) -> f64 {
         .sum()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, FromRepr)]
+#[repr(u8)]
 enum MyFunc {
     Sigmoid,
     Clamp,
@@ -308,12 +288,11 @@ enum MyFunc {
 }
 
 impl MyFunc {
-    fn parse(input: &str) -> Option<(Self, u8, Option<u8>)> {
-        match input {
-            "sigmoid" => Some((MyFunc::Sigmoid, 1, Some(1))),
-            "clamp" => Some((MyFunc::Clamp, 3, Some(3))),
-            "digits" => Some((MyFunc::Digits, 1, None)),
-            _ => None,
+    fn with_mmargs(self) -> (Self, u8, Option<u8>) {
+        match self {
+            MyFunc::Sigmoid => (MyFunc::Sigmoid, 1, Some(1)),
+            MyFunc::Clamp => (MyFunc::Clamp, 3, Some(3)),
+            MyFunc::Digits => (MyFunc::Digits, 1, None),
         }
     }
 
@@ -323,6 +302,39 @@ impl MyFunc {
             MyFunc::Clamp => FunctionPointer::<f64>::Triple(clamp),
             MyFunc::Digits => FunctionPointer::Flexible(digits),
         }
+    }
+}
+
+struct MyFuncNameTrie;
+
+impl NameTrie<(MyFunc, u8, Option<u8>)> for MyFuncNameTrie {
+    fn nodes(&self) -> &[TrieNode] {
+        &[
+            TrieNode::Branch('c', 5),
+            TrieNode::Branch('l', 4),
+            TrieNode::Branch('a', 3),
+            TrieNode::Branch('m', 2),
+            TrieNode::Branch('p', 1),
+            TrieNode::Leaf(MyFunc::Clamp as u32),
+            TrieNode::Branch('d', 6),
+            TrieNode::Branch('i', 5),
+            TrieNode::Branch('g', 4),
+            TrieNode::Branch('i', 3),
+            TrieNode::Branch('t', 2),
+            TrieNode::Branch('s', 1),
+            TrieNode::Leaf(MyFunc::Digits as u32),
+            TrieNode::Branch('s', 7),
+            TrieNode::Branch('i', 6),
+            TrieNode::Branch('g', 5),
+            TrieNode::Branch('m', 4),
+            TrieNode::Branch('o', 3),
+            TrieNode::Branch('i', 2),
+            TrieNode::Branch('d', 1),
+            TrieNode::Leaf(MyFunc::Sigmoid as u32),
+        ]
+    }
+    fn leaf_to_value(&self, leaf: u32) -> (MyFunc, u8, Option<u8>) {
+        MyFunc::from_repr(leaf as u8).unwrap().with_mmargs()
     }
 }
 

@@ -10,6 +10,7 @@ use crate::postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans};
 use crate::postfix_tree::tree_iterators::NodeEdge;
 use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
 use crate::tokenizer::Token;
+use crate::trie::NameTrie;
 use crate::{
     Associativity, BinaryOp, FunctionIdentifier, FunctionPointer, ParsingError, ParsingErrorKind,
     UnaryOp, VariableIdentifier, VariableStore,
@@ -17,6 +18,7 @@ use crate::{
 use shunting_yard::{SyAstOutput, SyNumberOutput, parse_or_eval};
 
 mod shunting_yard;
+mod token_fragmentation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FunctionType<F: FunctionIdentifier> {
@@ -193,26 +195,26 @@ where
     V: VariableIdentifier,
     F: FunctionIdentifier,
 {
-    pub fn new<S: AsRef<str>>(
+    pub fn new<'a, S: AsRef<str>>(
         tokens: impl AsRef<[Token<S>]>,
-        custom_constant_parser: impl Fn(&str) -> Option<N>,
-        custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
-        custom_variable_parser: impl Fn(&str) -> Option<V>,
+        custom_constants: &impl NameTrie<&'a N>,
+        custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+        custom_variables: &impl NameTrie<V>,
     ) -> Result<MathAst<N, V, F>, SyntaxError> {
         parse_or_eval(
             SyAstOutput(SubtreeCollection::new()),
             tokens,
-            custom_constant_parser,
-            custom_function_parser,
-            custom_variable_parser,
+            custom_constants,
+            custom_functions,
+            custom_variables,
         )
     }
 
-    pub fn parse_and_eval<'a, 'b, S: VariableStore<N, V>, A: AsRef<str>>(
+    pub fn parse_and_eval<'a, 'b, 'c, S: VariableStore<N, V>, A: AsRef<str>>(
         tokens: impl AsRef<[Token<A>]>,
-        custom_constant_parser: impl Fn(&str) -> Option<N>,
-        custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
-        custom_variable_parser: impl Fn(&str) -> Option<V>,
+        custom_constants: &impl NameTrie<&'c N>,
+        custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+        custom_variables: &impl NameTrie<V>,
         variable_values: &'a S,
         function_to_pointer: impl Fn(F) -> FunctionPointer<'b, N>,
     ) -> Result<N, SyntaxError> {
@@ -225,9 +227,9 @@ where
                 func_ident: PhantomData,
             },
             tokens,
-            custom_constant_parser,
-            custom_function_parser,
-            custom_variable_parser,
+            custom_constants,
+            custom_functions,
+            custom_variables,
         )
     }
 
@@ -610,26 +612,19 @@ where
 mod tests {
     use std::f64::consts::*;
 
+    use strum::FromRepr;
+
     use super::*;
     use crate::VariableStore;
     use crate::tokenizer::{StandardFloatRecognizer as Sfr, TokenStream};
+    use crate::trie::TrieNode;
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+    #[repr(u8)]
     enum TestVar {
         X,
         Y,
         T,
-    }
-
-    impl TestVar {
-        fn parse(input: &str) -> Option<Self> {
-            match input {
-                "x" => Some(TestVar::X),
-                "y" => Some(TestVar::Y),
-                "t" => Some(TestVar::T),
-                _ => None,
-            }
-        }
     }
 
     impl Display for TestVar {
@@ -655,14 +650,8 @@ mod tests {
         }
     }
 
-    fn parse_constant(input: &str) -> Option<f64> {
-        match input {
-            "c" => Some(299792458.0),
-            _ => None,
-        }
-    }
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+    #[repr(u8)]
     enum TestFunc {
         Deg2Rad,
         ExpD,
@@ -671,13 +660,12 @@ mod tests {
     }
 
     impl TestFunc {
-        fn parse(input: &str) -> Option<(Self, u8, Option<u8>)> {
-            match input {
-                "deg2rad" => Some((TestFunc::Deg2Rad, 1, Some(1))),
-                "expd" => Some((TestFunc::ExpD, 2, Some(2))),
-                "clamp" => Some((TestFunc::Clamp, 3, Some(3))),
-                "digits" => Some((TestFunc::Digits, 1, None)),
-                _ => None,
+        const fn with_mmargs(self) -> (Self, u8, Option<u8>) {
+            match self {
+                TestFunc::Deg2Rad => (TestFunc::Deg2Rad, 1, Some(1)),
+                TestFunc::ExpD => (TestFunc::ExpD, 2, Some(2)),
+                TestFunc::Clamp => (TestFunc::Clamp, 3, Some(3)),
+                TestFunc::Digits => (TestFunc::Digits, 1, None),
             }
         }
         fn as_pointer(self) -> FunctionPointer<'static, f64> {
@@ -709,10 +697,84 @@ mod tests {
         }
     }
 
+    struct TestConstsNameTrie;
+
+    impl NameTrie<&'static f64> for TestConstsNameTrie {
+        fn nodes(&self) -> &[TrieNode] {
+            &[TrieNode::Branch('c', 1), TrieNode::Leaf(0)]
+        }
+
+        fn leaf_to_value(&self, _leaf: u32) -> &'static f64 {
+            &299792458.0
+        }
+    }
+
+    struct TestFuncsNameTrie;
+
+    impl NameTrie<(TestFunc, u8, Option<u8>)> for TestFuncsNameTrie {
+        fn nodes(&self) -> &[TrieNode] {
+            &[
+                TrieNode::Branch('c', 5),
+                TrieNode::Branch('l', 4),
+                TrieNode::Branch('a', 3),
+                TrieNode::Branch('m', 2),
+                TrieNode::Branch('p', 1),
+                TrieNode::Leaf(TestFunc::Clamp as u32),
+                TrieNode::Branch('d', 13),
+                TrieNode::Branch('e', 6),
+                TrieNode::Branch('g', 5),
+                TrieNode::Branch('2', 4),
+                TrieNode::Branch('r', 3),
+                TrieNode::Branch('a', 2),
+                TrieNode::Branch('d', 1),
+                TrieNode::Leaf(TestFunc::Deg2Rad as u32),
+                TrieNode::Branch('i', 5),
+                TrieNode::Branch('g', 4),
+                TrieNode::Branch('i', 3),
+                TrieNode::Branch('t', 2),
+                TrieNode::Branch('s', 1),
+                TrieNode::Leaf(TestFunc::Digits as u32),
+                TrieNode::Branch('e', 4),
+                TrieNode::Branch('x', 3),
+                TrieNode::Branch('p', 2),
+                TrieNode::Branch('d', 1),
+                TrieNode::Leaf(TestFunc::ExpD as u32),
+            ]
+        }
+        fn leaf_to_value(&self, leaf: u32) -> (TestFunc, u8, Option<u8>) {
+            TestFunc::from_repr(leaf as u8).unwrap().with_mmargs()
+        }
+    }
+
+    struct TestVarsNameTrie;
+
+    impl NameTrie<TestVar> for TestVarsNameTrie {
+        fn nodes(&self) -> &[TrieNode] {
+            &[
+                TrieNode::Branch('x', 1),
+                TrieNode::Leaf(TestVar::X as u32),
+                TrieNode::Branch('y', 1),
+                TrieNode::Leaf(TestVar::Y as u32),
+                TrieNode::Branch('t', 1),
+                TrieNode::Leaf(TestVar::T as u32),
+            ]
+        }
+        fn leaf_to_value(&self, leaf: u32) -> TestVar {
+            TestVar::from_repr(leaf as u8).unwrap()
+        }
+    }
+
     fn parse(input: &str) -> Result<MathAst<f64, TestVar, TestFunc>, ParsingError> {
         let tokens = TokenStream::new::<Sfr>(input)
             .map_err(|e| e.to_general())?
             .0;
+        MathAst::new(
+            &tokens,
+            &TestConstsNameTrie,
+            &TestFuncsNameTrie,
+            &TestVarsNameTrie,
+        )
+        .map_err(|e| e.to_general(input, &tokens))
     }
 
     #[test]
@@ -1405,9 +1467,9 @@ mod tests {
         fn evaluate(input: &str) -> f64 {
             MathAst::parse_and_eval(
                 &TokenStream::new::<Sfr>(input).unwrap().0,
-                parse_constant,
-                TestFunc::parse,
-                TestVar::parse,
+                &TestConstsNameTrie,
+                &TestFuncsNameTrie,
+                &TestVarsNameTrie,
                 &TestVarStore,
                 TestFunc::as_pointer,
             )

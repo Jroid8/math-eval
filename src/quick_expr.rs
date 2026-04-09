@@ -516,27 +516,21 @@ where
 
 #[cfg(all(debug_assertions, test))]
 mod tests {
-    use crate::tokenizer::TokenStream;
+    use strum::FromRepr;
+
+    use crate::{
         tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
+        trie::{EmptyNameTrie, NameTrie, TrieNode},
+    };
 
     use super::*;
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+    #[repr(u8)]
     enum TestVar {
         X,
         Y,
         T,
-    }
-
-    impl TestVar {
-        fn parse(input: &str) -> Option<Self> {
-            match input {
-                "x" => Some(TestVar::X),
-                "y" => Some(TestVar::Y),
-                "t" => Some(TestVar::T),
-                _ => None,
-            }
-        }
     }
 
     #[derive(Debug)]
@@ -552,28 +546,25 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+    #[repr(u8)]
     enum TestFunc {
         Sigmoid,
-        Hypot,
         F1,
         Digits,
     }
 
     impl TestFunc {
-        fn parse(input: &str) -> Option<(Self, u8, Option<u8>)> {
-            match input {
-                "sigmoid" => Some((TestFunc::Sigmoid, 1, Some(1))),
-                "hypot" => Some((TestFunc::Hypot, 2, Some(2))),
-                "func1" => Some((TestFunc::F1, 3, Some(3))),
-                "digits" => Some((TestFunc::Digits, 1, None)),
-                _ => None,
+        fn with_mmargs(self) -> (Self, u8, Option<u8>) {
+            match self {
+                TestFunc::Sigmoid => (TestFunc::Sigmoid, 1, Some(1)),
+                TestFunc::F1 => (TestFunc::F1, 3, Some(3)),
+                TestFunc::Digits => (TestFunc::Digits, 1, None),
             }
         }
         fn as_pointer(self) -> FunctionPointer<'static, f64> {
             match self {
                 TestFunc::Sigmoid => FunctionPointer::<f64>::Single(sigmoid),
-                TestFunc::Hypot => FunctionPointer::<f64>::Dual(hypot),
                 TestFunc::F1 => FunctionPointer::<f64>::Triple(func1),
                 TestFunc::Digits => FunctionPointer::Flexible(digits),
             }
@@ -590,10 +581,6 @@ mod tests {
         1.0 / (1.0 + (-x).exp())
     }
 
-    fn hypot(x: f64, y: f64) -> f64 {
-        (x * x + y * y).sqrt()
-    }
-
     fn func1(x: f64, y: f64, z: f64) -> f64 {
         x * x + 2.0 * y + 3.0 * z
     }
@@ -605,6 +592,58 @@ mod tests {
             .sum()
     }
 
+    struct TestVarsNameTrie;
+
+    impl NameTrie<TestVar> for TestVarsNameTrie {
+        fn nodes(&self) -> &[TrieNode] {
+            &[
+                TrieNode::Branch('x', 1),
+                TrieNode::Leaf(TestVar::X as u32),
+                TrieNode::Branch('y', 1),
+                TrieNode::Leaf(TestVar::Y as u32),
+                TrieNode::Branch('t', 1),
+                TrieNode::Leaf(TestVar::T as u32),
+            ]
+        }
+        fn leaf_to_value(&self, leaf: u32) -> TestVar {
+            TestVar::from_repr(leaf as u8).unwrap()
+        }
+    }
+
+    struct TestFuncsNameTrie;
+
+    impl NameTrie<(TestFunc, u8, Option<u8>)> for TestFuncsNameTrie {
+        fn nodes(&self) -> &[TrieNode] {
+            &[
+                TrieNode::Branch('d', 6),
+                TrieNode::Branch('i', 5),
+                TrieNode::Branch('g', 4),
+                TrieNode::Branch('i', 3),
+                TrieNode::Branch('t', 2),
+                TrieNode::Branch('s', 1),
+                TrieNode::Leaf(TestFunc::Digits as u32),
+                TrieNode::Branch('f', 5),
+                TrieNode::Branch('u', 4),
+                TrieNode::Branch('n', 3),
+                TrieNode::Branch('c', 2),
+                TrieNode::Branch('1', 1),
+                TrieNode::Leaf(TestFunc::F1 as u32),
+                TrieNode::Branch('s', 7),
+                TrieNode::Branch('i', 6),
+                TrieNode::Branch('g', 5),
+                TrieNode::Branch('m', 4),
+                TrieNode::Branch('o', 3),
+                TrieNode::Branch('i', 2),
+                TrieNode::Branch('d', 1),
+                TrieNode::Leaf(TestFunc::Sigmoid as u32),
+            ]
+        }
+
+        fn leaf_to_value(&self, leaf: u32) -> (TestFunc, u8, Option<u8>) {
+            TestFunc::from_repr(leaf as u8).unwrap().with_mmargs()
+        }
+    }
+
     #[test]
     fn convert() {
         fn convert(input: &str) -> QuickExpr<'_, f64, TestVar, TestFunc> {
@@ -613,7 +652,7 @@ mod tests {
                 .unwrap()
                 .0;
             QuickExpr::new(
-                MathAst::new(&tokens, |_| None, TestFunc::parse, TestVar::parse).unwrap(),
+                MathAst::new(&tokens, &EmptyNameTrie, &TestFuncsNameTrie, &TestVarsNameTrie).unwrap(),
                 TestFunc::as_pointer,
             )
         }

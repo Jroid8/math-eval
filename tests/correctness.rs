@@ -2,9 +2,13 @@ use std::{f64::consts::PI, fmt::Display, ops::RangeInclusive};
 
 use fastrand_contrib::f64_range;
 use math_eval::{
-    FunctionPointer, VariableStore, quick_expr::QuickExpr, syntax::MathAst, tokenizer::TokenStream,
+    FunctionPointer, VariableStore,
+    quick_expr::QuickExpr,
+    syntax::MathAst,
     tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
+    trie::{NameTrie, TrieNode},
 };
+use strum::FromRepr;
 
 use crate::common::{AstGen, rand_f64};
 
@@ -17,22 +21,12 @@ fn correctness_baseline() {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[repr(u8)]
 enum MyVar {
     X,
     Y,
     Sigma,
-}
-
-impl MyVar {
-    fn parse(input: &str) -> Option<MyVar> {
-        match input {
-            "x" => Some(MyVar::X),
-            "y" => Some(MyVar::Y),
-            "σ" => Some(MyVar::Sigma),
-            _ => None,
-        }
-    }
 }
 
 impl Display for MyVar {
@@ -42,6 +36,24 @@ impl Display for MyVar {
             MyVar::Y => "y",
             MyVar::Sigma => "σ",
         })
+    }
+}
+
+struct MyVarsNameTrie;
+
+impl NameTrie<MyVar> for MyVarsNameTrie {
+    fn nodes(&self) -> &[TrieNode] {
+        &[
+            TrieNode::Branch('x', 1),
+            TrieNode::Leaf(MyVar::X as u32),
+            TrieNode::Branch('y', 1),
+            TrieNode::Leaf(MyVar::Y as u32),
+            TrieNode::Branch('σ', 1),
+            TrieNode::Leaf(MyVar::Sigma as u32),
+        ]
+    }
+    fn leaf_to_value(&self, leaf: u32) -> MyVar {
+        MyVar::from_repr(leaf as u8).unwrap()
     }
 }
 
@@ -74,7 +86,8 @@ fn average(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[repr(u8)]
 enum MyFunc {
     Rad2Deg,
     Average,
@@ -83,13 +96,12 @@ enum MyFunc {
 }
 
 impl MyFunc {
-    fn parse(input: &str) -> Option<(MyFunc, u8, Option<u8>)> {
-        match input {
-            "rad2deg" => Some((MyFunc::Rad2Deg, 1, Some(1))),
-            "avg" | "average" => Some((MyFunc::Average, 1, None)),
-            "rand" | "random" => Some((MyFunc::Random, 1, Some(1))),
-            "terra" => Some((MyFunc::Terra, 2, Some(2))),
-            _ => None,
+    fn with_mmargs(self) -> (MyFunc, u8, Option<u8>) {
+        match self {
+            MyFunc::Rad2Deg => (MyFunc::Rad2Deg, 1, Some(1)),
+            MyFunc::Average => (MyFunc::Average, 1, None),
+            MyFunc::Random => (MyFunc::Random, 1, Some(1)),
+            MyFunc::Terra => (MyFunc::Terra, 2, Some(2)),
         }
     }
 
@@ -111,6 +123,48 @@ impl Display for MyFunc {
             MyFunc::Random => "rand",
             MyFunc::Terra => "terra",
         })
+    }
+}
+
+struct MyFuncsNameTrie;
+
+impl NameTrie<(MyFunc, u8, Option<u8>)> for MyFuncsNameTrie {
+    fn nodes(&self) -> &[TrieNode] {
+        &[
+            TrieNode::Branch('a', 9),
+            TrieNode::Branch('v', 8),
+            TrieNode::Branch('e', 5),
+            TrieNode::Branch('r', 4),
+            TrieNode::Branch('a', 3),
+            TrieNode::Branch('g', 2),
+            TrieNode::Branch('e', 1),
+            TrieNode::Leaf(MyFunc::Average as u32),
+            TrieNode::Branch('g', 1),
+            TrieNode::Leaf(MyFunc::Average as u32),
+            TrieNode::Branch('r', 13),
+            TrieNode::Branch('a', 12),
+            TrieNode::Branch('d', 5),
+            TrieNode::Branch('2', 4),
+            TrieNode::Branch('d', 3),
+            TrieNode::Branch('e', 2),
+            TrieNode::Branch('g', 1),
+            TrieNode::Leaf(MyFunc::Rad2Deg as u32),
+            TrieNode::Branch('n', 5),
+            TrieNode::Branch('d', 4),
+            TrieNode::Leaf(MyFunc::Random as u32),
+            TrieNode::Branch('o', 2),
+            TrieNode::Branch('m', 1),
+            TrieNode::Leaf(MyFunc::Random as u32),
+            TrieNode::Branch('t', 5),
+            TrieNode::Branch('e', 4),
+            TrieNode::Branch('r', 3),
+            TrieNode::Branch('r', 2),
+            TrieNode::Branch('a', 1),
+            TrieNode::Leaf(MyFunc::Terra as u32),
+        ]
+    }
+    fn leaf_to_value(&self, leaf: u32) -> (MyFunc, u8, Option<u8>) {
+        MyFunc::from_repr(leaf as u8).unwrap().with_mmargs()
     }
 }
 
@@ -159,13 +213,29 @@ const G: f64 = 6.6743e-11;
 const C: f64 = 299792458.0;
 const W: f64 = 520.0;
 
-fn parse_consts(input: &str) -> Option<f64> {
-    fastrand::u64(..);
-    match input {
-        "g" | "G" => Some(G),
-        "c" => Some(C),
-        "w" => Some(W),
-        _ => None,
+struct MyConstsNameTrie;
+
+impl NameTrie<&'static f64> for MyConstsNameTrie {
+    fn nodes(&self) -> &[TrieNode] {
+        &[
+            TrieNode::Branch('g', 1),
+            TrieNode::Leaf(0),
+            TrieNode::Branch('G', 1),
+            TrieNode::Leaf(0),
+            TrieNode::Branch('c', 1),
+            TrieNode::Leaf(1),
+            TrieNode::Branch('w', 1),
+            TrieNode::Leaf(2),
+        ]
+    }
+
+    fn leaf_to_value(&self, leaf: u32) -> &'static f64 {
+        match leaf {
+            0 => &G,
+            1 => &C,
+            2 => &W,
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -183,9 +253,9 @@ impl BaselineTestCase {
     fn perform(&self) {
         let ast = MathAst::new(
             &TokenStream::new::<Sfr>(self.str_expr).unwrap(),
-            parse_consts,
-            MyFunc::parse,
-            MyVar::parse,
+            &MyConstsNameTrie,
+            &MyFuncsNameTrie,
+            &MyVarsNameTrie,
         )
         .unwrap();
         let ctxful_funcs = CtxfulMyFuncs::new();
@@ -201,9 +271,9 @@ impl BaselineTestCase {
             let ast_res = ast.eval(mf2p, &MyStore { x, y, sigma });
             let syno_res = MathAst::parse_and_eval(
                 &TokenStream::new::<Sfr>(self.str_expr).unwrap(),
-                parse_consts,
-                MyFunc::parse,
-                MyVar::parse,
+                &MyConstsNameTrie,
+                &MyFuncsNameTrie,
+                &MyVarsNameTrie,
                 &MyStore { x, y, sigma },
                 mf2p,
             )

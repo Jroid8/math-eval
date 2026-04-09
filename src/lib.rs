@@ -9,19 +9,17 @@ use seq_macro::seq;
 use syntax::MathAst;
 use tokenizer::TokenStream;
 
-use crate::{number::NFPointer, quick_expr::QuickExpr};
+use crate::{number::NFPointer, quick_expr::QuickExpr, trie::NameTrie};
 
+pub mod builder;
 pub mod number;
 pub mod postfix_tree;
 pub mod quick_expr;
 pub mod syntax;
 pub mod tokenizer;
-pub mod builder;
 pub mod trie;
 
 pub use builder::EvalBuilder;
-
-const NAME_LIMIT: u8 = 32;
 
 pub trait VariableIdentifier: Clone + Copy + Debug + Eq + 'static {}
 
@@ -325,20 +323,20 @@ impl<N: Number> FunctionPointer<'_, N> {
     }
 }
 
-pub fn compile<'a, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
+pub fn compile<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
-    custom_constant_parser: impl Fn(&str) -> Option<N>,
-    custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
-    custom_variable_parser: impl Fn(&str) -> Option<V>,
-    function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
-) -> Result<QuickExpr<'a, N, V, F>, ParsingError> {
+    custom_constants: &impl NameTrie<&'c N>,
+    custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+    custom_variables: &impl NameTrie<V>,
+    function_to_pointer: impl Fn(F) -> FunctionPointer<'f, N>,
+) -> Result<QuickExpr<'f, N, V, F>, ParsingError> {
     let token_stream =
         TokenStream::new::<N::Recognizer>(input).map_err(|e| e.to_general())?;
     let mut syntax_tree = MathAst::new(
         &token_stream.0,
-        custom_constant_parser,
-        custom_function_parser,
-        custom_variable_parser,
+        custom_constants,
+        custom_functions,
+        custom_variables,
     )
     .map_err(|e| e.to_general(input, &token_stream.0))?;
     syntax_tree.aot_evaluation(&function_to_pointer);
@@ -346,21 +344,21 @@ pub fn compile<'a, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     Ok(QuickExpr::new(syntax_tree, function_to_pointer))
 }
 
-pub fn evaluate<'a, 'b, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
+pub fn evaluate<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
-    custom_constant_parser: impl Fn(&str) -> Option<N>,
-    custom_function_parser: impl Fn(&str) -> Option<(F, u8, Option<u8>)>,
-    custom_variable_parser: impl Fn(&str) -> Option<V>,
-    function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
+    custom_constants: &impl NameTrie<&'c N>,
+    custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+    custom_variables: &impl NameTrie<V>,
+    function_to_pointer: impl Fn(F) -> FunctionPointer<'f, N>,
     variable_values: &impl VariableStore<N, V>,
 ) -> Result<N, ParsingError> {
     let token_stream =
         TokenStream::new::<N::Recognizer>(input).map_err(|e| e.to_general())?;
     MathAst::parse_and_eval(
         &token_stream.0,
-        custom_constant_parser,
-        custom_function_parser,
-        custom_variable_parser,
+        custom_constants,
+        custom_functions,
+        custom_variables,
         variable_values,
         function_to_pointer,
     )

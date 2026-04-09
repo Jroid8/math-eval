@@ -2,10 +2,14 @@ use criterion::{
     Bencher, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
 use math_eval::{
-    FunctionPointer, VariableStore, quick_expr::QuickExpr, syntax::MathAst, tokenizer::TokenStream,
+    FunctionPointer, VariableStore,
+    quick_expr::QuickExpr,
+    syntax::MathAst,
     tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
+    trie::{EmptyNameTrie, NameTrie, TrieNode},
 };
 use meval::{Context, Expr};
+use strum::FromRepr;
 
 fn dist(x: f64, y: f64) -> f64 {
     (x * x + y * y).sqrt()
@@ -34,36 +38,44 @@ fn meval_calc_bencher(b: &mut Bencher<'_>, input: &str) {
     })
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, FromRepr)]
+#[repr(u8)]
 enum MyVar {
     X,
     Y,
     T,
 }
 
-impl MyVar {
-    fn parse(input: &str) -> Option<Self> {
-        match input {
-            "x" => Some(MyVar::X),
-            "y" => Some(MyVar::Y),
-            "t" => Some(MyVar::T),
-            _ => None,
-        }
+struct MyVarsNameTrie;
+
+impl NameTrie<MyVar> for MyVarsNameTrie {
+    fn nodes(&self) -> &[TrieNode] {
+        &[
+            TrieNode::Branch('x', 1),
+            TrieNode::Leaf(MyVar::X as u32),
+            TrieNode::Branch('y', 1),
+            TrieNode::Leaf(MyVar::Y as u32),
+            TrieNode::Branch('t', 1),
+            TrieNode::Leaf(MyVar::T as u32),
+        ]
+    }
+    fn leaf_to_value(&self, leaf: u32) -> MyVar {
+        MyVar::from_repr(leaf as u8).unwrap()
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, FromRepr)]
+#[repr(u8)]
 enum MyFunc {
     Dist,
     Slope,
 }
 
 impl MyFunc {
-    fn parse(input: &str) -> Option<(Self, u8, Option<u8>)> {
-        match input {
-            "dist" => Some((MyFunc::Dist, 2, Some(2))),
-            "slope" => Some((MyFunc::Slope, 4, Some(4))),
-            _ => None,
+    fn with_mmargs(self) -> (Self, u8, Option<u8>) {
+        match self {
+            MyFunc::Dist => (MyFunc::Dist, 2, Some(2)),
+            MyFunc::Slope => (MyFunc::Slope, 4, Some(4)),
         }
     }
 
@@ -72,6 +84,30 @@ impl MyFunc {
             MyFunc::Dist => FunctionPointer::<f64>::Dual(dist),
             MyFunc::Slope => FunctionPointer::<f64>::Flexible(slope),
         }
+    }
+}
+
+struct MyFuncsNameTrie;
+
+impl NameTrie<(MyFunc, u8, Option<u8>)> for MyFuncsNameTrie {
+    fn nodes(&self) -> &[TrieNode] {
+        &[
+            TrieNode::Branch('d', 4),
+            TrieNode::Branch('i', 3),
+            TrieNode::Branch('s', 2),
+            TrieNode::Branch('t', 1),
+            TrieNode::Leaf(MyFunc::Dist as u32),
+            TrieNode::Branch('s', 5),
+            TrieNode::Branch('l', 4),
+            TrieNode::Branch('o', 3),
+            TrieNode::Branch('p', 2),
+            TrieNode::Branch('e', 1),
+            TrieNode::Leaf(MyFunc::Slope as u32),
+        ]
+    }
+
+    fn leaf_to_value(&self, leaf: u32) -> (MyFunc, u8, Option<u8>) {
+        MyFunc::from_repr(leaf as u8).unwrap().with_mmargs()
     }
 }
 
@@ -126,10 +162,11 @@ fn calculation(crit: &mut Criterion) {
     for (input, desc) in exprs {
         let ast = MathAst::new(
             TokenStream::new::<Sfr>(input).unwrap(),
-            |_| None,
-            MyFunc::parse,
-            MyVar::parse,
-        ).unwrap();
+            &EmptyNameTrie,
+            &MyFuncsNameTrie,
+            &MyVarsNameTrie,
+        )
+        .unwrap();
         group.throughput(Throughput::Elements(ast.as_tree().len() as u64));
         group.bench_with_input(
             BenchmarkId::new("math-eval", desc),

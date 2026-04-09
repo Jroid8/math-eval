@@ -1,194 +1,179 @@
-use std::collections::HashMap;
-
 use seq_macro::seq;
 
-use crate::{FunctionPointer, ParsingError, compile, evaluate, number::Number};
+use crate::{
+    FunctionPointer, ParsingError, compile, evaluate,
+    number::Number,
+    trie::{EmptyNameTrie, VecNameTrie},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NoVariable;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OneVariable(String);
+pub struct OneVariable<'a>(&'a str);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TwoVariables([String; 2]);
+pub struct TwoVariables<'a>([(&'a str, u8); 2]);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ThreeVariables([String; 3]);
+pub struct ThreeVariables<'a>([(&'a str, u8); 3]);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FourVariables([String; 4]);
+pub struct FourVariables<'a>([(&'a str, u8); 4]);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ManyVariables(Vec<String>);
+pub struct ManyVariables<'a>(Vec<(&'a str, usize)>);
 
 #[derive(Clone, Debug)]
-pub struct EvalBuilder<'a, N, V = NoVariable>
-where
-    N: Number,
-{
-    constants: HashMap<String, N>,
-    function_identifier: HashMap<String, (usize, u8, Option<u8>)>,
-    functions: Vec<FunctionPointer<'a, N>>,
+pub struct EvalBuilder<'c, 'n, 'f, N: Number, V = NoVariable> {
+    constants: Vec<(&'n str, &'c N)>,
+    function_identifier: Vec<(&'n str, (usize, u8, Option<u8>))>,
+    functions: Vec<FunctionPointer<'f, N>>,
     variables: V,
 }
 
-impl<N> Default for EvalBuilder<'_, N>
-where
-    N: Number,
-{
+impl<N: Number> Default for EvalBuilder<'_, '_, '_, N> {
     fn default() -> Self {
         Self {
-            constants: HashMap::default(),
-            function_identifier: HashMap::default(),
+            constants: Vec::default(),
+            function_identifier: Vec::default(),
             functions: Vec::default(),
             variables: NoVariable,
         }
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N>
-where
-    N: Number,
-{
+impl<N: Number> EvalBuilder<'_, '_, '_, N> {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl<'a, N, V> EvalBuilder<'a, N, V>
-where
-    N: Number,
-{
-    pub fn add_constant(mut self, name: impl Into<String>, value: N) -> Self {
-        self.constants.insert(name.into(), value);
+impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
+    pub fn add_constant(mut self, name: &'n str, value: &'c N) -> Self {
+        self.constants.push((name, value));
         self
     }
 
-    pub fn add_fn1(
-        mut self,
-        name: impl Into<String>,
-        function: for<'b> fn(N::AsArg<'b>) -> N,
-    ) -> Self {
+    pub fn add_fn1(mut self, name: &'n str, function: for<'a> fn(N::AsArg<'a>) -> N) -> Self {
         self.function_identifier
-            .insert(name.into(), (self.functions.len(), 1, Some(1)));
+            .push((name, (self.functions.len(), 1, Some(1))));
         self.functions.push(FunctionPointer::Single(function));
         self
     }
 
     pub fn add_fn2(
         mut self,
-        name: impl Into<String>,
-        function: for<'b, 'c> fn(N::AsArg<'b>, N::AsArg<'c>) -> N,
+        name: &'n str,
+        function: for<'a, 'b> fn(N::AsArg<'a>, N::AsArg<'b>) -> N,
     ) -> Self {
         self.function_identifier
-            .insert(name.into(), (self.functions.len(), 2, Some(2)));
+            .push((name, (self.functions.len(), 2, Some(2))));
         self.functions.push(FunctionPointer::Dual(function));
         self
     }
 
     pub fn add_fn3(
         mut self,
-        name: impl Into<String>,
-        function: for<'b, 'c, 'd> fn(N::AsArg<'b>, N::AsArg<'c>, N::AsArg<'d>) -> N,
+        name: &'n str,
+        function: for<'i, 'j, 'k> fn(N::AsArg<'i>, N::AsArg<'j>, N::AsArg<'k>) -> N,
     ) -> Self {
         self.function_identifier
-            .insert(name.into(), (self.functions.len(), 3, Some(3)));
+            .push((name, (self.functions.len(), 3, Some(3))));
         self.functions.push(FunctionPointer::Triple(function));
         self
     }
 
     pub fn add_fn_flex(
         mut self,
-        name: impl Into<String>,
+        name: &'n str,
         mininum_argument_count: u8,
         maximum_argument_count: Option<u8>,
         function: fn(&[N]) -> N,
     ) -> Self {
-        self.function_identifier.insert(
-            name.into(),
+        self.function_identifier.push((
+            name,
             (
                 self.functions.len(),
                 mininum_argument_count,
                 maximum_argument_count,
             ),
-        );
+        ));
         self.functions.push(FunctionPointer::Flexible(function));
         self
     }
 
     pub fn add_dyn_fn1(
         mut self,
-        name: impl Into<String>,
-        function: &'a dyn for<'b> Fn(N::AsArg<'b>) -> N,
+        name: &'n str,
+        function: &'f dyn for<'b> Fn(N::AsArg<'b>) -> N,
     ) -> Self {
         self.function_identifier
-            .insert(name.into(), (self.functions.len(), 1, Some(1)));
+            .push((name, (self.functions.len(), 1, Some(1))));
         self.functions.push(FunctionPointer::DynSingle(function));
         self
     }
 
     pub fn add_dyn_fn2(
         mut self,
-        name: impl Into<String>,
-        function: &'a dyn for<'b, 'c> Fn(N::AsArg<'b>, N::AsArg<'c>) -> N,
+        name: &'n str,
+        function: &'f dyn for<'a, 'b> Fn(N::AsArg<'a>, N::AsArg<'b>) -> N,
     ) -> Self {
         self.function_identifier
-            .insert(name.into(), (self.functions.len(), 2, Some(2)));
+            .push((name, (self.functions.len(), 2, Some(2))));
         self.functions.push(FunctionPointer::DynDual(function));
         self
     }
 
     pub fn add_dyn_fn3(
         mut self,
-        name: impl Into<String>,
-        function: &'a dyn for<'b, 'c, 'd> Fn(N::AsArg<'b>, N::AsArg<'c>, N::AsArg<'d>) -> N,
+        name: &'n str,
+        function: &'f dyn for<'i, 'j, 'k> Fn(N::AsArg<'i>, N::AsArg<'j>, N::AsArg<'k>) -> N,
     ) -> Self {
         self.function_identifier
-            .insert(name.into(), (self.functions.len(), 3, Some(3)));
+            .push((name, (self.functions.len(), 3, Some(3))));
         self.functions.push(FunctionPointer::DynTriple(function));
         self
     }
 
     pub fn add_dyn_fn_flex(
         mut self,
-        name: impl Into<String>,
+        name: &'n str,
         mininum_argument_count: u8,
         maximum_argument_count: Option<u8>,
-        function: &'a dyn Fn(&[N]) -> N,
+        function: &'f dyn Fn(&[N]) -> N,
     ) -> Self {
-        self.function_identifier.insert(
-            name.into(),
+        self.function_identifier.push((
+            name,
             (
                 self.functions.len(),
                 mininum_argument_count,
                 maximum_argument_count,
             ),
-        );
+        ));
         self.functions.push(FunctionPointer::DynFlexible(function));
         self
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, NoVariable>
-where
-    N: Number,
-{
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, OneVariable> {
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, NoVariable> {
+    pub fn add_variable(self, name: &'n str) -> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
         EvalBuilder {
-            variables: OneVariable(name.into()),
+            variables: OneVariable(name),
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
         }
     }
-    pub fn build_as_evaluator(self) -> impl Fn(&str) -> Result<N, ParsingError> + 'a {
+    pub fn build_as_evaluator(mut self) -> impl Fn(&str) -> Result<N, ParsingError> {
+        let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
+        let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
         move |input: &str| {
-            evaluate(
+            evaluate::<_, (), _>(
                 input,
-                |inp| self.constants.get(inp).cloned(),
-                |inp| self.function_identifier.get(inp).copied(),
-                |_| None::<()>,
+                &constant_parser,
+                &function_parser,
+                &EmptyNameTrie,
                 |idx| self.functions[idx],
                 &(),
             )
@@ -196,16 +181,18 @@ where
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, NoVariable>
+impl<'c, 'n, 'f, N> EvalBuilder<'c, 'n, 'f, N, NoVariable>
 where
     N: for<'b> Number<AsArg<'b> = N> + Copy,
 {
-    pub fn build_as_function(self, input: &str) -> Result<impl FnMut() -> N + 'a, ParsingError> {
-        let expr = compile(
+    pub fn build_as_function(mut self, input: &str) -> Result<impl FnMut() -> N, ParsingError> {
+        let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
+        let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
+        let expr = compile::<_, (), _>(
             input,
-            |inp| self.constants.get(inp).copied(),
-            |inp| self.function_identifier.get(inp).copied(),
-            |_| None::<()>,
+            &constant_parser,
+            &function_parser,
+            &EmptyNameTrie,
             |idx| self.functions[idx],
         )?;
         let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
@@ -213,25 +200,25 @@ where
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, OneVariable>
-where
-    N: Number,
-{
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, TwoVariables> {
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
+    pub fn add_variable(self, name: &'n str) -> EvalBuilder<'c, 'n, 'f, N, TwoVariables<'n>> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
-            variables: TwoVariables([self.variables.0, name.into()]),
+            variables: TwoVariables([(self.variables.0, 0), (name, 1)]),
         }
     }
-    pub fn build_as_evaluator(self) -> impl Fn(&str, N) -> Result<N, ParsingError> + 'a {
+    pub fn build_as_evaluator(mut self) -> impl Fn(&str, N) -> Result<N, ParsingError> {
+        let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
+        let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
+        let variable_parser = VecNameTrie::new(&mut [(&self.variables.0, ())]);
         move |input: &str, v0: N| {
             evaluate(
                 input,
-                |inp| self.constants.get(inp).cloned(),
-                |inp| self.function_identifier.get(inp).copied(),
-                |inp| (self.variables.0 == inp).then_some(()),
+                &constant_parser,
+                &function_parser,
+                &variable_parser,
                 |idx| self.functions[idx],
                 &(v0,),
             )
@@ -239,16 +226,16 @@ where
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, OneVariable>
-where
-    N: Number,
-{
-    pub fn build_as_function(self, input: &str) -> Result<impl FnMut(N) -> N + 'a, ParsingError> {
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
+    pub fn build_as_function(mut self, input: &str) -> Result<impl FnMut(N) -> N, ParsingError> {
+        let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
+        let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
+        let variable_parser = VecNameTrie::new(&mut [(&self.variables.0, ())]);
         let expr = compile(
             input,
-            |inp| self.constants.get(inp).cloned(),
-            |inp| self.function_identifier.get(inp).copied(),
-            |inp| (self.variables.0 == inp).then_some(()),
+            &constant_parser,
+            &function_parser,
+            &variable_parser,
             |idx| self.functions[idx],
         )?;
         let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
@@ -259,17 +246,17 @@ where
 macro_rules! fn_build_as_evaluator {
     ($n: expr) => {
         seq!(I in 0..$n {
-            pub fn build_as_evaluator(self)
-                -> impl Fn(&str, #(N,)*) -> Result<N, ParsingError> + 'a {
+            pub fn build_as_evaluator(mut self)
+                -> impl Fn(&str, #(N,)*) -> Result<N, ParsingError> {
+                let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
+                let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
+                let variable_parser = VecNameTrie::new(self.variables.0.as_mut_slice());
                 move |input, #(v~I,)*| {
                     evaluate(
                         input,
-                        |inp| self.constants.get(inp).cloned(),
-                        |inp| self.function_identifier.get(inp).copied(),
-                        |inp| self.variables.0
-                            .iter()
-                            .position(|var| var == inp)
-                            .map(|i| i as u8),
+                        &constant_parser,
+                        &function_parser,
+                        &variable_parser,
                         |idx| self.functions[idx],
                         &[#(v~I,)*],
                     )
@@ -283,14 +270,17 @@ macro_rules! fn_build_as_function {
     ($n: expr) => {
         seq!(I in 0..$n {
             pub fn build_as_function(
-                self,
+                mut self,
                 input: &str,
-            ) -> Result<impl FnMut(#(N,)*) -> N + 'a, ParsingError> {
+            ) -> Result<impl FnMut(#(N,)*) -> N, ParsingError> {
+                let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
+                let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
+                let variable_parser = VecNameTrie::new(self.variables.0.as_mut_slice());
                 let expr = compile(
                     input,
-                    |inp| self.constants.get(inp).cloned(),
-                    |inp| self.function_identifier.get(inp).copied(),
-                    |inp| self.variables.0.iter().position(|var| var == inp).map(|i| i as u8),
+                    &constant_parser,
+                    &function_parser,
+                    &variable_parser,
                     |idx| self.functions[idx],
                 )?;
                 let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
@@ -303,82 +293,71 @@ macro_rules! fn_build_as_function {
 macro_rules! fn_add_variable {
     ($n: expr, $next: ident) => {
         seq!(I in 0..$n {
-            pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, $next> {
+            pub fn add_variable(self, name: &'n str) -> EvalBuilder<'c, 'n, 'f, N, $next<'n>> {
                 let mut iter = self.variables.0.into_iter();
                 EvalBuilder {
                     constants: self.constants,
                     function_identifier: self.function_identifier,
                     functions: self.functions,
-                    variables: $next([#(iter.next().unwrap(),)* name.into()]),
+                    variables: $next([#(iter.next().unwrap(),)* (name, $n)]),
                 }
             }
         });
     };
 }
 
-impl<'a, N> EvalBuilder<'a, N, TwoVariables>
-where
-    N: Number,
-{
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, TwoVariables<'n>> {
     fn_add_variable!(2, ThreeVariables);
     fn_build_as_evaluator!(2);
 }
 
-impl<'a, N> EvalBuilder<'a, N, TwoVariables>
-where
-    N: Number,
-{
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, TwoVariables<'n>> {
     fn_build_as_function!(2);
 }
 
-impl<'a, N> EvalBuilder<'a, N, ThreeVariables>
-where
-    N: Number,
-{
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ThreeVariables<'n>> {
     fn_add_variable!(3, FourVariables);
     fn_build_as_evaluator!(3);
 }
 
-impl<'a, N> EvalBuilder<'a, N, ThreeVariables>
-where
-    N: Number,
-{
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ThreeVariables<'n>> {
     fn_build_as_function!(3);
 }
 
-impl<'a, N> EvalBuilder<'a, N, FourVariables>
-where
-    N: Number,
-{
-    pub fn add_variable(self, name: impl Into<String>) -> EvalBuilder<'a, N, ManyVariables> {
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, FourVariables<'n>> {
+    pub fn add_variable(self, name: &'n str) -> EvalBuilder<'c, 'n, 'f, N, ManyVariables<'n>> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
             functions: self.functions,
-            variables: ManyVariables(self.variables.0.into_iter().chain([name.into()]).collect()),
+            variables: ManyVariables(
+                self.variables
+                    .0
+                    .into_iter()
+                    .map(|(n, i)| (n, i as usize))
+                    .chain(Some((name, self.variables.0.len())))
+                    .collect(),
+            ),
         }
     }
     fn_build_as_evaluator!(4);
 }
 
-impl<'a, N> EvalBuilder<'a, N, FourVariables>
-where
-    N: Number,
-{
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, FourVariables<'n>> {
     fn_build_as_function!(4);
 }
 
-impl<'a, N> EvalBuilder<'a, N, ManyVariables>
-where
-    N: Number,
-{
-    pub fn build_as_evaluator(self) -> impl Fn(&str, &[N]) -> Result<N, ParsingError> + 'a {
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ManyVariables<'n>> {
+    pub fn build_as_evaluator(mut self) -> impl Fn(&str, &[N]) -> Result<N, ParsingError> {
+        let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
+        let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
+        let variable_parser = VecNameTrie::new(self.variables.0.as_mut_slice());
         move |input, vars| {
             evaluate(
                 input,
-                |inp| self.constants.get(inp).cloned(),
-                |inp| self.function_identifier.get(inp).copied(),
-                |inp| self.variables.0.iter().position(|var| var == inp),
+                &constant_parser,
+                &function_parser,
+                &variable_parser,
                 |idx| self.functions[idx],
                 &vars,
             )
@@ -386,19 +365,19 @@ where
     }
 }
 
-impl<'a, N> EvalBuilder<'a, N, ManyVariables>
-where
-    N: Number,
-{
+impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ManyVariables<'n>> {
     pub fn build_as_function<'b>(
-        self,
+        mut self,
         input: &str,
-    ) -> Result<impl FnMut(&'b [N]) -> N + 'a, ParsingError> {
+    ) -> Result<impl FnMut(&'b [N]) -> N, ParsingError> {
+        let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
+        let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
+        let variable_parser = VecNameTrie::new(self.variables.0.as_mut_slice());
         let expr = compile(
             input,
-            |inp| self.constants.get(inp).cloned(),
-            |inp| self.function_identifier.get(inp).copied(),
-            |inp| self.variables.0.iter().position(|var| var == inp),
+            &constant_parser,
+            &function_parser,
+            &variable_parser,
             |idx| self.functions[idx],
         )?;
         let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
@@ -408,26 +387,23 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, fmt::{Debug, Display}};
+    use std::fmt::{Debug, Display};
 
     use super::*;
     use crate::FunctionPointer;
 
     #[derive(PartialEq, Debug)]
-    struct UnexpectedBuilderFieldValues<V> {
-        constants: Option<(HashMap<String, f64>, HashMap<String, f64>)>,
+    struct UnexpectedBuilderFieldValues<'n, 'c, V> {
+        constants: Option<(Vec<(&'n str, &'c f64)>, Vec<(&'n str, &'c f64)>)>,
         function_identifier: Option<(
-            HashMap<String, (usize, u8, Option<u8>)>,
-            HashMap<String, (usize, u8, Option<u8>)>,
+            Vec<(&'n str, (usize, u8, Option<u8>))>,
+            Vec<(&'n str, (usize, u8, Option<u8>))>,
         )>,
         functions: Vec<(usize, f64)>,
         variables: Option<(V, V)>,
     }
 
-    impl<V> Display for UnexpectedBuilderFieldValues<V>
-    where
-        V: Debug,
-    {
+    impl<V: Debug> Display for UnexpectedBuilderFieldValues<'_, '_, V> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             if let Some(consts) = &self.constants {
                 writeln!(f, "constants: {:?} != {:?}", consts.0, consts.1)?;
@@ -446,15 +422,15 @@ mod tests {
     }
 
     #[allow(clippy::result_large_err)]
-    fn compare<V: PartialEq>(
-        builder: EvalBuilder<'_, f64, V>,
-        constants: impl Iterator<Item = (&'static str, f64)>,
-        function_identifier: impl Iterator<Item = (&'static str, usize, u8, Option<u8>)>,
+    fn compare<'n, 'c, V: PartialEq>(
+        builder: EvalBuilder<'c, 'n, '_, f64, V>,
+        constants: impl Iterator<Item = (&'n str, &'c f64)>,
+        function_identifier: impl Iterator<Item = (&'n str, usize, u8, Option<u8>)>,
         variables: V,
-    ) -> Option<UnexpectedBuilderFieldValues<V>> {
-        let constants = constants.map(|(n, v)| (n.to_string(), v)).collect();
+    ) -> Option<UnexpectedBuilderFieldValues<'n, 'c, V>> {
+        let constants: Vec<_> = constants.collect();
         let function_identifier = function_identifier
-            .map(|(n, id, min, max)| (n.to_string(), (id, min, max)))
+            .map(|(n, id, min, max)| (n, (id, min, max)))
             .collect();
         let res = UnexpectedBuilderFieldValues {
             constants: (builder.constants != constants).then_some((builder.constants, constants)),
@@ -519,8 +495,8 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new().add_constant("c", 3.57),
-            [("c", 3.57)].into_iter(),
+            EvalBuilder::new().add_constant("c", &3.57),
+            [("c", &3.57)].into_iter(),
             [].into_iter(),
             NoVariable,
         ));
@@ -529,7 +505,7 @@ mod tests {
             EvalBuilder::new().add_variable("x"),
             [].into_iter(),
             [].into_iter(),
-            OneVariable(String::from("x")),
+            OneVariable("x"),
         ));
 
         test!(compare(
@@ -549,8 +525,8 @@ mod tests {
         test!(compare(
             EvalBuilder::new()
                 .add_fn1("f2", |_| 0.0)
-                .add_constant("c1", 7.319),
-            [("c1", 7.319)].into_iter(),
+                .add_constant("c1", &7.319),
+            [("c1", &7.319)].into_iter(),
             [("f2", 0, 1, Some(1))].into_iter(),
             NoVariable,
         ));
@@ -558,9 +534,9 @@ mod tests {
         let zero = String::from("0");
         test!(compare(
             EvalBuilder::new()
-                .add_constant("c1", 7.319)
+                .add_constant("c1", &7.319)
                 .add_dyn_fn1("f2", &|_| zero.parse().unwrap()),
-            [("c1", 7.319)].into_iter(),
+            [("c1", &7.319)].into_iter(),
             [("f2", 0, 1, Some(1))].into_iter(),
             NoVariable,
         ));
@@ -622,21 +598,21 @@ mod tests {
                 ("ff", 2, 3, None)
             ]
             .into_iter(),
-            OneVariable(String::from("t")),
+            OneVariable("t"),
         ));
 
         test!(compare(
             EvalBuilder::new().add_variable("y").add_variable("x"),
             [].into_iter(),
             [].into_iter(),
-            TwoVariables([String::from("y"), String::from("x")]),
+            TwoVariables([("y", 0), ("x", 1)]),
         ));
 
         test!(compare(
             EvalBuilder::new().add_variable("y").add_variable("x"),
             [].into_iter(),
             [].into_iter(),
-            TwoVariables([String::from("y"), String::from("x")]),
+            TwoVariables([("y", 0), ("x", 1)]),
         ));
 
         test!(compare(
@@ -653,7 +629,7 @@ mod tests {
                 ("ff", 2, 3, None)
             ]
             .into_iter(),
-            TwoVariables([String::from("y"), String::from("x")]),
+            TwoVariables([("y", 0), ("x", 1)]),
         ));
 
         test!(compare(
@@ -663,7 +639,7 @@ mod tests {
                 .add_variable("z"),
             [].into_iter(),
             [].into_iter(),
-            ThreeVariables([String::from("y"), String::from("x"), String::from("z")]),
+            ThreeVariables([("y", 0), ("x", 1), ("z", 2)]),
         ));
 
         test!(compare(
@@ -683,7 +659,7 @@ mod tests {
                 ("f3", 3, 3, Some(3))
             ]
             .into_iter(),
-            ThreeVariables([String::from("y"), String::from("x"), String::from("z")]),
+            ThreeVariables([("y", 0), ("x", 1), ("z", 2)]),
         ));
 
         test!(compare(
@@ -694,12 +670,7 @@ mod tests {
                 .add_variable("w"),
             [].into_iter(),
             [].into_iter(),
-            FourVariables([
-                String::from("y"),
-                String::from("x"),
-                String::from("z"),
-                String::from("w")
-            ]),
+            FourVariables([("y", 0), ("x", 1), ("z", 2), ("w", 3)]),
         ));
 
         let three = String::from("3");
@@ -707,7 +678,7 @@ mod tests {
             EvalBuilder::new()
                 .add_dyn_fn1("f0", &|_| zero.parse().unwrap())
                 .add_variable("y")
-                .add_constant("c", 9.999999)
+                .add_constant("c", &9.999999)
                 .add_fn2("f1", |_, _| 1.0)
                 .add_variable("x")
                 .add_fn3("f2", |_, _, _| 2.0)
@@ -715,7 +686,7 @@ mod tests {
                 .add_dyn_fn_flex("f3", 1, Some(5), &|_| three.parse().unwrap())
                 .add_variable("w")
                 .add_fn1("f4", |_| 4.0),
-            [("c", 9.999999)].into_iter(),
+            [("c", &9.999999)].into_iter(),
             [
                 ("f0", 0, 1, Some(1)),
                 ("f1", 1, 2, Some(2)),
@@ -724,12 +695,7 @@ mod tests {
                 ("f4", 4, 1, Some(1))
             ]
             .into_iter(),
-            FourVariables([
-                String::from("y"),
-                String::from("x"),
-                String::from("z"),
-                String::from("w")
-            ]),
+            FourVariables([("y", 0), ("x", 1), ("z", 2), ("w", 3)]),
         ));
 
         test!(compare(
@@ -741,21 +707,15 @@ mod tests {
                 .add_variable("w"),
             [].into_iter(),
             [].into_iter(),
-            ManyVariables(vec![
-                String::from("y"),
-                String::from("x"),
-                String::from("z"),
-                String::from("v"),
-                String::from("w")
-            ]),
+            ManyVariables(vec![("y", 0), ("x", 1), ("z", 2), ("v", 3), ("w", 4)]),
         ));
 
         test!(compare(
             EvalBuilder::new()
                 .add_fn1("f0", |_| 0.0)
                 .add_variable("y")
-                .add_constant("c", 9.999999)
-                .add_constant("ce", 2.222222)
+                .add_constant("c", &9.999999)
+                .add_constant("ce", &2.222222)
                 .add_fn2("f1", |_, _| 1.0)
                 .add_variable("x")
                 .add_fn3("f2", |_, _, _| 2.0)
@@ -765,7 +725,7 @@ mod tests {
                 .add_fn1("f4", |_| 4.0)
                 .add_variable("t")
                 .add_fn_flex("f5", 5, None, |_| 5.0),
-            [("c", 9.999999), ("ce", 2.222222)].into_iter(),
+            [("c", &9.999999), ("ce", &2.222222)].into_iter(),
             [
                 ("f0", 0, 1, Some(1)),
                 ("f1", 1, 2, Some(2)),
@@ -775,13 +735,7 @@ mod tests {
                 ("f5", 5, 5, None)
             ]
             .into_iter(),
-            ManyVariables(vec![
-                String::from("y"),
-                String::from("x"),
-                String::from("z"),
-                String::from("w"),
-                String::from("t")
-            ]),
+            ManyVariables(vec![("y", 0), ("x", 1), ("z", 2), ("w", 3), ("t", 4)]),
         ));
 
         let four = String::from("4");
@@ -789,8 +743,8 @@ mod tests {
             EvalBuilder::new()
                 .add_dyn_fn1("f0", &|_| zero.parse().unwrap())
                 .add_variable("y")
-                .add_constant("c", 9.999999)
-                .add_constant("ce", 2.222222)
+                .add_constant("c", &9.999999)
+                .add_constant("ce", &2.222222)
                 .add_dyn_fn2("f1", &|_, _| one.parse().unwrap())
                 .add_variable("x")
                 .add_dyn_fn3("f2", &|_, _, _| two.parse().unwrap())
@@ -801,7 +755,7 @@ mod tests {
                 .add_variable("t")
                 .add_dyn_fn_flex("f5", 5, None, &|_| three.parse::<f64>().unwrap()
                     + two.parse::<f64>().unwrap()),
-            [("c", 9.999999), ("ce", 2.222222)].into_iter(),
+            [("c", &9.999999), ("ce", &2.222222)].into_iter(),
             [
                 ("f0", 0, 1, Some(1)),
                 ("f1", 1, 2, Some(2)),
@@ -811,13 +765,7 @@ mod tests {
                 ("f5", 5, 5, None)
             ]
             .into_iter(),
-            ManyVariables(vec![
-                String::from("y"),
-                String::from("x"),
-                String::from("z"),
-                String::from("w"),
-                String::from("t")
-            ]),
+            ManyVariables(vec![("y", 0), ("x", 1), ("z", 2), ("w", 3), ("t", 4)]),
         ))
     }
 }
