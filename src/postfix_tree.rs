@@ -5,9 +5,7 @@ use std::{
 };
 
 use subtree_collection::SubtreeCollection;
-use tree_iterators::{ChildIter, ParentIter, PostOrderIter};
-
-use crate::postfix_tree::tree_iterators::EulerTour;
+use tree_iterators::{ChildIter, ParentIter, PostOrderIter, EulerTour};
 
 pub mod subtree_collection;
 pub mod tree_iterators;
@@ -20,41 +18,50 @@ pub trait Node: Clone + std::fmt::Debug {
 struct OptUsize(usize);
 
 impl OptUsize {
-    #[expect(dead_code)]
+    #[inline]
     fn is_some(&self) -> bool {
         self.0 != usize::MAX
     }
 
+    #[inline]
     fn is_none(&self) -> bool {
         self.0 == usize::MAX
     }
 
+    #[inline]
     fn as_opt(&self) -> Option<usize> {
-        if self.0 == usize::MAX {
-            None
-        } else {
+        if self.is_some() {
             Some(self.0)
-        }
-    }
-
-    fn as_mut(&mut self) -> Option<&mut usize> {
-        if self.0 == usize::MAX {
-            None
         } else {
-            Some(&mut self.0)
+            None
         }
     }
 
+    #[inline]
+    fn as_mut(&mut self) -> Option<&mut usize> {
+        if self.is_some() {
+            Some(&mut self.0)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
     #[expect(dead_code)]
     fn map<T>(self, f: impl FnOnce(usize) -> T) -> Option<T> {
-        self.as_opt().map(f)
+        if self.is_some() {
+            Some(f(self.0))
+        } else {
+            None
+        }
     }
 
+    #[inline]
     fn unwrap(self) -> usize {
-        if self.0 == usize::MAX {
-            panic!("called `unwrap()` on a `None` value")
-        } else {
+        if self.is_some() {
             self.0
+        } else {
+            panic!("called `unwrap()` on a `None` value")
         }
     }
 }
@@ -66,12 +73,6 @@ impl std::fmt::Debug for OptUsize {
         } else {
             f.debug_tuple("Some").field(&self.0).finish()
         }
-    }
-}
-
-impl From<usize> for OptUsize {
-    fn from(value: usize) -> Self {
-        OptUsize(value)
     }
 }
 
