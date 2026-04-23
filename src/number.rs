@@ -2,6 +2,7 @@ use std::{
     f64::consts::{E, PI, TAU},
     fmt::{Debug, Display},
     marker::PhantomData,
+    num::NonZeroU8,
     ops::{Add, Div, Mul, Neg, Sub},
     str::FromStr,
 };
@@ -9,7 +10,7 @@ use std::{
 use strum::{EnumIter, FromRepr};
 
 use crate::{
-    FunctionIdentifier as FuncId,
+    FunctionIdentifier as FuncId, nz,
     quick_expr::{CtxFuncPtr, MarkedFunc},
     tokenizer::{NumberRecognizer, StandardFloatRecognizer},
     trie::{NameTrie, TrieNode},
@@ -105,23 +106,20 @@ impl BuiltinFunction {
             },
         }
     }
-    pub fn is_flex(self) -> bool {
+    pub const fn is_flex(self) -> bool {
         matches!(self, BuiltinFunction::Min | BuiltinFunction::Max)
     }
-    pub fn min_args(self) -> u8 {
+    pub const fn min_args(self) -> NonZeroU8 {
         match self {
-            BuiltinFunction::Log => 2,
-            BuiltinFunction::Max => 2,
-            BuiltinFunction::Min => 2,
-            _ => 1,
+            BuiltinFunction::Log | BuiltinFunction::Max | BuiltinFunction::Min => nz!(2),
+            _ => nz!(1),
         }
     }
-    pub fn max_args(self) -> Option<u8> {
+    pub const fn max_args(self) -> Option<NonZeroU8> {
         match self {
-            BuiltinFunction::Log => Some(2),
-            BuiltinFunction::Max => None,
-            BuiltinFunction::Min => None,
-            _ => Some(1),
+            BuiltinFunction::Log => Some(nz!(2)),
+            BuiltinFunction::Max | BuiltinFunction::Min => None,
+            _ => Some(nz!(1)),
         }
     }
     pub fn name(self) -> &'static str {

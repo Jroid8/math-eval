@@ -4,7 +4,7 @@ use math_eval::{
     FunctionPointer, VariableStore,
     number::BuiltinFunction,
     quick_expr::QuickExpr,
-    syntax::MathAst,
+    syntax::{CfInfo, MathAst},
     tokenizer::{
         DelimEdge, DelimKind, DelimiterToken, OprToken, StandardFloatRecognizer as Sfr, Token,
         TokenStream,
@@ -296,11 +296,11 @@ enum MyFunc {
 }
 
 impl MyFunc {
-    fn with_mmargs(self) -> (Self, u8, Option<u8>) {
+    fn with_info(self) -> CfInfo<Self> {
         match self {
-            MyFunc::Sigmoid => (MyFunc::Sigmoid, 1, Some(1)),
-            MyFunc::Clamp => (MyFunc::Clamp, 3, Some(3)),
-            MyFunc::Digits => (MyFunc::Digits, 1, None),
+            MyFunc::Sigmoid => CfInfo::new(MyFunc::Sigmoid, nz!(1), Some(nz!(1))),
+            MyFunc::Clamp => CfInfo::new(MyFunc::Clamp, nz!(3), Some(nz!(3))),
+            MyFunc::Digits => CfInfo::new(MyFunc::Digits, nz!(1), None),
         }
     }
 
@@ -315,7 +315,7 @@ impl MyFunc {
 
 struct MyFuncNameTrie;
 
-impl NameTrie<(MyFunc, u8, Option<u8>)> for MyFuncNameTrie {
+impl NameTrie<CfInfo<MyFunc>> for MyFuncNameTrie {
     fn nodes(&self) -> &[TrieNode] {
         &[
             TrieNode::Branch('c', 5),
@@ -341,8 +341,8 @@ impl NameTrie<(MyFunc, u8, Option<u8>)> for MyFuncNameTrie {
             TrieNode::Leaf(MyFunc::Sigmoid as u32),
         ]
     }
-    fn leaf_to_value(&self, leaf: u32) -> (MyFunc, u8, Option<u8>) {
-        MyFunc::from_repr(leaf as u8).unwrap().with_mmargs()
+    fn leaf_to_value(&self, leaf: u32) -> CfInfo<MyFunc> {
+        MyFunc::from_repr(leaf as u8).unwrap().with_info()
     }
 }
 

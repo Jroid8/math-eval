@@ -4,7 +4,7 @@ use fastrand_contrib::f64_range;
 use math_eval::{
     FunctionPointer, VariableStore,
     quick_expr::QuickExpr,
-    syntax::MathAst,
+    syntax::{CfInfo, MathAst},
     tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
     trie::{NameTrie, TrieNode},
 };
@@ -96,12 +96,12 @@ enum MyFunc {
 }
 
 impl MyFunc {
-    fn with_mmargs(self) -> (MyFunc, u8, Option<u8>) {
+    fn with_info(self) -> CfInfo<MyFunc> {
         match self {
-            MyFunc::Rad2Deg => (MyFunc::Rad2Deg, 1, Some(1)),
-            MyFunc::Average => (MyFunc::Average, 1, None),
-            MyFunc::Random => (MyFunc::Random, 1, Some(1)),
-            MyFunc::Terra => (MyFunc::Terra, 2, Some(2)),
+            MyFunc::Rad2Deg => CfInfo::new(MyFunc::Rad2Deg, nz!(1), Some(nz!(1))),
+            MyFunc::Average => CfInfo::new(MyFunc::Average, nz!(1), None),
+            MyFunc::Random => CfInfo::new(MyFunc::Random, nz!(1), Some(nz!(1))),
+            MyFunc::Terra => CfInfo::new(MyFunc::Terra, nz!(2), Some(nz!(2))),
         }
     }
 
@@ -128,7 +128,7 @@ impl Display for MyFunc {
 
 struct MyFuncsNameTrie;
 
-impl NameTrie<(MyFunc, u8, Option<u8>)> for MyFuncsNameTrie {
+impl NameTrie<CfInfo<MyFunc>> for MyFuncsNameTrie {
     fn nodes(&self) -> &[TrieNode] {
         &[
             TrieNode::Branch('a', 9),
@@ -163,8 +163,8 @@ impl NameTrie<(MyFunc, u8, Option<u8>)> for MyFuncsNameTrie {
             TrieNode::Leaf(MyFunc::Terra as u32),
         ]
     }
-    fn leaf_to_value(&self, leaf: u32) -> (MyFunc, u8, Option<u8>) {
-        MyFunc::from_repr(leaf as u8).unwrap().with_mmargs()
+    fn leaf_to_value(&self, leaf: u32) -> CfInfo<MyFunc> {
+        MyFunc::from_repr(leaf as u8).unwrap().with_info()
     }
 }
 

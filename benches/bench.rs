@@ -4,7 +4,7 @@ use criterion::{
 use math_eval::{
     FunctionPointer, VariableStore,
     quick_expr::QuickExpr,
-    syntax::MathAst,
+    syntax::{CfInfo, MathAst},
     tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
     trie::{EmptyNameTrie, NameTrie, TrieNode},
 };
@@ -71,11 +71,17 @@ enum MyFunc {
     Slope,
 }
 
+macro_rules! nz {
+    ($v: literal) => {
+        const { std::num::NonZero::new($v).unwrap() }
+    };
+}
+
 impl MyFunc {
-    fn with_mmargs(self) -> (Self, u8, Option<u8>) {
+    fn with_info(self) -> CfInfo<Self> {
         match self {
-            MyFunc::Dist => (MyFunc::Dist, 2, Some(2)),
-            MyFunc::Slope => (MyFunc::Slope, 4, Some(4)),
+            MyFunc::Dist => CfInfo::new(MyFunc::Dist, nz!(2), Some(nz!(2))),
+            MyFunc::Slope => CfInfo::new(MyFunc::Slope, nz!(4), Some(nz!(4))),
         }
     }
 
@@ -89,7 +95,7 @@ impl MyFunc {
 
 struct MyFuncsNameTrie;
 
-impl NameTrie<(MyFunc, u8, Option<u8>)> for MyFuncsNameTrie {
+impl NameTrie<CfInfo<MyFunc>> for MyFuncsNameTrie {
     fn nodes(&self) -> &[TrieNode] {
         &[
             TrieNode::Branch('d', 4),
@@ -106,8 +112,8 @@ impl NameTrie<(MyFunc, u8, Option<u8>)> for MyFuncsNameTrie {
         ]
     }
 
-    fn leaf_to_value(&self, leaf: u32) -> (MyFunc, u8, Option<u8>) {
-        MyFunc::from_repr(leaf as u8).unwrap().with_mmargs()
+    fn leaf_to_value(&self, leaf: u32) -> CfInfo<MyFunc> {
+        MyFunc::from_repr(leaf as u8).unwrap().with_info()
     }
 }
 

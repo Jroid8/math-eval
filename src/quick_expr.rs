@@ -322,9 +322,9 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                     if bf.is_flex() {
                         stack_exclusive = true;
                     }
-                    arg_cons = argc;
+                    arg_cons = argc.get();
                     instructions.push(Instr::Calculate(MarkedFunc::new(
-                        CtxFuncPtr::from_ptr_args(bf.into(), argc),
+                        CtxFuncPtr::from_ptr_args(bf.into(), argc.get()),
                         FunctionSource::BuiltinFunction(bf),
                     )));
                 }
@@ -333,9 +333,9 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                     if ptr.is_flex() {
                         stack_exclusive = true;
                     }
-                    arg_cons = argc;
+                    arg_cons = argc.get();
                     instructions.push(Instr::Calculate(MarkedFunc::new(
-                        CtxFuncPtr::from_ptr_args(ptr, argc),
+                        CtxFuncPtr::from_ptr_args(ptr, argc.get()),
                         FunctionSource::CustomFunction(cf),
                     )));
                 }
@@ -504,6 +504,8 @@ mod tests {
     use strum::FromRepr;
 
     use crate::{
+        nz,
+        syntax::CfInfo,
         tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
         trie::{EmptyNameTrie, NameTrie, TrieNode},
     };
@@ -540,11 +542,11 @@ mod tests {
     }
 
     impl TestFunc {
-        fn with_mmargs(self) -> (Self, u8, Option<u8>) {
+        fn with_info(self) -> CfInfo<Self> {
             match self {
-                TestFunc::Sigmoid => (TestFunc::Sigmoid, 1, Some(1)),
-                TestFunc::F1 => (TestFunc::F1, 3, Some(3)),
-                TestFunc::Digits => (TestFunc::Digits, 1, None),
+                TestFunc::Sigmoid => CfInfo::new(TestFunc::Sigmoid, nz!(1), Some(nz!(1))),
+                TestFunc::F1 => CfInfo::new(TestFunc::F1, nz!(3), Some(nz!(3))),
+                TestFunc::Digits => CfInfo::new(TestFunc::Digits, nz!(1), None),
             }
         }
         fn as_pointer(self) -> FunctionPointer<'static, f64> {
@@ -597,7 +599,7 @@ mod tests {
 
     struct TestFuncsNameTrie;
 
-    impl NameTrie<(TestFunc, u8, Option<u8>)> for TestFuncsNameTrie {
+    impl NameTrie<CfInfo<TestFunc>> for TestFuncsNameTrie {
         fn nodes(&self) -> &[TrieNode] {
             &[
                 TrieNode::Branch('d', 6),
@@ -624,8 +626,8 @@ mod tests {
             ]
         }
 
-        fn leaf_to_value(&self, leaf: u32) -> (TestFunc, u8, Option<u8>) {
-            TestFunc::from_repr(leaf as u8).unwrap().with_mmargs()
+        fn leaf_to_value(&self, leaf: u32) -> CfInfo<TestFunc> {
+            TestFunc::from_repr(leaf as u8).unwrap().with_info()
         }
     }
 

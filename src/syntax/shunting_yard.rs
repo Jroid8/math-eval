@@ -1,12 +1,14 @@
-use std::{fmt::Debug, marker::PhantomData};
+use std::{fmt::Debug, marker::PhantomData, num::NonZeroU8};
 
 use super::{AstNode, FunctionType, MathAst, SyntaxError, SyntaxErrorKind};
 use crate::{
     BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, UnaryOp, VariableIdentifier as VarId,
     VariableStore,
     number::{BFPointer, BuiltinFuncsNameTrie, BuiltinFunction, Number},
+    nz,
     postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans, SubtreeCollection},
     syntax::{
+        CfInfo,
         grammar::{ResOprToken, ResToken, ResolvedTkStream},
         token_fragmentation::{FragKind, NAME_LIMIT, ParsedFragment, fragment_token},
     },
@@ -16,7 +18,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SyFunction<F: FuncId> {
     Builtin(BuiltinFunction),
-    Custom(F, u8, Option<u8>),
+    Custom(F, NonZeroU8, Option<NonZeroU8>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +26,7 @@ pub(super) enum SyOperator<F: FuncId> {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
     HpNeg,
-    Function(SyFunction<F>, u8),
+    Function(SyFunction<F>, NonZeroU8),
     FuncNoParen(FunctionType<F>),
     Parentheses,
 }
@@ -71,12 +73,20 @@ impl<F: FuncId> SyOperator<F> {
             SyOperator::Function(SyFunction::Custom(cf, _, _), args) => {
                 AstNode::Function(FunctionType::Custom(cf), args)
             }
-            SyOperator::FuncNoParen(FunctionType::Builtin(bf)) => AstNode::Function(bf.into(), 1),
+            SyOperator::FuncNoParen(FunctionType::Builtin(bf)) => {
+                AstNode::Function(bf.into(), nz!(1))
+            }
             SyOperator::FuncNoParen(FunctionType::Custom(cf)) => {
-                AstNode::Function(FunctionType::Custom(cf), 1)
+                AstNode::Function(FunctionType::Custom(cf), nz!(1))
             }
             SyOperator::Parentheses => unreachable!(),
         }
+    }
+}
+
+impl<F: FuncId> From<CfInfo<F>> for SyFunction<F> {
+    fn from(cfi: CfInfo<F>) -> Self {
+        SyFunction::Custom(cfi.ident, cfi.min_args, cfi.max_args)
     }
 }
 
@@ -256,8 +266,8 @@ where
                     func(self.args_pop()?.asarg(), rhs.asarg())
                 }
                 BFPointer::Flexible(func) => {
-                    let res = func(&self.args[self.args.len() - args as usize..]);
-                    self.args.truncate(self.args.len() - args as usize);
+                    let res = func(&self.args[self.args.len() - args.get() as usize..]);
+                    self.args.truncate(self.args.len() - args.get() as usize);
                     res
                 }
             },
@@ -273,8 +283,8 @@ where
                     func(self.args_pop()?.asarg(), a2.asarg(), a3.asarg())
                 }
                 FunctionPointer::Flexible(func) => {
-                    let res = func(&self.args[self.args.len() - args as usize..]);
-                    self.args.truncate(self.args.len() - args as usize);
+                    let res = func(&self.args[self.args.len() - args.get() as usize..]);
+                    self.args.truncate(self.args.len() - args.get() as usize);
                     res
                 }
                 FunctionPointer::DynSingle(func) => func(self.args_pop()?.asarg()),
@@ -288,8 +298,8 @@ where
                     func(self.args_pop()?.asarg(), a2.asarg(), a3.asarg())
                 }
                 FunctionPointer::DynFlexible(func) => {
-                    let res = func(&self.args[self.args.len() - args as usize..]);
-                    self.args.truncate(self.args.len() - args as usize);
+                    let res = func(&self.args[self.args.len() - args.get() as usize..]);
+                    self.args.truncate(self.args.len() - args.get() as usize);
                     res
                 }
             },
@@ -364,7 +374,7 @@ where
             FragKind::Constant(num) => output_queue.push(AstNode::Number(num.to_owned()))?,
             FragKind::Variable(var) => output_queue.push(AstNode::Variable(var))?,
             FragKind::Function(func, min, _) => {
-                if min > 1 {
+                if min.get() > 1 {
                     return Err(SyntaxErrorKind::NotEnoughArguments);
                 } else {
                     output_queue.push_opr(SyOperator::FuncNoParen(func), operator_stack)?;
@@ -380,7 +390,7 @@ pub(super) fn parse_or_eval<'a, O, N, V, F, S>(
     mut output_queue: O,
     stream: ResolvedTkStream<'_, S>,
     custom_constants: &impl NameTrie<&'a N>,
-    custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+    custom_functions: &impl NameTrie<CfInfo<F>>,
     custom_variables: &impl NameTrie<V>,
 ) -> Result<O::Output, SyntaxError>
 where
@@ -436,12 +446,15 @@ where
                         )
                     })
                     .or_else(|| {
-                        custom_functions.exact_match(name).map(|(cf, min, _)| {
-                            (SyOperator::FuncNoParen(FunctionType::Custom(cf)), min)
+                        custom_functions.exact_match(name).map(|cfi| {
+                            (
+                                SyOperator::FuncNoParen(FunctionType::Custom(cfi.ident)),
+                                cfi.min_args,
+                            )
                         })
                     })
                 {
-                    if min > 1 {
+                    if min.get() > 1 {
                         return Err(SyntaxError(SyntaxErrorKind::NotEnoughArguments, pos..=pos));
                     }
                     output_queue.push_opr(func, &mut operator_stack)?;
@@ -467,11 +480,11 @@ where
                 }
                 if let Some(func) = BuiltinFuncsNameTrie
                     .exact_match(name)
-                    .map(|bf| SyOperator::Function(SyFunction::Builtin(bf), 1))
+                    .map(|bf| SyOperator::Function(SyFunction::Builtin(bf), nz!(1)))
                     .or_else(|| {
-                        custom_functions.exact_match(name).map(|(cf, min, max)| {
-                            SyOperator::Function(SyFunction::Custom(cf, min, max), 1)
-                        })
+                        custom_functions
+                            .exact_match(name)
+                            .map(|cfi| SyOperator::Function(cfi.into(), nz!(1)))
                     })
                 {
                     operator_stack.push(func);
@@ -494,8 +507,7 @@ where
                     custom_functions,
                 ) {
                     if let FragKind::Function(func, min, max) = fragments.last().unwrap().kind {
-                        let (func, min, max) = (func, min, max);
-                        if min > 1 {
+                        if min.get() > 1 {
                             return Err(SyntaxError(
                                 SyntaxErrorKind::NotEnoughArguments,
                                 pos..=pos,
@@ -519,7 +531,7 @@ where
                                 FunctionType::Builtin(bf) => SyFunction::Builtin(bf),
                                 FunctionType::Custom(cf) => SyFunction::Custom(cf, min, max),
                             },
-                            1,
+                            nz!(1),
                         ));
                     } else {
                         push_fragments(&mut fragments, &mut operator_stack, &mut output_queue)
@@ -539,7 +551,15 @@ where
                 output_queue.flush(&mut operator_stack)?;
                 match operator_stack.last_mut() {
                     Some(SyOperator::Function(_, args)) => {
-                        *args += 1;
+                        if let Some(new_args) = args.checked_add(1) {
+                            *args = new_args;
+                        } else {
+                            // arguments exceeded 255
+                            return Err(SyntaxError(
+                                SyntaxErrorKind::TooManyArguments,
+                                find_opening(&stream, pos).unwrap()..=pos,
+                            ));
+                        }
                     }
                     _ => {
                         return Err(SyntaxError(
@@ -566,7 +586,7 @@ where
                                     output_queue.pop_arg();
                                     bf = BuiltinFunction::Log2;
                                 }
-                                _ if args == 1 => {
+                                _ if args.get() == 1 => {
                                     bf = BuiltinFunction::Log10;
                                 }
                                 _ => (),
@@ -601,7 +621,7 @@ where
             ResToken::OpenPipe => {
                 operator_stack.push(SyOperator::Function(
                     SyFunction::Builtin(BuiltinFunction::Abs),
-                    1,
+                    nz!(1),
                 ));
             }
             ResToken::ClosePipe => {
@@ -609,8 +629,9 @@ where
                 if let Some(SyOperator::Function(SyFunction::Builtin(BuiltinFunction::Abs), args)) =
                     operator_stack.pop()
                 {
-                    if args == 1 {
-                        output_queue.push(AstNode::Function(BuiltinFunction::Abs.into(), 1))?;
+                    if args.get() == 1 {
+                        output_queue
+                            .push(AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)))?;
                     } else {
                         return Err(SyntaxError(
                             SyntaxErrorKind::TooManyArguments,

@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use crate::{
     FunctionIdentifier as FuncId, VariableIdentifier as VarId,
     number::BuiltinFuncsNameTrie,
-    syntax::{SyntaxError, SyntaxErrorKind},
+    syntax::{CfInfo, SyntaxError, SyntaxErrorKind},
     tokenizer::{DelimEdge, DelimKind, DelimiterToken, OprToken, Token},
     trie::NameTrie,
 };
@@ -25,7 +25,7 @@ enum Expecting {
 fn suffix_is_fnp<V: VarId, F: FuncId>(
     name: &str,
     custom_variables: &impl NameTrie<V>,
-    custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+    custom_functions: &impl NameTrie<CfInfo<F>>,
 ) -> bool {
     if custom_variables.exact_match(name).is_some() {
         return false;
@@ -47,7 +47,7 @@ impl Expecting {
         cur: &Token<S>,
         opening_pipe: bool,
         custom_variables: &impl NameTrie<V>,
-        custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+        custom_functions: &impl NameTrie<CfInfo<F>>,
     ) -> Result<Self, SyntaxErrorKind> {
         match self {
             Expecting::Prefix => match cur {
@@ -378,7 +378,7 @@ impl<'a, S: AsRef<str>> ResolvedTkStream<'a, S> {
     pub(super) fn new<V: VarId, F: FuncId>(
         tokens: &'a impl AsRef<[Token<S>]>,
         custom_variables: &impl NameTrie<V>,
-        custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+        custom_functions: &impl NameTrie<CfInfo<F>>,
     ) -> Result<Self, SyntaxError> {
         let tokens = tokens.as_ref();
         if tokens.len() == 0 {
@@ -598,6 +598,7 @@ impl<'a, S: AsRef<str>> DoubleEndedIterator for ResTkStreamIter<'a, S> {
 mod tests {
     use super::Expecting::*;
     use super::*;
+    use crate::nz;
     use crate::tokenizer::Token;
     use crate::trie::TrieNode;
     use strum::FromRepr;
@@ -633,7 +634,7 @@ mod tests {
 
     struct TestFuncNameTrie;
 
-    impl NameTrie<(TestFunc, u8, Option<u8>)> for TestFuncNameTrie {
+    impl NameTrie<CfInfo<TestFunc>> for TestFuncNameTrie {
         fn nodes(&self) -> &[TrieNode] {
             &[
                 TrieNode::Branch('f', 4),
@@ -643,8 +644,8 @@ mod tests {
                 TrieNode::Leaf(0),
             ]
         }
-        fn leaf_to_value(&self, _leaf: u32) -> (TestFunc, u8, Option<u8>) {
-            (TestFunc, 1, None)
+        fn leaf_to_value(&self, _leaf: u32) -> CfInfo<TestFunc> {
+            CfInfo::new(TestFunc, nz!(1), None)
         }
     }
 

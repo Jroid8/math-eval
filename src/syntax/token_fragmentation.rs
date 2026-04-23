@@ -1,7 +1,9 @@
+use std::num::NonZeroU8;
+
 use crate::{
     FunctionIdentifier as FuncId, VariableIdentifier as VarId,
     number::{BuiltinFuncsNameTrie, Number},
-    syntax::FunctionType,
+    syntax::{CfInfo, FunctionType},
     tokenizer::NumberRecognizer,
     trie::NameTrie,
 };
@@ -13,7 +15,7 @@ pub(super) enum FragKind<'c, N: Number, V: VarId, F: FuncId> {
     Literal(N),
     Constant(N::AsArg<'c>),
     Variable(V),
-    Function(FunctionType<F>, u8, Option<u8>),
+    Function(FunctionType<F>, NonZeroU8, Option<NonZeroU8>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,7 +45,7 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
     dest: &mut Vec<ParsedFragment<'c, N, V, F>>,
     constants: &impl NameTrie<&'c N>,
     variables: &impl NameTrie<V>,
-    functions: &impl NameTrie<(F, u8, Option<u8>)>,
+    functions: &impl NameTrie<CfInfo<F>>,
 ) -> bool {
     dest.clear();
     dest.reserve(NAME_LIMIT as usize);
@@ -73,9 +75,13 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
                         i as u8,
                     )
                 }))
-                .chain(functions.longest_match(slice).map(|((func, min, max), i)| {
+                .chain(functions.longest_match(slice).map(|(cfi, i)| {
                     ParsedFragment::new(
-                        FragKind::Function(FunctionType::Custom(func), min, max),
+                        FragKind::Function(
+                            FunctionType::Custom(cfi.ident),
+                            cfi.min_args,
+                            cfi.max_args,
+                        ),
                         i as u8,
                     )
                 }))
@@ -105,7 +111,7 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{number::BuiltinFunction, trie::VecNameTrie};
+    use crate::{number::BuiltinFunction, nz, trie::VecNameTrie};
 
     use super::*;
     use std::f64::consts::*;
@@ -137,9 +143,12 @@ mod tests {
             ("shallnotbenamed", TestVar::ShallNotBeNamed),
         ]);
         let myfuncs = VecNameTrie::new(&mut [
-            ("func1", (TestFunc::Func1, 1, None)),
-            ("f2", (TestFunc::F2, 1, None)),
-            ("verylongfunction", (TestFunc::VeryLongFunction, 1, None)),
+            ("func1", CfInfo::new(TestFunc::Func1, nz!(1), None)),
+            ("f2", CfInfo::new(TestFunc::F2, nz!(1), None)),
+            (
+                "verylongfunction",
+                CfInfo::new(TestFunc::VeryLongFunction, nz!(1), None),
+            ),
         ]);
         let myconsts = VecNameTrie::new(&mut [("c", &C), ("pi2", &FRAC_2_PI)]);
         let mut alloc = Vec::new();
@@ -172,7 +181,7 @@ mod tests {
             fragment("tcost"),
             Some(vec![
                 FragKind::Variable(TestVar::T),
-                FragKind::Function(BuiltinFunction::Cos.into(), 1, Some(1)),
+                FragKind::Function(BuiltinFunction::Cos.into(), nz!(1), Some(nz!(1))),
                 FragKind::Variable(TestVar::T),
             ])
         );
@@ -209,21 +218,21 @@ mod tests {
             fragment("σf2"),
             Some(vec![
                 FragKind::Variable(TestVar::Sigma),
-                FragKind::Function(FunctionType::Custom(TestFunc::F2), 1, None)
+                FragKind::Function(FunctionType::Custom(TestFunc::F2), nz!(1), None)
             ])
         );
         assert_eq!(
             fragment("cmin"),
             Some(vec![
                 FragKind::Constant(299792458.0),
-                FragKind::Function(BuiltinFunction::Min.into(), 2, None)
+                FragKind::Function(BuiltinFunction::Min.into(), nz!(2), None)
             ])
         );
         assert_eq!(
             fragment("sinsinangle"),
             Some(vec![
-                FragKind::Function(BuiltinFunction::Sin.into(), 1, Some(1)),
-                FragKind::Function(BuiltinFunction::Sin.into(), 1, Some(1)),
+                FragKind::Function(BuiltinFunction::Sin.into(), nz!(1), Some(nz!(1))),
+                FragKind::Function(BuiltinFunction::Sin.into(), nz!(1), Some(nz!(1))),
                 FragKind::Variable(TestVar::Angle),
             ])
         );
@@ -232,7 +241,7 @@ mod tests {
             Some(vec![
                 FragKind::Variable(TestVar::Sigma),
                 FragKind::Literal(55.0),
-                FragKind::Function(BuiltinFunction::Sin.into(), 1, Some(1)),
+                FragKind::Function(BuiltinFunction::Sin.into(), nz!(1), Some(nz!(1))),
                 FragKind::Variable(TestVar::T),
             ])
         );
@@ -240,9 +249,9 @@ mod tests {
             fragment("anglesinvar5func1"),
             Some(vec![
                 FragKind::Variable(TestVar::Angle),
-                FragKind::Function(BuiltinFunction::Sin.into(), 1, Some(1)),
+                FragKind::Function(BuiltinFunction::Sin.into(), nz!(1), Some(nz!(1))),
                 FragKind::Variable(TestVar::Var5),
-                FragKind::Function(FunctionType::Custom(TestFunc::Func1), 1, None),
+                FragKind::Function(FunctionType::Custom(TestFunc::Func1), nz!(1), None),
             ])
         );
         assert_eq!(
@@ -250,11 +259,15 @@ mod tests {
             Some(vec![
                 FragKind::Variable(TestVar::T),
                 FragKind::Variable(TestVar::T),
-                FragKind::Function(BuiltinFunction::Ln.into(), 1, Some(1)),
+                FragKind::Function(BuiltinFunction::Ln.into(), nz!(1), Some(nz!(1))),
                 FragKind::Variable(TestVar::T),
                 FragKind::Variable(TestVar::T),
                 FragKind::Variable(TestVar::Var5),
-                FragKind::Function(FunctionType::Custom(TestFunc::VeryLongFunction), 1, None),
+                FragKind::Function(
+                    FunctionType::Custom(TestFunc::VeryLongFunction),
+                    nz!(1),
+                    None
+                ),
             ])
         );
         assert_eq!(fragment("a"), None);

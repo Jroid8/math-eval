@@ -80,6 +80,13 @@ fn weighted_choice<'a, T>(items: &'a [(T, u8)]) -> Option<&'a T> {
     Some(&last.0)
 }
 
+#[macro_export]
+macro_rules! nz {
+    ($v: literal) => {
+        const { std::num::NonZero::new($v).unwrap() }
+    };
+}
+
 const CHILD_COUNT_WEIGHTS: [(u8, u8); 4] = [(1, 5), (2, 8), (3, 2), (4, 1)];
 
 #[derive(Debug, Clone)]
@@ -122,20 +129,20 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
         };
         match *weighted_choice(selection).unwrap() {
             1 => match fastrand::u8(0..10) {
-                0..6 => AstNode::Function(FunctionType::Builtin(rand_bf_1p()), 1),
+                0..6 => AstNode::Function(FunctionType::Builtin(rand_bf_1p()), nz!(1)),
                 6..9 => AstNode::UnaryOp(rand_unaryop()),
                 9 => AstNode::Function(
                     FunctionType::Custom(*fastrand::choice(self.functions_1p).unwrap()),
-                    1,
+                    nz!(1),
                 ),
                 _ => unreachable!(),
             },
             2 => match fastrand::u8(0..20) {
                 0..16 => AstNode::BinaryOp(rand_binaryop()),
-                16..19 => AstNode::Function(FunctionType::Builtin(rand_bf_2p()), 2),
+                16..19 => AstNode::Function(FunctionType::Builtin(rand_bf_2p()), nz!(2)),
                 19 => AstNode::Function(
                     FunctionType::Custom(*fastrand::choice(self.functions_2p).unwrap()),
-                    2,
+                    nz!(2),
                 ),
                 _ => unreachable!(),
             },
@@ -146,7 +153,7 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_3p).unwrap()),
                     _ => unreachable!(),
                 },
-                3,
+                nz!(3),
             ),
             4 => AstNode::Function(
                 match fastrand::u8(0..7) {
@@ -155,7 +162,7 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_4p).unwrap()),
                     _ => unreachable!(),
                 },
-                4,
+                nz!(4),
             ),
             _ => unreachable!(),
         }

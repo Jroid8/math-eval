@@ -1,8 +1,12 @@
+use std::num::NonZeroU8;
+
 use seq_macro::seq;
 
 use crate::{
     FunctionPointer, ParsingError, compile, evaluate,
     number::Number,
+    nz,
+    syntax::CfInfo,
     trie::{EmptyNameTrie, VecNameTrie},
 };
 
@@ -27,7 +31,7 @@ pub struct ManyVariables<'a>(Vec<(&'a str, usize)>);
 #[derive(Clone, Debug)]
 pub struct EvalBuilder<'c, 'n, 'f, N: Number, V = NoVariable> {
     constants: Vec<(&'n str, &'c N)>,
-    function_identifier: Vec<(&'n str, (usize, u8, Option<u8>))>,
+    function_identifier: Vec<(&'n str, CfInfo<usize>)>,
     functions: Vec<FunctionPointer<'f, N>>,
     variables: V,
 }
@@ -56,8 +60,10 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
     }
 
     pub fn add_fn1(mut self, name: &'n str, function: for<'a> fn(N::AsArg<'a>) -> N) -> Self {
-        self.function_identifier
-            .push((name, (self.functions.len(), 1, Some(1))));
+        self.function_identifier.push((
+            name,
+            CfInfo::new(self.functions.len(), nz!(1), Some(nz!(1))),
+        ));
         self.functions.push(FunctionPointer::Single(function));
         self
     }
@@ -67,8 +73,10 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
         name: &'n str,
         function: for<'a, 'b> fn(N::AsArg<'a>, N::AsArg<'b>) -> N,
     ) -> Self {
-        self.function_identifier
-            .push((name, (self.functions.len(), 2, Some(2))));
+        self.function_identifier.push((
+            name,
+            CfInfo::new(self.functions.len(), nz!(2), Some(nz!(2))),
+        ));
         self.functions.push(FunctionPointer::Dual(function));
         self
     }
@@ -78,8 +86,10 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
         name: &'n str,
         function: for<'i, 'j, 'k> fn(N::AsArg<'i>, N::AsArg<'j>, N::AsArg<'k>) -> N,
     ) -> Self {
-        self.function_identifier
-            .push((name, (self.functions.len(), 3, Some(3))));
+        self.function_identifier.push((
+            name,
+            CfInfo::new(self.functions.len(), nz!(3), Some(nz!(3))),
+        ));
         self.functions.push(FunctionPointer::Triple(function));
         self
     }
@@ -87,13 +97,13 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
     pub fn add_fn_flex(
         mut self,
         name: &'n str,
-        mininum_argument_count: u8,
-        maximum_argument_count: Option<u8>,
+        mininum_argument_count: NonZeroU8,
+        maximum_argument_count: Option<NonZeroU8>,
         function: fn(&[N]) -> N,
     ) -> Self {
         self.function_identifier.push((
             name,
-            (
+            CfInfo::new(
                 self.functions.len(),
                 mininum_argument_count,
                 maximum_argument_count,
@@ -108,8 +118,10 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
         name: &'n str,
         function: &'f dyn for<'b> Fn(N::AsArg<'b>) -> N,
     ) -> Self {
-        self.function_identifier
-            .push((name, (self.functions.len(), 1, Some(1))));
+        self.function_identifier.push((
+            name,
+            CfInfo::new(self.functions.len(), nz!(1), Some(nz!(1))),
+        ));
         self.functions.push(FunctionPointer::DynSingle(function));
         self
     }
@@ -119,8 +131,10 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
         name: &'n str,
         function: &'f dyn for<'a, 'b> Fn(N::AsArg<'a>, N::AsArg<'b>) -> N,
     ) -> Self {
-        self.function_identifier
-            .push((name, (self.functions.len(), 2, Some(2))));
+        self.function_identifier.push((
+            name,
+            CfInfo::new(self.functions.len(), nz!(2), Some(nz!(2))),
+        ));
         self.functions.push(FunctionPointer::DynDual(function));
         self
     }
@@ -130,8 +144,10 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
         name: &'n str,
         function: &'f dyn for<'i, 'j, 'k> Fn(N::AsArg<'i>, N::AsArg<'j>, N::AsArg<'k>) -> N,
     ) -> Self {
-        self.function_identifier
-            .push((name, (self.functions.len(), 3, Some(3))));
+        self.function_identifier.push((
+            name,
+            CfInfo::new(self.functions.len(), nz!(3), Some(nz!(3))),
+        ));
         self.functions.push(FunctionPointer::DynTriple(function));
         self
     }
@@ -139,13 +155,13 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
     pub fn add_dyn_fn_flex(
         mut self,
         name: &'n str,
-        mininum_argument_count: u8,
-        maximum_argument_count: Option<u8>,
+        mininum_argument_count: NonZeroU8,
+        maximum_argument_count: Option<NonZeroU8>,
         function: &'f dyn Fn(&[N]) -> N,
     ) -> Self {
         self.function_identifier.push((
             name,
-            (
+            CfInfo::new(
                 self.functions.len(),
                 mininum_argument_count,
                 maximum_argument_count,
@@ -395,10 +411,7 @@ mod tests {
     #[derive(PartialEq, Debug)]
     struct UnexpectedBuilderFieldValues<'n, 'c, V> {
         constants: Option<(Vec<(&'n str, &'c f64)>, Vec<(&'n str, &'c f64)>)>,
-        function_identifier: Option<(
-            Vec<(&'n str, (usize, u8, Option<u8>))>,
-            Vec<(&'n str, (usize, u8, Option<u8>))>,
-        )>,
+        function_identifier: Option<(Vec<(&'n str, CfInfo<usize>)>, Vec<(&'n str, CfInfo<usize>)>)>,
         functions: Vec<(usize, f64)>,
         variables: Option<(V, V)>,
     }
@@ -425,12 +438,12 @@ mod tests {
     fn compare<'n, 'c, V: PartialEq>(
         builder: EvalBuilder<'c, 'n, '_, f64, V>,
         constants: impl Iterator<Item = (&'n str, &'c f64)>,
-        function_identifier: impl Iterator<Item = (&'n str, usize, u8, Option<u8>)>,
+        function_identifier: impl Iterator<Item = (&'n str, usize, NonZeroU8, Option<NonZeroU8>)>,
         variables: V,
     ) -> Option<UnexpectedBuilderFieldValues<'n, 'c, V>> {
         let constants: Vec<_> = constants.collect();
         let function_identifier = function_identifier
-            .map(|(n, id, min, max)| (n, (id, min, max)))
+            .map(|(n, id, min, max)| (n, CfInfo::new(id, min, max)))
             .collect();
         let res = UnexpectedBuilderFieldValues {
             constants: (builder.constants != constants).then_some((builder.constants, constants)),
@@ -518,7 +531,7 @@ mod tests {
         test!(compare(
             EvalBuilder::new().add_fn1("f1", |_| 0.0),
             [].into_iter(),
-            [("f1", 0, 1, Some(1))].into_iter(),
+            [("f1", 0, nz!(1), Some(nz!(1)))].into_iter(),
             NoVariable,
         ));
 
@@ -527,7 +540,7 @@ mod tests {
                 .add_fn1("f2", |_| 0.0)
                 .add_constant("c1", &7.319),
             [("c1", &7.319)].into_iter(),
-            [("f2", 0, 1, Some(1))].into_iter(),
+            [("f2", 0, nz!(1), Some(nz!(1)))].into_iter(),
             NoVariable,
         ));
 
@@ -537,7 +550,7 @@ mod tests {
                 .add_constant("c1", &7.319)
                 .add_dyn_fn1("f2", &|_| zero.parse().unwrap()),
             [("c1", &7.319)].into_iter(),
-            [("f2", 0, 1, Some(1))].into_iter(),
+            [("f2", 0, nz!(1), Some(nz!(1)))].into_iter(),
             NoVariable,
         ));
 
@@ -546,7 +559,11 @@ mod tests {
                 .add_fn1("f1", |_| 0.0)
                 .add_fn2("f2", |_, _| 1.0),
             [].into_iter(),
-            [("f1", 0, 1, Some(1)), ("f2", 1, 2, Some(2))].into_iter(),
+            [
+                ("f1", 0, nz!(1), Some(nz!(1))),
+                ("f2", 1, nz!(2), Some(nz!(2)))
+            ]
+            .into_iter(),
             NoVariable,
         ));
 
@@ -556,7 +573,11 @@ mod tests {
                 .add_dyn_fn1("f1", &|_| zero.parse().unwrap())
                 .add_dyn_fn2("f2", &|_, _| one.parse().unwrap()),
             [].into_iter(),
-            [("f1", 0, 1, Some(1)), ("f2", 1, 2, Some(2))].into_iter(),
+            [
+                ("f1", 0, nz!(1), Some(nz!(1))),
+                ("f2", 1, nz!(2), Some(nz!(2)))
+            ]
+            .into_iter(),
             NoVariable,
         ));
 
@@ -565,7 +586,11 @@ mod tests {
                 .add_dyn_fn2("f2", &|_, _| zero.parse().unwrap())
                 .add_fn3("f3", |_, _, _| 1.0),
             [].into_iter(),
-            [("f2", 0, 2, Some(2)), ("f3", 1, 3, Some(3))].into_iter(),
+            [
+                ("f2", 0, nz!(2), Some(nz!(2))),
+                ("f3", 1, nz!(3), Some(nz!(3)))
+            ]
+            .into_iter(),
             NoVariable,
         ));
 
@@ -573,12 +598,12 @@ mod tests {
             EvalBuilder::new()
                 .add_fn2("f2", |_, _| 0.0)
                 .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
-                .add_fn_flex("ff", 3, None, |_| 2.0),
+                .add_fn_flex("ff", nz!(3), None, |_| 2.0),
             [].into_iter(),
             [
-                ("f2", 0, 2, Some(2)),
-                ("f3", 1, 3, Some(3)),
-                ("ff", 2, 3, None)
+                ("f2", 0, nz!(2), Some(nz!(2))),
+                ("f3", 1, nz!(3), Some(nz!(3))),
+                ("ff", 2, nz!(3), None)
             ]
             .into_iter(),
             NoVariable,
@@ -590,12 +615,12 @@ mod tests {
                 .add_variable("t")
                 .add_fn2("f2", |_, _| 0.0)
                 .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
-                .add_dyn_fn_flex("ff", 3, None, &|_| two.parse().unwrap()),
+                .add_dyn_fn_flex("ff", nz!(3), None, &|_| two.parse().unwrap()),
             [].into_iter(),
             [
-                ("f2", 0, 2, Some(2)),
-                ("f3", 1, 3, Some(3)),
-                ("ff", 2, 3, None)
+                ("f2", 0, nz!(2), Some(nz!(2))),
+                ("f3", 1, nz!(3), Some(nz!(3))),
+                ("ff", 2, nz!(3), None)
             ]
             .into_iter(),
             OneVariable("t"),
@@ -621,12 +646,12 @@ mod tests {
                 .add_dyn_fn2("f2", &|_, _| zero.parse().unwrap())
                 .add_variable("x")
                 .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
-                .add_dyn_fn_flex("ff", 3, None, &|_| two.parse().unwrap()),
+                .add_dyn_fn_flex("ff", nz!(3), None, &|_| two.parse().unwrap()),
             [].into_iter(),
             [
-                ("f2", 0, 2, Some(2)),
-                ("f3", 1, 3, Some(3)),
-                ("ff", 2, 3, None)
+                ("f2", 0, nz!(2), Some(nz!(2))),
+                ("f3", 1, nz!(3), Some(nz!(3))),
+                ("ff", 2, nz!(3), None)
             ]
             .into_iter(),
             TwoVariables([("y", 0), ("x", 1)]),
@@ -653,10 +678,10 @@ mod tests {
                 .add_variable("z"),
             [].into_iter(),
             [
-                ("f0", 0, 3, Some(3)),
-                ("f1", 1, 3, Some(3)),
-                ("f2", 2, 3, Some(3)),
-                ("f3", 3, 3, Some(3))
+                ("f0", 0, nz!(3), Some(nz!(3))),
+                ("f1", 1, nz!(3), Some(nz!(3))),
+                ("f2", 2, nz!(3), Some(nz!(3))),
+                ("f3", 3, nz!(3), Some(nz!(3)))
             ]
             .into_iter(),
             ThreeVariables([("y", 0), ("x", 1), ("z", 2)]),
@@ -683,16 +708,16 @@ mod tests {
                 .add_variable("x")
                 .add_fn3("f2", |_, _, _| 2.0)
                 .add_variable("z")
-                .add_dyn_fn_flex("f3", 1, Some(5), &|_| three.parse().unwrap())
+                .add_dyn_fn_flex("f3", nz!(1), Some(nz!(5)), &|_| three.parse().unwrap())
                 .add_variable("w")
                 .add_fn1("f4", |_| 4.0),
             [("c", &9.999999)].into_iter(),
             [
-                ("f0", 0, 1, Some(1)),
-                ("f1", 1, 2, Some(2)),
-                ("f2", 2, 3, Some(3)),
-                ("f3", 3, 1, Some(5)),
-                ("f4", 4, 1, Some(1))
+                ("f0", 0, nz!(1), Some(nz!(1))),
+                ("f1", 1, nz!(2), Some(nz!(2))),
+                ("f2", 2, nz!(3), Some(nz!(3))),
+                ("f3", 3, nz!(1), Some(nz!(5))),
+                ("f4", 4, nz!(1), Some(nz!(1)))
             ]
             .into_iter(),
             FourVariables([("y", 0), ("x", 1), ("z", 2), ("w", 3)]),
@@ -720,19 +745,19 @@ mod tests {
                 .add_variable("x")
                 .add_fn3("f2", |_, _, _| 2.0)
                 .add_variable("z")
-                .add_fn_flex("f3", 1, Some(5), |_| 3.0)
+                .add_fn_flex("f3", nz!(1), Some(nz!(5)), |_| 3.0)
                 .add_variable("w")
                 .add_fn1("f4", |_| 4.0)
                 .add_variable("t")
-                .add_fn_flex("f5", 5, None, |_| 5.0),
+                .add_fn_flex("f5", nz!(5), None, |_| 5.0),
             [("c", &9.999999), ("ce", &2.222222)].into_iter(),
             [
-                ("f0", 0, 1, Some(1)),
-                ("f1", 1, 2, Some(2)),
-                ("f2", 2, 3, Some(3)),
-                ("f3", 3, 1, Some(5)),
-                ("f4", 4, 1, Some(1)),
-                ("f5", 5, 5, None)
+                ("f0", 0, nz!(1), Some(nz!(1))),
+                ("f1", 1, nz!(2), Some(nz!(2))),
+                ("f2", 2, nz!(3), Some(nz!(3))),
+                ("f3", 3, nz!(1), Some(nz!(5))),
+                ("f4", 4, nz!(1), Some(nz!(1))),
+                ("f5", 5, nz!(5), None)
             ]
             .into_iter(),
             ManyVariables(vec![("y", 0), ("x", 1), ("z", 2), ("w", 3), ("t", 4)]),
@@ -749,20 +774,20 @@ mod tests {
                 .add_variable("x")
                 .add_dyn_fn3("f2", &|_, _, _| two.parse().unwrap())
                 .add_variable("z")
-                .add_dyn_fn_flex("f3", 1, Some(5), &|_| three.parse().unwrap())
+                .add_dyn_fn_flex("f3", nz!(1), Some(nz!(5)), &|_| three.parse().unwrap())
                 .add_variable("w")
                 .add_dyn_fn1("f4", &|_| four.parse().unwrap())
                 .add_variable("t")
-                .add_dyn_fn_flex("f5", 5, None, &|_| three.parse::<f64>().unwrap()
+                .add_dyn_fn_flex("f5", nz!(5), None, &|_| three.parse::<f64>().unwrap()
                     + two.parse::<f64>().unwrap()),
             [("c", &9.999999), ("ce", &2.222222)].into_iter(),
             [
-                ("f0", 0, 1, Some(1)),
-                ("f1", 1, 2, Some(2)),
-                ("f2", 2, 3, Some(3)),
-                ("f3", 3, 1, Some(5)),
-                ("f4", 4, 1, Some(1)),
-                ("f5", 5, 5, None)
+                ("f0", 0, nz!(1), Some(nz!(1))),
+                ("f1", 1, nz!(2), Some(nz!(2))),
+                ("f2", 2, nz!(3), Some(nz!(3))),
+                ("f3", 3, nz!(1), Some(nz!(5))),
+                ("f4", 4, nz!(1), Some(nz!(1))),
+                ("f5", 5, nz!(5), None)
             ]
             .into_iter(),
             ManyVariables(vec![("y", 0), ("x", 1), ("z", 2), ("w", 3), ("t", 4)]),

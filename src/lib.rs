@@ -9,7 +9,7 @@ use seq_macro::seq;
 use syntax::MathAst;
 use tokenizer::TokenStream;
 
-use crate::{number::BFPointer, quick_expr::QuickExpr, trie::NameTrie};
+use crate::{number::BFPointer, quick_expr::QuickExpr, syntax::CfInfo, trie::NameTrie};
 
 pub mod builder;
 pub mod number;
@@ -340,7 +340,7 @@ impl<N: Number> FunctionPointer<'_, N> {
 pub fn compile<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
     custom_constants: &impl NameTrie<&'c N>,
-    custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+    custom_functions: &impl NameTrie<CfInfo<F>>,
     custom_variables: &impl NameTrie<V>,
     function_to_pointer: impl Fn(F) -> FunctionPointer<'f, N>,
 ) -> Result<QuickExpr<'f, N, V, F>, ParsingError> {
@@ -360,7 +360,7 @@ pub fn compile<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
 pub fn evaluate<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
     custom_constants: &impl NameTrie<&'c N>,
-    custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
+    custom_functions: &impl NameTrie<CfInfo<F>>,
     custom_variables: &impl NameTrie<V>,
     function_to_pointer: impl Fn(F) -> FunctionPointer<'f, N>,
     variable_values: &impl VariableStore<N, V>,
@@ -395,3 +395,11 @@ impl<N: Number> VariableStore<N, usize> for &'_ [N] {
         self[var].asarg()
     }
 }
+
+macro_rules! nz {
+    ($v: literal) => {
+        const { std::num::NonZero::new($v).unwrap() }
+    };
+}
+
+pub(crate) use nz;
