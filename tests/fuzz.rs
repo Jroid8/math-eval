@@ -5,7 +5,10 @@ use math_eval::{
     number::NativeFunction,
     quick_expr::QuickExpr,
     syntax::MathAst,
-    tokenizer::{OprToken, StandardFloatRecognizer as Sfr, Token, TokenStream},
+    tokenizer::{
+        DelimEdge, DelimKind, DelimiterToken, OprToken, StandardFloatRecognizer as Sfr, Token,
+        TokenStream,
+    },
     trie::{EmptyNameTrie, NameTrie, TrieNode, VecNameTrie},
 };
 use strum::{EnumIter, FromRepr, IntoEnumIterator};
@@ -32,21 +35,26 @@ fn fuzz_tokenizer() {
 #[test]
 fn fuzz_parser() {
     fn rand_token() -> Token<String> {
-        match fastrand::u8(0..8) {
+        match fastrand::u8(0..7) {
             0 => Token::Number(rand_f64().to_string()),
             1 => Token::Operator(fastrand::choice(OprToken::iter()).unwrap()),
             2 => Token::Variable(fastrand::choice(MyVar::iter()).unwrap().to_string()),
-            3 => Token::Function(if fastrand::u8(0..100) < 80 {
-                fastrand::choice(NativeFunction::iter())
-                    .unwrap()
-                    .to_string()
-            } else {
-                fastrand::choice(MyFunc::iter()).unwrap().to_string()
-            }),
-            4 => Token::OpenParen,
-            5 => Token::CloseParen,
-            6 => Token::Comma,
-            7 => Token::Pipe,
+            3 => Token::Function(
+                if fastrand::u8(0..100) < 80 {
+                    fastrand::choice(NativeFunction::iter())
+                        .unwrap()
+                        .to_string()
+                } else {
+                    fastrand::choice(MyFunc::iter()).unwrap().to_string()
+                },
+                fastrand::choice(DelimKind::iter()).unwrap(),
+            ),
+            4 => Token::Delimiter(DelimiterToken(
+                fastrand::choice(DelimKind::iter()).unwrap(),
+                fastrand::choice(DelimEdge::iter()).unwrap(),
+            )),
+            5 => Token::Comma,
+            6 => Token::Pipe,
             _ => unreachable!(),
         }
     }

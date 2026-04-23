@@ -9,6 +9,7 @@ use crate::number::{NFPointer, NativeFunction, Number};
 use crate::postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans};
 use crate::postfix_tree::tree_iterators::NodeEdge;
 use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
+use crate::syntax::grammar::ResolvedTkStream;
 use crate::tokenizer::Token;
 use crate::trie::NameTrie;
 use crate::{
@@ -17,6 +18,7 @@ use crate::{
 };
 use shunting_yard::{SyAstOutput, SyNumberOutput, parse_or_eval};
 
+mod grammar;
 mod shunting_yard;
 mod token_fragmentation;
 
@@ -84,13 +86,20 @@ pub enum SyntaxErrorKind {
     NotEnoughArguments,
     TooManyArguments,
     EmptyParenthesis,
+    EmptyBrackets,
+    EmptyBraces,
+    EmptyPipePair,
     EmptyArgument,
     EmptyInput,
-    EmptyPipeAbs,
     MissingOpeningParenthesis,
     MissingClosingParenthesis,
+    MissingOpeningBraces,
+    MissingClosingBraces,
+    MissingOpeningBrackets,
+    MissingClosingBrackets,
+    MissingOpeningPipe,
+    MissingClosingPipe,
     CommaOutsideFunction,
-    PipeAbsNotClosed,
     NameTooLong,
     UnexpectedToken,
     UnknownError,
@@ -141,19 +150,26 @@ impl SyntaxError {
                 SyntaxErrorKind::NotEnoughArguments => ParsingErrorKind::NotEnoughArguments,
                 SyntaxErrorKind::TooManyArguments => ParsingErrorKind::TooManyArguments,
                 SyntaxErrorKind::EmptyParenthesis => ParsingErrorKind::EmptyParenthesis,
+                SyntaxErrorKind::EmptyBrackets => ParsingErrorKind::EmptyBrackets,
+                SyntaxErrorKind::EmptyBraces => ParsingErrorKind::EmptyBraces,
+                SyntaxErrorKind::EmptyPipePair => ParsingErrorKind::EmptyPipePair,
                 SyntaxErrorKind::EmptyArgument => ParsingErrorKind::EmptyArgument,
                 SyntaxErrorKind::MissingOpeningParenthesis => {
-                    ParsingErrorKind::MissingOpenParenthesis
+                    ParsingErrorKind::MissingOpeningParenthesis
                 }
                 SyntaxErrorKind::MissingClosingParenthesis => {
-                    ParsingErrorKind::MissingCloseParenthesis
+                    ParsingErrorKind::MissingClosingParenthesis
                 }
+                SyntaxErrorKind::MissingOpeningBraces => ParsingErrorKind::MissingOpeningBraces,
+                SyntaxErrorKind::MissingClosingBraces => ParsingErrorKind::MissingClosingBraces,
+                SyntaxErrorKind::MissingOpeningBrackets => ParsingErrorKind::MissingOpeningBrackets,
+                SyntaxErrorKind::MissingClosingBrackets => ParsingErrorKind::MissingClosingBrackets,
+                SyntaxErrorKind::MissingOpeningPipe => ParsingErrorKind::MissingOpeningPipe,
+                SyntaxErrorKind::MissingClosingPipe => ParsingErrorKind::MissingClosingPipe,
                 SyntaxErrorKind::CommaOutsideFunction => ParsingErrorKind::CommaOutsideFunction,
                 SyntaxErrorKind::EmptyInput => ParsingErrorKind::EmptyInput,
-                SyntaxErrorKind::PipeAbsNotClosed => ParsingErrorKind::PipeAbsNotClosed,
                 SyntaxErrorKind::NameTooLong => ParsingErrorKind::NameTooLong,
                 SyntaxErrorKind::UnexpectedToken => ParsingErrorKind::UnexpectedCharacter,
-                SyntaxErrorKind::EmptyPipeAbs => ParsingErrorKind::EmptyPipeAbs,
                 SyntaxErrorKind::UnknownError => ParsingErrorKind::UnknownError,
             },
         }
@@ -196,14 +212,14 @@ where
     F: FunctionIdentifier,
 {
     pub fn new<'a, S: AsRef<str>>(
-        tokens: impl AsRef<[Token<S>]>,
+        tokens: &impl AsRef<[Token<S>]>,
         custom_constants: &impl NameTrie<&'a N>,
         custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
         custom_variables: &impl NameTrie<V>,
     ) -> Result<MathAst<N, V, F>, SyntaxError> {
         parse_or_eval(
             SyAstOutput(SubtreeCollection::new()),
-            tokens,
+            ResolvedTkStream::new(&tokens, custom_variables, custom_functions)?,
             custom_constants,
             custom_functions,
             custom_variables,
@@ -226,7 +242,7 @@ where
                 var_ident: PhantomData,
                 func_ident: PhantomData,
             },
-            tokens,
+            ResolvedTkStream::new(&tokens, custom_variables, custom_functions)?,
             custom_constants,
             custom_functions,
             custom_variables,
@@ -764,22 +780,19 @@ mod tests {
         }
     }
 
-    fn parse(input: &str) -> Result<MathAst<f64, TestVar, TestFunc>, ParsingError> {
-        let tokens = TokenStream::new::<Sfr>(input)
-            .map_err(|e| e.to_general())?
-            .0;
+    fn parse(input: &str) -> Result<MathAst<f64, TestVar, TestFunc>, SyntaxError> {
+        let tokens = TokenStream::new::<Sfr>(input).unwrap().0;
         MathAst::new(
             &tokens,
             &TestConstsNameTrie,
             &TestFuncsNameTrie,
             &TestVarsNameTrie,
         )
-        .map_err(|e| e.to_general(input, &tokens))
     }
 
     #[test]
     fn parse_to_ast() {
-        fn syntaxify(input: &str) -> Result<Vec<AstNode<f64, TestVar, TestFunc>>, ParsingError> {
+        fn syntaxify(input: &str) -> Result<Vec<AstNode<f64, TestVar, TestFunc>>, SyntaxError> {
             parse(input).map(|st| {
                 st.0.into_inner()
                     .into_iter()
@@ -1250,6 +1263,26 @@ mod tests {
             ])
         );
         assert_eq!(
+            syntaxify("|1-|x||"),
+            Ok(vec![
+                AstNode::Number(1.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Abs.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Function(NativeFunction::Abs.into(), 1),
+            ])
+        );
+        assert_eq!(
+            syntaxify("|x||y|"),
+            Ok(vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(NativeFunction::Abs.into(), 1),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(NativeFunction::Abs.into(), 1),
+                AstNode::BinaryOp(BinaryOp::Mul)
+            ])
+        );
+        assert_eq!(
             syntaxify("x(-1)"),
             Ok(vec![
                 AstNode::Variable(TestVar::X),
@@ -1259,206 +1292,140 @@ mod tests {
         );
         assert_eq!(
             syntaxify(""),
-            Err(ParsingError {
-                kind: ParsingErrorKind::EmptyInput,
-                at: 0..=0
-            })
+            Err(SyntaxError(SyntaxErrorKind::EmptyInput, 0..=0))
         );
         assert_eq!(
             syntaxify("sin(x)+ja"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::UnknownVariableOrConstant,
-                at: 7..=8
-            })
+            Err(SyntaxError(
+                SyntaxErrorKind::UnknownVariableOrConstant,
+                4..=4
+            ))
         );
         assert_eq!(
             syntaxify("x*()"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::EmptyParenthesis,
-                at: 2..=3
-            })
+            Err(SyntaxError(SyntaxErrorKind::EmptyParenthesis, 2..=3))
         );
         assert_eq!(
             syntaxify("5+pi*sinj(x)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::UnknownFunction,
-                at: 5..=9
-            })
+            Err(SyntaxError(SyntaxErrorKind::UnknownFunction, 4..=4))
         );
         assert_eq!(
             syntaxify("1+expd(2y)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::NotEnoughArguments,
-                at: 2..=9
-            })
+            Err(SyntaxError(SyntaxErrorKind::NotEnoughArguments, 2..=5))
         );
         assert_eq!(
             syntaxify("5(1+clamp(2y, 1))"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::NotEnoughArguments,
-                at: 4..=15
-            })
+            Err(SyntaxError(SyntaxErrorKind::NotEnoughArguments, 4..=9))
         );
         assert_eq!(
             syntaxify("deg2rad(1, pi)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::TooManyArguments,
-                at: 0..=13
-            })
+            Err(SyntaxError(SyntaxErrorKind::TooManyArguments, 0..=4))
         );
         assert_eq!(
             syntaxify("-expd(1, pi, sin(x))"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::TooManyArguments,
-                at: 1..=19
-            })
+            Err(SyntaxError(SyntaxErrorKind::TooManyArguments, 1..=9))
         );
         assert_eq!(
             syntaxify("9t-clamp(1, pi, sin(x), 15tan(y))"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::TooManyArguments,
-                at: 3..=32
-            })
+            Err(SyntaxError(SyntaxErrorKind::TooManyArguments, 3..=16))
         );
         assert_eq!(
             syntaxify("x*sin()"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::EmptyArgument,
-                at: 2..=6
-            })
+            Err(SyntaxError(SyntaxErrorKind::EmptyArgument, 2..=3))
         );
         assert_eq!(
             syntaxify("x*log(y,)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::EmptyArgument,
-                at: 7..=8
-            })
+            Err(SyntaxError(SyntaxErrorKind::EmptyArgument, 4..=5))
         );
         assert_eq!(
             syntaxify("x*expd(,5y)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::EmptyArgument,
-                at: 2..=7
-            })
+            Err(SyntaxError(SyntaxErrorKind::EmptyArgument, 2..=3))
         );
         assert_eq!(
             syntaxify("x*clamp(x,,5y)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::EmptyArgument,
-                at: 9..=10
-            })
+            Err(SyntaxError(SyntaxErrorKind::EmptyArgument, 4..=5))
         );
         assert_eq!(
             syntaxify("x)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MissingOpenParenthesis,
-                at: 1..=1
-            })
+            Err(SyntaxError(
+                SyntaxErrorKind::MissingOpeningParenthesis,
+                1..=1
+            ))
         );
         assert_eq!(
             syntaxify("(x"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MissingCloseParenthesis,
-                at: 0..=0
-            })
+            Err(SyntaxError(
+                SyntaxErrorKind::MissingClosingParenthesis,
+                0..=0
+            ))
         );
         assert_eq!(
             syntaxify("(x + 1)*sin(y"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MissingCloseParenthesis,
-                at: 8..=11
-            })
+            Err(SyntaxError(
+                SyntaxErrorKind::MissingClosingParenthesis,
+                6..=6
+            ))
         );
         assert_eq!(
             syntaxify("(x + (y)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MissingCloseParenthesis,
-                at: 0..=0
-            })
+            Err(SyntaxError(
+                SyntaxErrorKind::MissingClosingParenthesis,
+                0..=0
+            ))
         );
         assert_eq!(
             syntaxify("(10) * y) + 4x"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MissingOpenParenthesis,
-                at: 8..=8
-            })
+            Err(SyntaxError(
+                SyntaxErrorKind::MissingOpeningParenthesis,
+                5..=5
+            ))
         );
         assert_eq!(
             syntaxify("*10 2"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MisplacedOperator,
-                at: 0..=0
-            })
+            Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, 0..=0))
         );
         assert_eq!(
             syntaxify("(*x 2)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MisplacedOperator,
-                at: 1..=1
-            })
+            Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, 1..=1))
         );
         assert_eq!(
             syntaxify("1+(x 2-)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MisplacedOperator,
-                at: 6..=6
-            })
+            Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, 5..=5))
         );
         assert_eq!(
             syntaxify("(+)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MisplacedOperator,
-                at: 1..=1
-            })
+            Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, 1..=1))
         );
         assert_eq!(
             syntaxify("(!)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MisplacedOperator,
-                at: 1..=1
-            })
+            Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, 1..=1))
         );
         assert_eq!(
             syntaxify("|x"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::PipeAbsNotClosed,
-                at: 0..=0
-            })
+            Err(SyntaxError(SyntaxErrorKind::MissingClosingPipe, 0..=0))
         );
         assert_eq!(
             syntaxify("3+|(|y|+1)/2"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::PipeAbsNotClosed,
-                at: 2..=2
-            })
+            Err(SyntaxError(SyntaxErrorKind::MissingClosingPipe, 2..=2))
         );
         assert_eq!(
             syntaxify("|sin(|x)|"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::PipeAbsNotClosed,
-                at: 5..=5
-            })
+            Err(SyntaxError(SyntaxErrorKind::MissingClosingPipe, 2..=2))
         );
         assert_eq!(
             syntaxify("x*"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MisplacedOperator,
-                at: 1..=1
-            })
+            Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, 1..=1))
         );
         assert_eq!(
             syntaxify("lnx)"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MissingOpenParenthesis,
-                at: 3..=3
-            })
+            Err(SyntaxError(
+                SyntaxErrorKind::MissingOpeningParenthesis,
+                1..=1
+            ))
         );
         assert_eq!(
             syntaxify("ln/x"),
-            Err(ParsingError {
-                kind: ParsingErrorKind::MisplacedOperator,
-                at: 2..=2
-            })
+            Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, 1..=1))
         );
     }
 

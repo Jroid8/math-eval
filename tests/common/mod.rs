@@ -139,18 +139,24 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
                 ),
                 _ => unreachable!(),
             },
-            3 => AstNode::Function(match fastrand::u8(0..7) {
-                0 => FunctionType::Native(NativeFunction::Min),
-                1 => FunctionType::Native(NativeFunction::Max),
-                2..7 => FunctionType::Custom(*fastrand::choice(self.functions_3p).unwrap()),
-                _ => unreachable!(),
-            }, 3),
-            4 => AstNode::Function(match fastrand::u8(0..7) {
-                0 => FunctionType::Native(NativeFunction::Min),
-                1 => FunctionType::Native(NativeFunction::Max),
-                2..7 => FunctionType::Custom(*fastrand::choice(self.functions_4p).unwrap()),
-                _ => unreachable!(),
-            }, 4),
+            3 => AstNode::Function(
+                match fastrand::u8(0..7) {
+                    0 => FunctionType::Native(NativeFunction::Min),
+                    1 => FunctionType::Native(NativeFunction::Max),
+                    2..7 => FunctionType::Custom(*fastrand::choice(self.functions_3p).unwrap()),
+                    _ => unreachable!(),
+                },
+                3,
+            ),
+            4 => AstNode::Function(
+                match fastrand::u8(0..7) {
+                    0 => FunctionType::Native(NativeFunction::Min),
+                    1 => FunctionType::Native(NativeFunction::Max),
+                    2..7 => FunctionType::Custom(*fastrand::choice(self.functions_4p).unwrap()),
+                    _ => unreachable!(),
+                },
+                4,
+            ),
             _ => unreachable!(),
         }
     }

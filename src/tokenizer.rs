@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 
 use strum::EnumIter;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, EnumIter)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter)]
 pub enum OprToken {
     Plus,
     Minus,
@@ -46,14 +46,42 @@ impl Display for OprToken {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter)]
+pub enum DelimEdge {
+    Opening,
+    Closing,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter)]
+pub enum DelimKind {
+    Paren,
+    Brace,
+    Bracket,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct DelimiterToken(pub DelimKind, pub DelimEdge);
+
+impl Display for DelimiterToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            DelimiterToken(DelimKind::Paren, DelimEdge::Opening) => "(",
+            DelimiterToken(DelimKind::Brace, DelimEdge::Opening) => "[",
+            DelimiterToken(DelimKind::Bracket, DelimEdge::Opening) => "{",
+            DelimiterToken(DelimKind::Paren, DelimEdge::Closing) => ")",
+            DelimiterToken(DelimKind::Brace, DelimEdge::Closing) => "]",
+            DelimiterToken(DelimKind::Bracket, DelimEdge::Closing) => "}",
+        })
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Token<S: AsRef<str>> {
     Number(S),
     Operator(OprToken),
     Variable(S),
-    Function(S),
-    OpenParen,
-    CloseParen,
+    Function(S, DelimKind),
+    Delimiter(DelimiterToken),
     Comma,
     Pipe,
 }
@@ -61,13 +89,10 @@ pub enum Token<S: AsRef<str>> {
 impl<S: AsRef<str>> Token<S> {
     pub fn byte_len(&self) -> usize {
         match self {
-            Token::Function(s) => {
-                // this token captures both the function name and the opening parentheses
-                s.as_ref().len() + 1
-            }
+            Token::Function(s, _) => s.as_ref().len() + 1,
             Token::Number(s) | Token::Variable(s) => s.as_ref().len(),
             Token::Operator(opr) => opr.length(),
-            Token::OpenParen | Token::CloseParen | Token::Comma | Token::Pipe => 1,
+            Token::Delimiter(_) | Token::Comma | Token::Pipe => 1,
         }
     }
 }
@@ -78,9 +103,12 @@ impl<S: AsRef<str>> Debug for Token<S> {
             Self::Number(num) => f.debug_tuple("Number").field(&num.as_ref()).finish(),
             Self::Operator(opr) => f.debug_tuple("Operator").field(opr).finish(),
             Self::Variable(var) => f.debug_tuple("Variable").field(&var.as_ref()).finish(),
-            Self::Function(func) => f.debug_tuple("Function").field(&func.as_ref()).finish(),
-            Self::OpenParen => write!(f, "OpenParen"),
-            Self::CloseParen => write!(f, "CloseParen"),
+            Self::Function(func, kind) => f
+                .debug_tuple("Function")
+                .field(&func.as_ref())
+                .field(&kind)
+                .finish(),
+            Self::Delimiter(delim) => f.debug_tuple("Delimiter").field(&delim).finish(),
             Self::Comma => write!(f, "Comma"),
             Self::Pipe => write!(f, "Pipe"),
         }
@@ -93,9 +121,15 @@ impl<S: AsRef<str>> Display for Token<S> {
             Token::Number(num) => f.write_str(num.as_ref()),
             Token::Operator(opr) => write!(f, "{opr}"),
             Token::Variable(var) => f.write_str(var.as_ref()),
-            Token::Function(func) => f.write_str(func.as_ref()),
-            Token::OpenParen => f.write_str("("),
-            Token::CloseParen => f.write_str(")"),
+            Token::Function(func, kind) => {
+                write!(
+                    f,
+                    "{}{}",
+                    func.as_ref(),
+                    DelimiterToken(*kind, DelimEdge::Opening)
+                )
+            }
+            Token::Delimiter(delim) => write!(f, "{delim}"),
             Token::Comma => f.write_str(","),
             Token::Pipe => f.write_str("|"),
         }
@@ -119,8 +153,7 @@ enum CharNotion {
     Pipe,
     Alphabet,
     Number,
-    OpenParen,
-    CloseParen,
+    Delimiter(DelimiterToken),
     Comma,
     Space,
 }
@@ -135,8 +168,30 @@ fn recognize(input: char) -> Option<CharNotion> {
         '^' => Some(CharNotion::Operation(OprChar::Power)),
         '%' => Some(CharNotion::Operation(OprChar::Percent)),
         '!' => Some(CharNotion::Operation(OprChar::Exclamation)),
-        '(' | '[' | '{' => Some(CharNotion::OpenParen),
-        ')' | ']' | '}' => Some(CharNotion::CloseParen),
+        '(' => Some(CharNotion::Delimiter(DelimiterToken(
+            DelimKind::Paren,
+            DelimEdge::Opening,
+        ))),
+        ')' => Some(CharNotion::Delimiter(DelimiterToken(
+            DelimKind::Paren,
+            DelimEdge::Closing,
+        ))),
+        '[' => Some(CharNotion::Delimiter(DelimiterToken(
+            DelimKind::Brace,
+            DelimEdge::Opening,
+        ))),
+        ']' => Some(CharNotion::Delimiter(DelimiterToken(
+            DelimKind::Brace,
+            DelimEdge::Closing,
+        ))),
+        '{' => Some(CharNotion::Delimiter(DelimiterToken(
+            DelimKind::Bracket,
+            DelimEdge::Opening,
+        ))),
+        '}' => Some(CharNotion::Delimiter(DelimiterToken(
+            DelimKind::Bracket,
+            DelimEdge::Closing,
+        ))),
         ',' => Some(CharNotion::Comma),
         ' ' | '\x09'..='\x0d' => Some(CharNotion::Space),
         '|' => Some(CharNotion::Pipe),
@@ -171,7 +226,7 @@ impl NumberRecognizer for StandardFloatRecognizer {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TokenStream<S: AsRef<str>>(pub(crate) Vec<Token<S>>);
 
 impl<'a> TokenStream<&'a str> {
@@ -201,10 +256,9 @@ impl<'a> TokenStream<&'a str> {
                             OprChar::Exclamation => state = Reading::Exclamation,
                         },
                         Some(CharNotion::Alphabet) => state = Reading::VarFunc(pos),
-                        Some(CharNotion::OpenParen) => result.push(Token::OpenParen),
-                        Some(CharNotion::CloseParen) => result.push(Token::CloseParen),
                         Some(CharNotion::Comma) => result.push(Token::Comma),
                         Some(CharNotion::Pipe) => result.push(Token::Pipe),
+                        Some(CharNotion::Delimiter(delim)) => result.push(Token::Delimiter(delim)),
                         Some(CharNotion::Space) => (),
                         None | Some(CharNotion::Number) => {
                             if let Some(nr) = N::new(cha) {
@@ -223,17 +277,17 @@ impl<'a> TokenStream<&'a str> {
                     }
                     Reading::VarFunc(start) => match notion {
                         Some(CharNotion::Alphabet | CharNotion::Number) => (),
-                        Some(CharNotion::OpenParen) => {
-                            result.push(Token::Function(&input[*start..pos]));
+                        Some(CharNotion::Delimiter(DelimiterToken(kind, DelimEdge::Opening))) => {
+                            result.push(Token::Function(&input[*start..pos], kind));
                             state = Reading::Nothing;
                         }
                         None
                         | Some(
                             CharNotion::Operation(_)
-                            | CharNotion::CloseParen
                             | CharNotion::Comma
                             | CharNotion::Pipe
-                            | CharNotion::Space,
+                            | CharNotion::Space
+                            | CharNotion::Delimiter(DelimiterToken(_, DelimEdge::Closing)),
                         ) => {
                             result.push(Token::Variable(&input[*start..pos]));
                             state = Reading::Nothing;
@@ -281,7 +335,7 @@ impl<S: AsRef<str>> AsRef<[Token<S>]> for TokenStream<S> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TokenizationError(pub usize);
 
 impl TokenizationError {
@@ -295,6 +349,8 @@ impl TokenizationError {
 
 #[cfg(test)]
 mod tests {
+    use super::DelimEdge::*;
+    use super::DelimKind::*;
     use super::Token::*;
     use super::*;
 
@@ -302,33 +358,42 @@ mod tests {
     fn tokenizer() {
         let tokenize = |s| TokenStream::new::<StandardFloatRecognizer>(s);
         assert_eq!(tokenize("1"), Ok(TokenStream(vec![Number("1")])));
-        assert_eq!(
-            tokenize("2291"),
-            Ok(TokenStream(vec![Number("2291")]))
-        );
+        assert_eq!(tokenize("2291"), Ok(TokenStream(vec![Number("2291")])));
         assert_eq!(
             tokenize("-1.0"),
             Ok(TokenStream(vec![Operator(OprToken::Minus), Number("1.0")]))
         );
         assert_eq!(
             tokenize("(11)"),
-            Ok(TokenStream(vec![OpenParen, Number("11"), CloseParen]))
+            Ok(TokenStream(vec![
+                Delimiter(DelimiterToken(Paren, Opening)),
+                Number("11"),
+                Delimiter(DelimiterToken(Paren, Closing))
+            ]))
         );
         assert_eq!(
             tokenize("[11]"),
-            Ok(TokenStream(vec![OpenParen, Number("11"), CloseParen]))
+            Ok(TokenStream(vec![
+                Delimiter(DelimiterToken(Brace, Opening)),
+                Number("11"),
+                Delimiter(DelimiterToken(Brace, Closing))
+            ]))
         );
         assert_eq!(
             tokenize("{11}"),
-            Ok(TokenStream(vec![OpenParen, Number("11"), CloseParen]))
+            Ok(TokenStream(vec![
+                Delimiter(DelimiterToken(Bracket, Opening)),
+                Number("11"),
+                Delimiter(DelimiterToken(Bracket, Closing))
+            ]))
         );
         assert_eq!(
-            tokenize("-(pi)"),
+            tokenize("-{pi}"),
             Ok(TokenStream(vec![
                 Operator(OprToken::Minus),
-                OpenParen,
+                Delimiter(DelimiterToken(Bracket, Opening)),
                 Variable("pi"),
-                CloseParen
+                Delimiter(DelimiterToken(Bracket, Closing))
             ]))
         );
         assert_eq!(
@@ -374,19 +439,27 @@ mod tests {
         assert_eq!(
             tokenize("sin(x)"),
             Ok(TokenStream(vec![
-                Function("sin"),
+                Function("sin", Paren),
                 Variable("x"),
-                CloseParen
+                Delimiter(DelimiterToken(Paren, Closing))
+            ]))
+        );
+        assert_eq!(
+            tokenize("sin[x]"),
+            Ok(TokenStream(vec![
+                Function("sin", Brace),
+                Variable("x"),
+                Delimiter(DelimiterToken(Brace, Closing))
             ]))
         );
         assert_eq!(
             tokenize("log(x, 5)"),
             Ok(TokenStream(vec![
-                Function("log"),
+                Function("log", Paren),
                 Variable("x"),
                 Comma,
                 Number("5"),
-                CloseParen
+                Delimiter(DelimiterToken(Paren, Closing))
             ]))
         );
         assert_eq!(
@@ -396,31 +469,15 @@ mod tests {
         assert_eq!(tokenize(""), Ok(TokenStream(vec![])));
         assert_eq!(tokenize("   "), Ok(TokenStream(vec![])));
         assert_eq!(
-            tokenize("((([{ 3 }])))"),
+            tokenize("cos{1+sin(0)}"),
             Ok(TokenStream(vec![
-                OpenParen,
-                OpenParen,
-                OpenParen,
-                OpenParen,
-                OpenParen,
-                Number("3"),
-                CloseParen,
-                CloseParen,
-                CloseParen,
-                CloseParen,
-                CloseParen
-            ]))
-        );
-        assert_eq!(
-            tokenize("cos(1+sin(0))"),
-            Ok(TokenStream(vec![
-                Function("cos"),
+                Function("cos", Bracket),
                 Number("1"),
                 Operator(OprToken::Plus),
-                Function("sin"),
+                Function("sin", Paren),
                 Number("0"),
-                CloseParen,
-                CloseParen
+                Delimiter(DelimiterToken(Paren, Closing)),
+                Delimiter(DelimiterToken(Bracket, Closing))
             ]))
         );
         assert_eq!(tokenize(".5"), Ok(TokenStream(vec![Number(".5")])));

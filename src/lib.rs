@@ -190,9 +190,14 @@ impl Display for ParsingError {
 pub enum ParsingErrorKind {
     UnexpectedCharacter,
     CommaOutsideFunction,
-    MissingOpenParenthesis,
-    MissingCloseParenthesis,
-    PipeAbsNotClosed,
+    MissingOpeningParenthesis,
+    MissingClosingParenthesis,
+    MissingOpeningBrackets,
+    MissingClosingBrackets,
+    MissingOpeningBraces,
+    MissingClosingBraces,
+    MissingOpeningPipe,
+    MissingClosingPipe,
     NumberParsingError,
     MisplacedOperator,
     UnknownVariableOrConstant,
@@ -200,20 +205,33 @@ pub enum ParsingErrorKind {
     NotEnoughArguments,
     TooManyArguments,
     EmptyParenthesis,
+    EmptyPipePair,
+    EmptyBrackets,
+    EmptyBraces,
     EmptyArgument,
     EmptyInput,
-    EmptyPipeAbs,
     NameTooLong,
     UnknownError,
 }
 
 impl Display for ParsingErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // FIX: put these in a const function
         f.write_str(match self {
             ParsingErrorKind::UnexpectedCharacter => "Unexpected character encountered",
             ParsingErrorKind::CommaOutsideFunction => "Comma found outside of function",
-            ParsingErrorKind::MissingOpenParenthesis => "Opening parenthesis is missing",
-            ParsingErrorKind::MissingCloseParenthesis => "Closing parenthesis is missing",
+            ParsingErrorKind::MissingOpeningParenthesis => "Missing opening parenthesis",
+            ParsingErrorKind::MissingClosingParenthesis => "Missing closing parenthesis",
+            ParsingErrorKind::MissingOpeningBrackets => "Missing opening brackets",
+            ParsingErrorKind::MissingClosingBrackets => "Missing closing brackets",
+            ParsingErrorKind::MissingOpeningBraces => "Missing opening braces",
+            ParsingErrorKind::MissingClosingBraces => "Missing closing braces",
+            ParsingErrorKind::MissingOpeningPipe => {
+                "Missing opening vertical bar symbol for absolute value"
+            }
+            ParsingErrorKind::MissingClosingPipe => {
+                "Missing closing vertical bar symbol for absolute value"
+            }
             ParsingErrorKind::NumberParsingError => "Unable to parse number",
             ParsingErrorKind::MisplacedOperator => "Misplaced operator",
             ParsingErrorKind::UnknownVariableOrConstant => "Unrecognized variable or constant",
@@ -221,13 +239,12 @@ impl Display for ParsingErrorKind {
             ParsingErrorKind::NotEnoughArguments => "Insufficient arguments for function",
             ParsingErrorKind::TooManyArguments => "Too many arguments for function",
             ParsingErrorKind::EmptyParenthesis => "Parentheses should not be empty",
+            ParsingErrorKind::EmptyBrackets => "Brackets should not be empty",
+            ParsingErrorKind::EmptyBraces => "Braces should not be empty",
             ParsingErrorKind::EmptyArgument => "Function arguments shouldn't be empty",
             ParsingErrorKind::EmptyInput => "Input shouldn't be empty",
-            ParsingErrorKind::PipeAbsNotClosed => {
-                "Unmatched vertical bar in absolute value expression"
-            }
             ParsingErrorKind::NameTooLong => "Identifier exceeds maximum length of 32 characters.",
-            ParsingErrorKind::EmptyPipeAbs => {
+            ParsingErrorKind::EmptyPipePair => {
                 "Pairs of vertical bars for the absolute value shouldn not be empty"
             }
             Self::UnknownError => "Unknown error",
@@ -330,8 +347,7 @@ pub fn compile<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     custom_variables: &impl NameTrie<V>,
     function_to_pointer: impl Fn(F) -> FunctionPointer<'f, N>,
 ) -> Result<QuickExpr<'f, N, V, F>, ParsingError> {
-    let token_stream =
-        TokenStream::new::<N::Recognizer>(input).map_err(|e| e.to_general())?;
+    let token_stream = TokenStream::new::<N::Recognizer>(input).map_err(|e| e.to_general())?;
     let mut syntax_tree = MathAst::new(
         &token_stream.0,
         custom_constants,
@@ -352,8 +368,7 @@ pub fn evaluate<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>
     function_to_pointer: impl Fn(F) -> FunctionPointer<'f, N>,
     variable_values: &impl VariableStore<N, V>,
 ) -> Result<N, ParsingError> {
-    let token_stream =
-        TokenStream::new::<N::Recognizer>(input).map_err(|e| e.to_general())?;
+    let token_stream = TokenStream::new::<N::Recognizer>(input).map_err(|e| e.to_general())?;
     MathAst::parse_and_eval(
         &token_stream.0,
         custom_constants,

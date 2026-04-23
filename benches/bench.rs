@@ -161,7 +161,7 @@ fn calculation(crit: &mut Criterion) {
     let mut group = crit.benchmark_group("Calculation");
     for (input, desc) in exprs {
         let ast = MathAst::new(
-            TokenStream::new::<Sfr>(input).unwrap(),
+            &TokenStream::new::<Sfr>(input).unwrap(),
             &EmptyNameTrie,
             &MyFuncsNameTrie,
             &MyVarsNameTrie,

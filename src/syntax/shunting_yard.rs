@@ -2,12 +2,13 @@ use std::{fmt::Debug, marker::PhantomData};
 
 use super::{AstNode, FunctionType, MathAst, SyntaxError, SyntaxErrorKind};
 use crate::{
-    BinaryOp, FunctionIdentifier, FunctionPointer, UnaryOp, VariableIdentifier,
-    VariableStore,
+    BinaryOp, FunctionIdentifier, FunctionPointer, UnaryOp, VariableIdentifier, VariableStore,
     number::{NFPointer, NativeFuncsNameTrie, NativeFunction, Number},
     postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans, SubtreeCollection},
-    syntax::token_fragmentation::{FragKind, NAME_LIMIT, ParsedFragment, fragment_token},
-    tokenizer::{OprToken, Token},
+    syntax::{
+        grammar::{ResOprToken, ResToken, ResolvedTkStream},
+        token_fragmentation::{FragKind, NAME_LIMIT, ParsedFragment, fragment_token},
+    },
     trie::NameTrie,
 };
 
@@ -18,7 +19,6 @@ where
 {
     Native(NativeFunction),
     Custom(F, u8, Option<u8>),
-    PipeAbs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,29 +83,27 @@ where
             SyOperator::FuncNoParen(FunctionType::Custom(cf)) => {
                 AstNode::Function(FunctionType::Custom(cf), 1)
             }
-            SyOperator::Function(SyFunction::PipeAbs, _) => {
-                AstNode::Function(NativeFunction::Abs.into(), 1)
-            }
             SyOperator::Parentheses => unreachable!(),
         }
     }
 }
 
-impl<F> From<OprToken> for SyOperator<F>
+impl<F> From<ResOprToken> for SyOperator<F>
 where
     F: FunctionIdentifier,
 {
-    fn from(value: OprToken) -> Self {
+    fn from(value: ResOprToken) -> Self {
         match value {
-            OprToken::Plus => Self::BinaryOp(BinaryOp::Add),
-            OprToken::Minus => Self::BinaryOp(BinaryOp::Sub),
-            OprToken::Multiply => Self::BinaryOp(BinaryOp::Mul),
-            OprToken::Divide => Self::BinaryOp(BinaryOp::Div),
-            OprToken::Power => Self::BinaryOp(BinaryOp::Pow),
-            OprToken::Modulo => Self::BinaryOp(BinaryOp::Mod),
-            OprToken::DoubleStar => Self::BinaryOp(BinaryOp::Mul),
-            OprToken::Factorial => Self::UnaryOp(UnaryOp::Fac),
-            OprToken::DoubleFactorial => Self::UnaryOp(UnaryOp::DoubleFac),
+            ResOprToken::Add => Self::BinaryOp(BinaryOp::Add),
+            ResOprToken::Subtract => Self::BinaryOp(BinaryOp::Sub),
+            ResOprToken::Multiply => Self::BinaryOp(BinaryOp::Mul),
+            ResOprToken::Divide => Self::BinaryOp(BinaryOp::Div),
+            ResOprToken::Power => Self::BinaryOp(BinaryOp::Pow),
+            ResOprToken::Modulo => Self::BinaryOp(BinaryOp::Mod),
+            ResOprToken::Factorial => Self::UnaryOp(UnaryOp::Fac),
+            ResOprToken::DoubleFactorial => Self::UnaryOp(UnaryOp::DoubleFac),
+            ResOprToken::Negative => Self::UnaryOp(UnaryOp::Neg),
+            ResOprToken::Positive => unreachable!(),
         }
     }
 }
@@ -119,7 +117,7 @@ where
     type Output;
 
     fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>) -> Result<(), NotEnoughOrphans>;
-    fn make(self) -> Result<Self::Output, MultipleRoots>;
+    fn build(self) -> Result<Self::Output, MultipleRoots>;
     fn push(&mut self, node: AstNode<N, V, F>) -> Result<(), NotEnoughOrphans>;
     fn pop_arg(&mut self) -> Option<AstNode<N, V, F>>;
     fn last_num<'a>(&'a self) -> Option<N::AsArg<'a>>;
@@ -181,7 +179,7 @@ where
             self.push(opr.to_syn())
         }
     }
-    fn make(self) -> Result<Self::Output, MultipleRoots> {
+    fn build(self) -> Result<Self::Output, MultipleRoots> {
         self.0.into_tree().map(|t| MathAst(t))
     }
     fn push(&mut self, kind: AstNode<N, V, F>) -> Result<(), NotEnoughOrphans> {
@@ -262,7 +260,7 @@ where
         self.args.push(res);
         Ok(())
     }
-    fn make(mut self) -> Result<Self::Output, MultipleRoots> {
+    fn build(mut self) -> Result<Self::Output, MultipleRoots> {
         if self.args.len() > 1 {
             Err(MultipleRoots)
         } else {
@@ -349,12 +347,12 @@ where
     }
 }
 
-fn find_opening_paren<S: AsRef<str>>(tokens: &[Token<S>]) -> Option<usize> {
+fn find_opening<S: AsRef<str>>(stream: &ResolvedTkStream<'_, S>, target: usize) -> Option<usize> {
     let mut nesting = 1;
-    for (i, tk) in tokens.iter().enumerate().rev() {
+    for (i, tk) in stream.iter().take(target).enumerate().rev() {
         match tk {
-            Token::CloseParen => nesting += 1,
-            Token::OpenParen | Token::Function(_) => {
+            ResToken::CloseDelim | ResToken::ClosePipe => nesting += 1,
+            ResToken::OpenDelim | ResToken::OpenPipe | ResToken::Function(_) => {
                 nesting -= 1;
                 if nesting == 0 {
                     return Some(i);
@@ -364,44 +362,6 @@ fn find_opening_paren<S: AsRef<str>>(tokens: &[Token<S>]) -> Option<usize> {
         }
     }
     None
-}
-
-fn find_opening_pipe<S: AsRef<str>>(tokens: &[Token<S>]) -> Option<usize> {
-    let mut idx = tokens.len() - 1;
-    loop {
-        match tokens[idx] {
-            Token::CloseParen => {
-                idx = find_opening_paren(&tokens[..idx]).unwrap();
-            }
-            Token::Pipe => return Some(idx),
-            Token::OpenParen | Token::Function(_) => unreachable!(),
-            _ => (),
-        }
-        if idx == 0 {
-            return None;
-        } else {
-            idx -= 1;
-        }
-    }
-}
-
-fn inside_pipe_abs<F>(operator_stack: &[SyOperator<F>]) -> bool
-where
-    F: FunctionIdentifier,
-{
-    for opr in operator_stack.iter().rev() {
-        match opr {
-            SyOperator::BinaryOp(_)
-            | SyOperator::UnaryOp(_)
-            | SyOperator::HpNeg
-            | SyOperator::FuncNoParen(_) => (),
-            SyOperator::Function(SyFunction::PipeAbs, _) => return true,
-            SyOperator::Function(_, _) | SyOperator::Parentheses => {
-                return false;
-            }
-        }
-    }
-    false
 }
 
 fn push_fragments<N, V, F, O>(
@@ -439,104 +399,9 @@ where
     Ok(())
 }
 
-// E -> PE | ES | EIE | (E) | |E| | F(A) | FE | T
-// P -> + | -
-// S -> ! | !!
-// I -> + | - | * | / | ^
-// A -> E,A | E
-// T -> N | V
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExprState {
-    Prefix,
-    Suffix,
-}
-
-impl ExprState {
-    fn new() -> Self {
-        Self::Prefix
-    }
-
-    fn next<S: AsRef<str>, F: FunctionIdentifier>(
-        &mut self,
-        token: &Token<S>,
-        operator_stack: &[SyOperator<F>],
-    ) -> Result<bool, SyntaxErrorKind> {
-        match self {
-            ExprState::Prefix => match token {
-                // prefix
-                Token::Operator(OprToken::Plus | OprToken::Minus)
-                | Token::OpenParen
-                | Token::Function(_) => Ok(false),
-                // suffix & infix
-                Token::CloseParen | Token::Comma => Err(SyntaxErrorKind::UnexpectedToken),
-                Token::Operator(
-                    OprToken::Factorial
-                    | OprToken::DoubleFactorial
-                    | OprToken::Multiply
-                    | OprToken::Divide
-                    | OprToken::Power
-                    | OprToken::Modulo
-                    | OprToken::DoubleStar,
-                ) => Err(SyntaxErrorKind::MisplacedOperator),
-                // pipe which may be prefix or suffix depending on the state
-                Token::Pipe => {
-                    if inside_pipe_abs(operator_stack) {
-                        // suffix
-                        Err(SyntaxErrorKind::UnexpectedToken)
-                    } else {
-                        // prefix
-                        Ok(false)
-                    }
-                }
-                // terminal
-                Token::Number(_) | Token::Variable(_) => {
-                    *self = ExprState::Suffix;
-                    Ok(false)
-                }
-            },
-            ExprState::Suffix => match token {
-                // suffix
-                Token::Operator(OprToken::Factorial | OprToken::DoubleFactorial)
-                | Token::CloseParen => Ok(false),
-                // prefix
-                Token::OpenParen | Token::Function(_) => {
-                    *self = ExprState::Prefix;
-                    Ok(true)
-                }
-                // pipe which may be prefix or suffix depending on the state
-                Token::Pipe => {
-                    if inside_pipe_abs(operator_stack) {
-                        Ok(false)
-                    } else {
-                        *self = ExprState::Prefix;
-                        Ok(true)
-                    }
-                }
-                // infix
-                Token::Operator(
-                    OprToken::Plus
-                    | OprToken::Minus
-                    | OprToken::Multiply
-                    | OprToken::Divide
-                    | OprToken::Power
-                    | OprToken::Modulo
-                    | OprToken::DoubleStar,
-                )
-                | Token::Comma => {
-                    *self = ExprState::Prefix;
-                    Ok(false)
-                }
-                // terminal
-                Token::Number(_) | Token::Variable(_) => Ok(true),
-            },
-        }
-    }
-}
-
 pub(super) fn parse_or_eval<'a, O, N, V, F, S>(
     mut output_queue: O,
-    tokens: impl AsRef<[Token<S>]>,
+    stream: ResolvedTkStream<'_, S>,
     custom_constants: &impl NameTrie<&'a N>,
     custom_functions: &impl NameTrie<(F, u8, Option<u8>)>,
     custom_variables: &impl NameTrie<V>,
@@ -549,65 +414,27 @@ where
     S: AsRef<str>,
 {
     // Dijkstra's shunting yard algorithm
-    let tokens = tokens.as_ref();
-    let clarify_err = |kind: SyntaxErrorKind, pos: usize| {
-        if kind == SyntaxErrorKind::UnexpectedToken && pos > 0 {
-            match tokens[pos - 1..=pos] {
-                [Token::Comma, Token::CloseParen]
-                | [Token::OpenParen | Token::Function(_), Token::Comma]
-                | [Token::Comma, Token::Comma]
-                | [Token::Function(_), Token::CloseParen] => {
-                    SyntaxError(SyntaxErrorKind::EmptyArgument, pos - 1..=pos)
-                }
-                [Token::OpenParen, Token::CloseParen] => {
-                    SyntaxError(SyntaxErrorKind::EmptyParenthesis, pos - 1..=pos)
-                }
-                [Token::Pipe, Token::Pipe] => {
-                    SyntaxError(SyntaxErrorKind::EmptyPipeAbs, pos - 1..=pos)
-                }
-                [Token::Operator(_), Token::CloseParen | Token::Comma] => {
-                    SyntaxError(SyntaxErrorKind::MisplacedOperator, pos - 1..=pos - 1)
-                }
-                _ => SyntaxError(kind, pos..=pos),
-            }
-        } else {
-            SyntaxError(kind, pos..=pos)
-        }
-    };
-    let mut state = ExprState::new();
     let mut was_pow = false;
     let mut operator_stack: Vec<SyOperator<F>> = Vec::new();
     let mut fragments = Vec::with_capacity(0);
-    for (pos, token) in tokens.iter().enumerate() {
-        let last_state = state;
-        let implied_mult = state
-            .next(token, &operator_stack)
-            .map_err(|e| clarify_err(e, pos))?;
-        if implied_mult {
+    for (pos, token) in stream.iter().enumerate() {
+        if stream.has_implied_mult(pos) {
             output_queue.push_opr(SyOperator::BinaryOp(BinaryOp::Mul), &mut operator_stack)?;
         }
         match token {
-            Token::Number(num) => output_queue.push(
-                num.as_ref()
-                    .parse::<N>()
+            ResToken::Number(num) => output_queue.push(
+                num.parse::<N>()
                     .map(AstNode::Number)
                     .map_err(|_| SyntaxError(SyntaxErrorKind::NumberParsingError, pos..=pos))?,
             )?,
-            Token::Operator(opr) => {
-                let opr = *opr;
-                if opr == OprToken::Minus && last_state == ExprState::Prefix {
-                    if was_pow {
-                        output_queue.push_opr(SyOperator::HpNeg, &mut operator_stack)?;
-                    } else {
-                        output_queue
-                            .push_opr(SyOperator::UnaryOp(UnaryOp::Neg), &mut operator_stack)?;
-                    }
-                } else if opr != OprToken::Plus || last_state != ExprState::Prefix {
+            ResToken::Operator(opr) => {
+                if was_pow && opr == ResOprToken::Negative {
+                    output_queue.push_opr(SyOperator::HpNeg, &mut operator_stack)?;
+                } else if opr != ResOprToken::Positive {
                     output_queue.push_opr(opr.into(), &mut operator_stack)?;
                 }
             }
-            Token::Variable(name) => {
-                let name = name.as_ref();
+            ResToken::Variable(name) => {
                 if name.chars().count() > NAME_LIMIT as usize {
                     return Err(SyntaxError(SyntaxErrorKind::NameTooLong, pos..=pos));
                 }
@@ -640,7 +467,6 @@ where
                     if min > 1 {
                         return Err(SyntaxError(SyntaxErrorKind::NotEnoughArguments, pos..=pos));
                     }
-                    state = ExprState::Prefix;
                     output_queue.push_opr(func, &mut operator_stack)?;
                 } else if fragment_token(
                     name,
@@ -649,12 +475,6 @@ where
                     custom_variables,
                     custom_functions,
                 ) {
-                    if matches!(
-                        fragments.last().unwrap().kind,
-                        FragKind::Function(_, _, _)
-                    ) {
-                        state = ExprState::Prefix;
-                    }
                     push_fragments(&mut fragments, &mut operator_stack, &mut output_queue)
                         .map_err(|e| SyntaxError(e, pos..=pos))?;
                 } else {
@@ -664,8 +484,7 @@ where
                     ));
                 }
             }
-            Token::Function(name) => {
-                let name = name.as_ref();
+            ResToken::Function(name) => {
                 if name.chars().count() > NAME_LIMIT as usize {
                     return Err(SyntaxError(SyntaxErrorKind::NameTooLong, pos..=pos));
                 }
@@ -736,10 +555,10 @@ where
                     return Err(SyntaxError(SyntaxErrorKind::UnknownFunction, pos..=pos));
                 }
             }
-            Token::OpenParen => {
+            ResToken::OpenDelim => {
                 operator_stack.push(SyOperator::Parentheses);
             }
-            Token::Comma => {
+            ResToken::Comma => {
                 output_queue.flush(&mut operator_stack)?;
                 match operator_stack.last_mut() {
                     Some(SyOperator::Function(_, args)) => {
@@ -753,17 +572,10 @@ where
                     }
                 }
             }
-            Token::CloseParen => {
+            ResToken::CloseDelim => {
                 output_queue.flush(&mut operator_stack)?;
-                match operator_stack.pop() {
-                    Some(SyOperator::Function(SyFunction::PipeAbs, _)) => {
-                        let opening = find_opening_pipe(&tokens[..pos]).unwrap();
-                        return Err(SyntaxError(
-                            SyntaxErrorKind::PipeAbsNotClosed,
-                            opening..=opening,
-                        ));
-                    }
-                    Some(SyOperator::Function(SyFunction::Native(mut nf), args)) => {
+                match operator_stack.pop().unwrap() {
+                    SyOperator::Function(SyFunction::Native(mut nf), args) => {
                         if nf == NativeFunction::Log {
                             // FIX: recieve 10 and 2 from MathEvalNumber so it can be const
                             let ten = N::from(10);
@@ -792,88 +604,50 @@ where
                             output_queue.push(AstNode::Function(nf.into(), args))?;
                             Ok(())
                         }
-                        .map_err(|e| {
-                            SyntaxError(e, find_opening_paren(&tokens[..pos]).unwrap()..=pos)
-                        })?
+                        .map_err(|e| SyntaxError(e, find_opening(&stream, pos).unwrap()..=pos))?
                     }
-                    Some(SyOperator::Function(
-                        SyFunction::Custom(cf, min_args, max_args),
-                        args,
-                    )) => if args < min_args {
-                        Err(SyntaxErrorKind::NotEnoughArguments)
-                    } else if max_args.is_some_and(|m| args > m) {
-                        Err(SyntaxErrorKind::TooManyArguments)
-                    } else {
-                        output_queue.push(AstNode::Function(FunctionType::Custom(cf), args))?;
-                        Ok(())
+                    SyOperator::Function(SyFunction::Custom(cf, min_args, max_args), args) => {
+                        if args < min_args {
+                            Err(SyntaxErrorKind::NotEnoughArguments)
+                        } else if max_args.is_some_and(|m| args > m) {
+                            Err(SyntaxErrorKind::TooManyArguments)
+                        } else {
+                            output_queue.push(AstNode::Function(FunctionType::Custom(cf), args))?;
+                            Ok(())
+                        }
+                        .map_err(|e| SyntaxError(e, find_opening(&stream, pos).unwrap()..=pos))?
                     }
-                    .map_err(|e| {
-                        SyntaxError(e, find_opening_paren(&tokens[..pos]).unwrap()..=pos)
-                    })?,
-                    Some(SyOperator::Parentheses) => (),
-                    _ => {
-                        return Err(SyntaxError(
-                            SyntaxErrorKind::MissingOpeningParenthesis,
-                            pos..=pos,
-                        ));
-                    }
+                    SyOperator::Parentheses => (),
+                    _ => unreachable!(),
                 }
             }
-            Token::Pipe => {
-                if inside_pipe_abs(&operator_stack) {
-                    output_queue.flush(&mut operator_stack)?;
-                    if let Some(SyOperator::Function(SyFunction::PipeAbs, args)) =
-                        operator_stack.pop()
-                        && args > 1
-                    {
-                        let mut opening_pipe = 0;
-                        for (i, tk) in tokens[..pos].iter().enumerate().rev() {
-                            if matches!(tk, Token::Pipe) {
-                                opening_pipe = i;
-                                break;
-                            }
-                        }
+            ResToken::OpenPipe => {
+                operator_stack.push(SyOperator::Function(
+                    SyFunction::Native(NativeFunction::Abs),
+                    1,
+                ));
+            }
+            ResToken::ClosePipe => {
+                output_queue.flush(&mut operator_stack)?;
+                if let Some(SyOperator::Function(SyFunction::Native(NativeFunction::Abs), args)) =
+                    operator_stack.pop()
+                {
+                    if args == 1 {
+                        output_queue.push(AstNode::Function(NativeFunction::Abs.into(), 1))?;
+                    } else {
                         return Err(SyntaxError(
                             SyntaxErrorKind::TooManyArguments,
-                            opening_pipe..=pos,
+                            find_opening(&stream, pos).unwrap()..=pos,
                         ));
                     }
-                    output_queue.push(AstNode::Function(NativeFunction::Abs.into(), 1))?;
                 } else {
-                    operator_stack.push(SyOperator::Function(SyFunction::PipeAbs, 1));
+                    // should be caught in syntax validation pass
+                    unreachable!()
                 }
             }
         }
-        was_pow = matches!(token, Token::Operator(OprToken::Power));
-    }
-    if let Some(last) = tokens.last() {
-        if state == ExprState::Prefix {
-            let pos = tokens.len() - 1;
-            if matches!(last, Token::Operator(_)) {
-                return Err(SyntaxError(SyntaxErrorKind::MisplacedOperator, pos..=pos));
-            } else {
-                return Err(SyntaxError(SyntaxErrorKind::UnexpectedToken, pos..=pos));
-            }
-        }
-    } else {
-        return Err(SyntaxError(SyntaxErrorKind::EmptyInput, 0..=0));
+        was_pow = matches!(token, ResToken::Operator(ResOprToken::Power));
     }
     output_queue.flush(&mut operator_stack)?;
-    match operator_stack.last() {
-        Some(SyOperator::Function(SyFunction::PipeAbs, _)) => {
-            let opening = find_opening_pipe(tokens).unwrap();
-            Err(SyntaxError(
-                SyntaxErrorKind::PipeAbsNotClosed,
-                opening..=opening,
-            ))
-        }
-        Some(SyOperator::Function(_, _) | SyOperator::Parentheses) => {
-            let unclosed_paren_pos = find_opening_paren(tokens).unwrap();
-            Err(SyntaxError(
-                SyntaxErrorKind::MissingClosingParenthesis,
-                unclosed_paren_pos..=unclosed_paren_pos,
-            ))
-        }
-        _ => Ok(output_queue.make()?),
-    }
+    Ok(output_queue.build()?)
 }
