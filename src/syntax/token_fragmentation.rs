@@ -62,7 +62,7 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
             N::CONSTS_NAME_TRIE
                 .longest_match(slice)
                 .into_iter()
-                .chain(constants.longest_match(slice).into_iter())
+                .chain(constants.longest_match(slice))
                 .map(|(c, i)| ParsedFragment::new(FragKind::Constant(c.asarg()), i as u8))
                 .chain(
                     variables

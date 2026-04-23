@@ -228,7 +228,7 @@ impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
     pub fn build_as_evaluator(mut self) -> impl Fn(&str, N) -> Result<N, ParsingError> {
         let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
         let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
-        let variable_parser = VecNameTrie::new(&mut [(&self.variables.0, ())]);
+        let variable_parser = VecNameTrie::new(&mut [(self.variables.0, ())]);
         move |input: &str, v0: N| {
             evaluate(
                 input,
@@ -246,7 +246,7 @@ impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
     pub fn build_as_function(mut self, input: &str) -> Result<impl FnMut(N) -> N, ParsingError> {
         let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
         let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
-        let variable_parser = VecNameTrie::new(&mut [(&self.variables.0, ())]);
+        let variable_parser = VecNameTrie::new(&mut [(self.variables.0, ())]);
         let expr = compile(
             input,
             &constant_parser,

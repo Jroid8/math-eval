@@ -221,7 +221,7 @@ impl NumberRecognizer for StandardFloatRecognizer {
             self.0 = true;
             true
         } else {
-            matches!(current, '0'..='9')
+            current.is_ascii_digit()
         }
     }
 }

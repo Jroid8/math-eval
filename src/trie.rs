@@ -11,7 +11,7 @@ pub trait NameTrie<T: Copy>: Sized {
     fn leaf_to_value(&self, leaf: u32) -> T;
 
     fn start_search(&self) -> TrieSearch<'_, T, Self> {
-        TrieSearch::new(&self)
+        TrieSearch::new(self)
     }
 
     fn exact_match(&self, name: &str) -> Option<T> {
@@ -30,9 +30,8 @@ pub trait NameTrie<T: Copy>: Sized {
 
     fn longest_match(&self, name: &str) -> Option<(T, usize)> {
         let mut search = self.start_search();
-        let mut chars = name.char_indices().map(|(i, c)| (i + c.len_utf8(), c));
         let mut result = None;
-        while let Some((right_edge, target)) = chars.next() {
+        for (right_edge, target) in name.char_indices().map(|(i, c)| (i + c.len_utf8(), c)) {
             let (ended, value) = search.advance(target);
             if let Some(value) = value {
                 result = Some((value, right_edge));

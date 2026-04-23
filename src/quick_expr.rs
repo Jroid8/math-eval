@@ -155,6 +155,7 @@ pub struct MarkedFunc<'a, N: Number, F: FuncId> {
 }
 
 impl<'a, N: Number, F: FuncId> MarkedFunc<'a, N, F> {
+    #[allow(unused_variables)]
     pub fn new(func: CtxFuncPtr<'a, N>, src: FunctionSource<F>) -> Self {
         Self {
             func,

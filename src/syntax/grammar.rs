@@ -381,7 +381,7 @@ impl<'a, S: AsRef<str>> ResolvedTkStream<'a, S> {
         custom_functions: &impl NameTrie<CfInfo<F>>,
     ) -> Result<Self, SyntaxError> {
         let tokens = tokens.as_ref();
-        if tokens.len() == 0 {
+        if tokens.is_empty() {
             return Err(SyntaxError(SyntaxErrorKind::EmptyInput, 0..=0));
         }
         let last_exp_guard = |exp: Expecting, pos: usize| -> Result<Expecting, SyntaxError> {
@@ -512,7 +512,7 @@ impl<'a, S: AsRef<str>> ResolvedTkStream<'a, S> {
 
     #[inline]
     pub(super) const fn iter(&'a self) -> ResTkStreamIter<'a, S> {
-        ResTkStreamIter::new(&self)
+        ResTkStreamIter::new(self)
     }
 }
 
