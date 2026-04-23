@@ -13,8 +13,8 @@ use crate::syntax::grammar::ResolvedTkStream;
 use crate::tokenizer::Token;
 use crate::trie::NameTrie;
 use crate::{
-    Associativity, BinaryOp, FunctionIdentifier, FunctionPointer, ParsingError, ParsingErrorKind,
-    UnaryOp, VariableIdentifier, VariableStore,
+    Associativity, BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, ParsingError,
+    ParsingErrorKind, UnaryOp, VariableIdentifier as VarId, VariableStore,
 };
 use shunting_yard::{SyAstOutput, SyNumberOutput, parse_or_eval};
 
@@ -23,12 +23,12 @@ mod shunting_yard;
 mod token_fragmentation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FunctionType<F: FunctionIdentifier> {
+pub enum FunctionType<F: FuncId> {
     Native(NativeFunction),
     Custom(F),
 }
 
-impl<F: FunctionIdentifier> From<NativeFunction> for FunctionType<F> {
+impl<F: FuncId> From<NativeFunction> for FunctionType<F> {
     fn from(value: NativeFunction) -> Self {
         Self::Native(value)
     }
@@ -36,7 +36,7 @@ impl<F: FunctionIdentifier> From<NativeFunction> for FunctionType<F> {
 
 impl<F> Display for FunctionType<F>
 where
-    F: FunctionIdentifier + Display,
+    F: FuncId + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -47,12 +47,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AstNode<N, V, F>
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
+pub enum AstNode<N: Number, V: VarId, F: FuncId> {
     Number(N),
     Variable(V),
     BinaryOp(BinaryOp),
@@ -60,12 +55,7 @@ where
     Function(FunctionType<F>, u8),
 }
 
-impl<N, V, F> Node for AstNode<N, V, F>
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
+impl<N: Number, V: VarId, F: FuncId> Node for AstNode<N, V, F> {
     fn children(&self) -> usize {
         match self {
             AstNode::Number(_) | AstNode::Variable(_) => 0,
@@ -201,16 +191,9 @@ impl From<MultipleRoots> for SyntaxError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MathAst<N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
-    PostfixTree<AstNode<N, V, F>>,
-);
+pub struct MathAst<N: Number, V: VarId, F: FuncId>(PostfixTree<AstNode<N, V, F>>);
 
-impl<V, N, F> MathAst<N, V, F>
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
+impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
     pub fn new<'a, S: AsRef<str>>(
         tokens: &impl AsRef<[Token<S>]>,
         custom_constants: &impl NameTrie<&'a N>,
@@ -527,16 +510,11 @@ where
     }
 }
 
-pub fn parenthesis_required<N, V, F>(
+pub fn parenthesis_required<N: Number, V: VarId, F: FuncId>(
     tree: &PostfixTree<AstNode<N, V, F>>,
     parent: usize,
     target: usize,
-) -> bool
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
+) -> bool {
     match (&tree[parent], &tree[target]) {
         (AstNode::BinaryOp(head), AstNode::BinaryOp(arm)) => {
             match head.precedence().cmp(&arm.precedence()) {
@@ -580,8 +558,8 @@ where
 impl<V, N, F> Display for MathAst<N, V, F>
 where
     N: Number + Display,
-    V: VariableIdentifier + Display,
-    F: FunctionIdentifier + Display,
+    V: VarId + Display,
+    F: FuncId + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (node, edge, idx) in self.0.euler_tour() {

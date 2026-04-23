@@ -9,7 +9,7 @@ use std::{
 use strum::{EnumIter, FromRepr};
 
 use crate::{
-    FunctionIdentifier,
+    FunctionIdentifier as FuncId,
     quick_expr::{CtxFuncPtr, MarkedFunc},
     tokenizer::{NumberRecognizer, StandardFloatRecognizer},
     trie::{NameTrie, TrieNode},
@@ -83,10 +83,7 @@ impl NativeFunction {
             NativeFunction::Min => NFPointer::Flexible(N::min),
         }
     }
-    pub fn as_markedfunc<N: Number, F: FunctionIdentifier>(
-        self,
-        argc: u8,
-    ) -> MarkedFunc<'static, N, F> {
+    pub fn as_markedfunc<N: Number, F: FuncId>(self, argc: u8) -> MarkedFunc<'static, N, F> {
         match self.as_pointer::<N>() {
             NFPointer::Single(func) => MarkedFunc {
                 func: CtxFuncPtr::Single(func),

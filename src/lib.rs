@@ -278,10 +278,7 @@ where
 }
 
 #[derive(Clone)]
-pub enum FunctionPointer<'a, N>
-where
-    N: Number,
-{
+pub enum FunctionPointer<'a, N: Number> {
     Single(for<'b> fn(N::AsArg<'b>) -> N),
     Dual(for<'b, 'c> fn(N::AsArg<'b>, N::AsArg<'c>) -> N),
     Triple(for<'b, 'c, 'd> fn(N::AsArg<'b>, N::AsArg<'c>, N::AsArg<'d>) -> N),
@@ -381,7 +378,7 @@ pub fn evaluate<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>
 }
 
 seq!(I in 2..10 {
-    impl<N> VariableStore<N, u8> for [N; I]
+    impl<N: Number> VariableStore<N, u8> for [N; I]
     where
         N: Number,
     {
@@ -392,10 +389,7 @@ seq!(I in 2..10 {
     }
 });
 
-impl<N> VariableStore<N, usize> for &'_ [N]
-where
-    N: Number,
-{
+impl<N: Number> VariableStore<N, usize> for &'_ [N] {
     #[inline]
     fn get<'a>(&'a self, var: usize) -> <N as Number>::AsArg<'a> {
         self[var].asarg()

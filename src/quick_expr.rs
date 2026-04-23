@@ -1,7 +1,8 @@
 use std::{fmt::Debug, marker::PhantomData, slice::Iter};
 
 use crate::{
-    BinaryOp, FunctionIdentifier, FunctionPointer, UnaryOp, VariableIdentifier, VariableStore,
+    BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, UnaryOp, VariableIdentifier as VarId,
+    VariableStore,
     number::{NativeFunction, Number},
     syntax::{AstNode, FunctionType, MathAst},
 };
@@ -15,7 +16,7 @@ pub enum Source {
 
 impl Source {
     #[inline]
-    fn resolve<'a, 'b, N: Number, V: VariableIdentifier>(
+    fn resolve<'a, 'b, N: Number, V: VarId>(
         self,
         literals: &mut Iter<'b, N>,
         variables: &mut Iter<'b, V>,
@@ -46,7 +47,7 @@ impl Source {
     }
 
     #[inline]
-    fn resolve_owned<N: Number, V: VariableIdentifier>(
+    fn resolve_owned<N: Number, V: VarId>(
         self,
         literals: &mut Iter<'_, N>,
         variables: &mut Iter<'_, V>,
@@ -108,7 +109,7 @@ impl<'a, N: Number> CtxFuncPtr<'a, N> {
     }
 }
 
-impl<'a, N> Copy for CtxFuncPtr<'a, N> where N: Number {}
+impl<'a, N: Number> Copy for CtxFuncPtr<'a, N> {}
 
 impl<N: Number> Debug for CtxFuncPtr<'_, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -138,7 +139,7 @@ impl<N: Number> From<UnaryOp> for CtxFuncPtr<'static, N> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FunctionSource<F: FunctionIdentifier> {
+pub enum FunctionSource<F: FuncId> {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
     NativeFunction(NativeFunction),
@@ -146,14 +147,14 @@ pub enum FunctionSource<F: FunctionIdentifier> {
 }
 
 #[derive(Clone)]
-pub struct MarkedFunc<'a, N: Number, F: FunctionIdentifier> {
+pub struct MarkedFunc<'a, N: Number, F: FuncId> {
     pub func: CtxFuncPtr<'a, N>,
     pub _src: PhantomData<F>,
     #[cfg(debug_assertions)]
     pub src: FunctionSource<F>,
 }
 
-impl<'a, N: Number, F: FunctionIdentifier> MarkedFunc<'a, N, F> {
+impl<'a, N: Number, F: FuncId> MarkedFunc<'a, N, F> {
     pub fn new(func: CtxFuncPtr<'a, N>, src: FunctionSource<F>) -> Self {
         Self {
             func,
@@ -165,19 +166,19 @@ impl<'a, N: Number, F: FunctionIdentifier> MarkedFunc<'a, N, F> {
 }
 
 #[cfg(debug_assertions)]
-impl<'a, N: Number, F: FunctionIdentifier> PartialEq for MarkedFunc<'a, N, F> {
+impl<'a, N: Number, F: FuncId> PartialEq for MarkedFunc<'a, N, F> {
     fn eq(&self, other: &Self) -> bool {
         self.src == other.src
     }
 }
 
 #[cfg(debug_assertions)]
-impl<'a, N: Number, F: FunctionIdentifier> Eq for MarkedFunc<'a, N, F> {}
+impl<'a, N: Number, F: FuncId> Eq for MarkedFunc<'a, N, F> {}
 
 impl<'a, N, F> std::fmt::Debug for MarkedFunc<'a, N, F>
 where
     N: Number + std::fmt::Debug,
-    F: FunctionIdentifier + std::fmt::Debug,
+    F: FuncId + std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut dbg = f.debug_tuple("MarkedFunc");
@@ -188,26 +189,26 @@ where
     }
 }
 
-impl<N: Number, F: FunctionIdentifier> From<BinaryOp> for MarkedFunc<'static, N, F> {
+impl<N: Number, F: FuncId> From<BinaryOp> for MarkedFunc<'static, N, F> {
     fn from(value: BinaryOp) -> Self {
         Self::new(value.into(), FunctionSource::BinaryOp(value))
     }
 }
 
-impl<N: Number, F: FunctionIdentifier> From<UnaryOp> for MarkedFunc<'static, N, F> {
+impl<N: Number, F: FuncId> From<UnaryOp> for MarkedFunc<'static, N, F> {
     fn from(value: UnaryOp) -> Self {
         Self::new(value.into(), FunctionSource::UnaryOp(value))
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum Instr<'a, N: Number, F: FunctionIdentifier> {
+pub enum Instr<'a, N: Number, F: FuncId> {
     Push(Source),
     Calculate(MarkedFunc<'a, N, F>),
 }
 
 #[cfg(debug_assertions)]
-impl<'a, N: Number, F: FunctionIdentifier> PartialEq for Instr<'a, N, F> {
+impl<'a, N: Number, F: FuncId> PartialEq for Instr<'a, N, F> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Push(l0), Self::Push(r0)) => l0 == r0,
@@ -218,10 +219,10 @@ impl<'a, N: Number, F: FunctionIdentifier> PartialEq for Instr<'a, N, F> {
 }
 
 #[cfg(debug_assertions)]
-impl<'a, N: Number, F: FunctionIdentifier> Eq for Instr<'a, N, F> {}
+impl<'a, N: Number, F: FuncId> Eq for Instr<'a, N, F> {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum InstrArg<N: Number, V: VariableIdentifier> {
+enum InstrArg<N: Number, V: VarId> {
     Literal(N),
     Variable(V),
     Stack,
@@ -243,19 +244,14 @@ pub enum StackCapCalcError {
 }
 
 #[derive(Clone, Debug)]
-pub struct QuickExpr<'a, N: Number, V: VariableIdentifier, F: FunctionIdentifier> {
+pub struct QuickExpr<'a, N: Number, V: VarId, F: FuncId> {
     pub param_sources: Vec<Source>,
     pub literals: Vec<N>,
     pub variables: Vec<V>,
     pub instructions: Vec<Instr<'a, N, F>>,
 }
 
-impl<'a, N, V, F> QuickExpr<'a, N, V, F>
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
+impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
     pub fn new(
         ast: MathAst<N, V, F>,
         function_to_pointer: impl Fn(F) -> FunctionPointer<'a, N>,
@@ -491,12 +487,7 @@ where
 }
 
 #[cfg(debug_assertions)]
-impl<'a, N, V, F> PartialEq for QuickExpr<'a, N, V, F>
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
+impl<'a, N: Number, V: VarId, F: FuncId> PartialEq for QuickExpr<'a, N, V, F> {
     fn eq(&self, other: &Self) -> bool {
         self.param_sources == other.param_sources
             && self.literals == other.literals
@@ -506,13 +497,7 @@ where
 }
 
 #[cfg(debug_assertions)]
-impl<'a, N, V, F> Eq for QuickExpr<'a, N, V, F>
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
-}
+impl<'a, N: Number, V: VarId, F: FuncId> Eq for QuickExpr<'a, N, V, F> {}
 
 #[cfg(all(debug_assertions, test))]
 mod tests {

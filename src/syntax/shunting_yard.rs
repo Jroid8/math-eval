@@ -2,7 +2,8 @@ use std::{fmt::Debug, marker::PhantomData};
 
 use super::{AstNode, FunctionType, MathAst, SyntaxError, SyntaxErrorKind};
 use crate::{
-    BinaryOp, FunctionIdentifier, FunctionPointer, UnaryOp, VariableIdentifier, VariableStore,
+    BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, UnaryOp, VariableIdentifier as VarId,
+    VariableStore,
     number::{NFPointer, NativeFuncsNameTrie, NativeFunction, Number},
     postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans, SubtreeCollection},
     syntax::{
@@ -13,19 +14,13 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SyFunction<F>
-where
-    F: FunctionIdentifier,
-{
+pub(super) enum SyFunction<F: FuncId> {
     Native(NativeFunction),
     Custom(F, u8, Option<u8>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SyOperator<F>
-where
-    F: FunctionIdentifier,
-{
+pub(super) enum SyOperator<F: FuncId> {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
     HpNeg,
@@ -34,10 +29,7 @@ where
     Parentheses,
 }
 
-impl<F> SyOperator<F>
-where
-    F: FunctionIdentifier,
-{
+impl<F: FuncId> SyOperator<F> {
     fn precedence(&self) -> u8 {
         match self {
             SyOperator::BinaryOp(BinaryOp::Add) => 0,
@@ -67,7 +59,7 @@ where
     fn to_syn<N, V>(self) -> AstNode<N, V, F>
     where
         N: Number,
-        V: VariableIdentifier,
+        V: VarId,
     {
         match self {
             SyOperator::BinaryOp(opr) => AstNode::BinaryOp(opr),
@@ -88,10 +80,7 @@ where
     }
 }
 
-impl<F> From<ResOprToken> for SyOperator<F>
-where
-    F: FunctionIdentifier,
-{
+impl<F: FuncId> From<ResOprToken> for SyOperator<F> {
     fn from(value: ResOprToken) -> Self {
         match value {
             ResOprToken::Add => Self::BinaryOp(BinaryOp::Add),
@@ -108,12 +97,7 @@ where
     }
 }
 
-pub(super) trait ShuntingYardOutput<N, V, F>: Debug
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
+pub(super) trait ShuntingYardOutput<N: Number, V: VarId, F: FuncId>: Debug {
     type Output;
 
     fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>) -> Result<(), NotEnoughOrphans>;
@@ -154,18 +138,11 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct SyAstOutput<N, V, F>(pub(super) SubtreeCollection<AstNode<N, V, F>>)
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier;
+pub(super) struct SyAstOutput<N: Number, V: VarId, F: FuncId>(
+    pub(super) SubtreeCollection<AstNode<N, V, F>>,
+);
 
-impl<N, V, F> ShuntingYardOutput<N, V, F> for SyAstOutput<N, V, F>
-where
-    N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
-{
+impl<N: Number, V: VarId, F: FuncId> ShuntingYardOutput<N, V, F> for SyAstOutput<N, V, F> {
     type Output = MathAst<N, V, F>;
 
     fn pop_opr(&mut self, operator_stack: &mut Vec<SyOperator<F>>) -> Result<(), NotEnoughOrphans> {
@@ -201,8 +178,8 @@ where
 pub(super) struct SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
     N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: VarId,
+    F: FuncId,
     S: VariableStore<N, V>,
     C: Fn(F) -> FunctionPointer<'a, N>,
 {
@@ -216,8 +193,8 @@ where
 impl<'a, 'b, N, V, F, S, C> SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
     N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: VarId,
+    F: FuncId,
     S: VariableStore<N, V>,
     C: Fn(F) -> FunctionPointer<'a, N>,
 {
@@ -228,8 +205,8 @@ where
 impl<'a, 'b, N, V, F, S, C> ShuntingYardOutput<N, V, F> for SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
     N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: VarId,
+    F: FuncId,
     S: VariableStore<N, V>,
     C: Fn(F) -> FunctionPointer<'a, N>,
 {
@@ -332,8 +309,8 @@ where
 impl<'a, 'b, N, V, F, S, C> Debug for SyNumberOutput<'a, 'b, N, V, F, S, C>
 where
     N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: VarId,
+    F: FuncId,
     S: VariableStore<N, V>,
     C: Fn(F) -> FunctionPointer<'a, N>,
 {
@@ -371,8 +348,8 @@ fn push_fragments<N, V, F, O>(
 ) -> Result<(), SyntaxErrorKind>
 where
     N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: VarId,
+    F: FuncId,
     O: ShuntingYardOutput<N, V, F>,
 {
     let mut was_func = true;
@@ -409,8 +386,8 @@ pub(super) fn parse_or_eval<'a, O, N, V, F, S>(
 where
     O: ShuntingYardOutput<N, V, F>,
     N: Number,
-    V: VariableIdentifier,
-    F: FunctionIdentifier,
+    V: VarId,
+    F: FuncId,
     S: AsRef<str>,
 {
     // Dijkstra's shunting yard algorithm
