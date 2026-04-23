@@ -5,7 +5,7 @@ use std::{
 };
 
 use subtree_collection::SubtreeCollection;
-use tree_iterators::{ChildIter, ParentIter, PostOrderIter, EulerTour};
+use tree_iterators::{ChildIter, EulerTour, ParentIter, PostOrderIter};
 
 pub mod subtree_collection;
 pub mod tree_iterators;
@@ -30,11 +30,7 @@ impl OptUsize {
 
     #[inline]
     fn as_opt(&self) -> Option<usize> {
-        if self.is_some() {
-            Some(self.0)
-        } else {
-            None
-        }
+        if self.is_some() { Some(self.0) } else { None }
     }
 
     #[inline]

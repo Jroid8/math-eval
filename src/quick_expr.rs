@@ -652,7 +652,13 @@ mod tests {
                 .unwrap()
                 .0;
             QuickExpr::new(
-                MathAst::new(&tokens, &EmptyNameTrie, &TestFuncsNameTrie, &TestVarsNameTrie).unwrap(),
+                MathAst::new(
+                    &tokens,
+                    &EmptyNameTrie,
+                    &TestFuncsNameTrie,
+                    &TestVarsNameTrie,
+                )
+                .unwrap(),
                 TestFunc::as_pointer,
             )
         }

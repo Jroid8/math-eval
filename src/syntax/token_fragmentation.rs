@@ -90,6 +90,7 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
             }
             continue;
         }
+        // backtracking
         loop {
             let Some(last) = dest.pop() else { return false };
             if !matches!(last.kind, FragKind::Literal(_)) {
