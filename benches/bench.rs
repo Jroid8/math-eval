@@ -143,7 +143,7 @@ fn matheval_calc_bencher(b: &mut Bencher<'_>, ast: &MathAst<f64, MyVar, MyFunc>)
 fn calculation(crit: &mut Criterion) {
     let exprs = [
         ("x+y", "one addition"),
-        ("sin(x)", "one native function single input"),
+        ("sin(x)", "one builtin function single input"),
         ("dist(x, y)", "one custom function two inputs"),
         ("slope(x,y,x+17,t)", "one custom function four inputs"),
         ("10*sin(t)", "2 instructions"),

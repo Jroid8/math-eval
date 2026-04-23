@@ -2,7 +2,7 @@
 
 use math_eval::{
     BinaryOp, FunctionIdentifier, UnaryOp, VariableIdentifier,
-    number::NativeFunction,
+    number::BuiltinFunction,
     postfix_tree::Node,
     syntax::{AstNode, FunctionType},
 };
@@ -11,8 +11,8 @@ pub fn rand_f64() -> f64 {
     f64::from_bits(fastrand::u64(..))
 }
 
-fn rand_nf_1p() -> NativeFunction {
-    use NativeFunction::*;
+fn rand_bf_1p() -> BuiltinFunction {
+    use BuiltinFunction::*;
     *weighted_choice(&[
         (Sin, 4),
         (Cos, 4),
@@ -48,11 +48,11 @@ fn rand_unaryop() -> UnaryOp {
     }
 }
 
-fn rand_nf_2p() -> NativeFunction {
+fn rand_bf_2p() -> BuiltinFunction {
     match fastrand::u8(0..11) {
-        0..5 => NativeFunction::Min,
-        5..10 => NativeFunction::Max,
-        10 => NativeFunction::Log,
+        0..5 => BuiltinFunction::Min,
+        5..10 => BuiltinFunction::Max,
+        10 => BuiltinFunction::Log,
         _ => unreachable!(),
     }
 }
@@ -122,7 +122,7 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
         };
         match *weighted_choice(selection).unwrap() {
             1 => match fastrand::u8(0..10) {
-                0..6 => AstNode::Function(FunctionType::Native(rand_nf_1p()), 1),
+                0..6 => AstNode::Function(FunctionType::Builtin(rand_bf_1p()), 1),
                 6..9 => AstNode::UnaryOp(rand_unaryop()),
                 9 => AstNode::Function(
                     FunctionType::Custom(*fastrand::choice(self.functions_1p).unwrap()),
@@ -132,7 +132,7 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             },
             2 => match fastrand::u8(0..20) {
                 0..16 => AstNode::BinaryOp(rand_binaryop()),
-                16..19 => AstNode::Function(FunctionType::Native(rand_nf_2p()), 2),
+                16..19 => AstNode::Function(FunctionType::Builtin(rand_bf_2p()), 2),
                 19 => AstNode::Function(
                     FunctionType::Custom(*fastrand::choice(self.functions_2p).unwrap()),
                     2,
@@ -141,8 +141,8 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             },
             3 => AstNode::Function(
                 match fastrand::u8(0..7) {
-                    0 => FunctionType::Native(NativeFunction::Min),
-                    1 => FunctionType::Native(NativeFunction::Max),
+                    0 => FunctionType::Builtin(BuiltinFunction::Min),
+                    1 => FunctionType::Builtin(BuiltinFunction::Max),
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_3p).unwrap()),
                     _ => unreachable!(),
                 },
@@ -150,8 +150,8 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             ),
             4 => AstNode::Function(
                 match fastrand::u8(0..7) {
-                    0 => FunctionType::Native(NativeFunction::Min),
-                    1 => FunctionType::Native(NativeFunction::Max),
+                    0 => FunctionType::Builtin(BuiltinFunction::Min),
+                    1 => FunctionType::Builtin(BuiltinFunction::Max),
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_4p).unwrap()),
                     _ => unreachable!(),
                 },

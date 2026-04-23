@@ -9,7 +9,7 @@ use seq_macro::seq;
 use syntax::MathAst;
 use tokenizer::TokenStream;
 
-use crate::{number::NFPointer, quick_expr::QuickExpr, trie::NameTrie};
+use crate::{number::BFPointer, quick_expr::QuickExpr, trie::NameTrie};
 
 pub mod builder;
 pub mod number;
@@ -306,12 +306,12 @@ impl<N: Number> Debug for FunctionPointer<'_, N> {
     }
 }
 
-impl<N: Number> From<number::NativeFunction> for FunctionPointer<'static, N> {
-    fn from(value: number::NativeFunction) -> Self {
+impl<N: Number> From<number::BuiltinFunction> for FunctionPointer<'static, N> {
+    fn from(value: number::BuiltinFunction) -> Self {
         match value.as_pointer() {
-            NFPointer::Single(func) => FunctionPointer::Single(func),
-            NFPointer::Dual(func) => FunctionPointer::Dual(func),
-            NFPointer::Flexible(func) => FunctionPointer::Flexible(func),
+            BFPointer::Single(func) => FunctionPointer::Single(func),
+            BFPointer::Dual(func) => FunctionPointer::Dual(func),
+            BFPointer::Flexible(func) => FunctionPointer::Flexible(func),
         }
     }
 }

@@ -19,7 +19,7 @@ use crate::{
 use crate::quick_expr::FunctionSource;
 
 #[derive(Debug, Clone, Copy, Hash)]
-pub enum NFPointer<N: Number> {
+pub enum BFPointer<N: Number> {
     Single(for<'a> fn(N::AsArg<'a>) -> N),
     Dual(for<'a, 'b> fn(N::AsArg<'a>, N::AsArg<'b>) -> N),
     Flexible(fn(&[N]) -> N),
@@ -27,7 +27,7 @@ pub enum NFPointer<N: Number> {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, EnumIter, FromRepr)]
 #[repr(u8)]
-pub enum NativeFunction {
+pub enum BuiltinFunction {
     Sin,
     Cos,
     Tan,
@@ -54,107 +54,107 @@ pub enum NativeFunction {
     Min,
 }
 
-impl NativeFunction {
-    pub fn as_pointer<N: Number>(self) -> NFPointer<N> {
+impl BuiltinFunction {
+    pub fn as_pointer<N: Number>(self) -> BFPointer<N> {
         match self {
-            NativeFunction::Sin => NFPointer::Single(N::sin),
-            NativeFunction::Cos => NFPointer::Single(N::cos),
-            NativeFunction::Tan => NFPointer::Single(N::tan),
-            NativeFunction::Cot => NFPointer::Single(N::cot),
-            NativeFunction::Asin => NFPointer::Single(N::asin),
-            NativeFunction::Acos => NFPointer::Single(N::acos),
-            NativeFunction::Atan => NFPointer::Single(N::atan),
-            NativeFunction::Acot => NFPointer::Single(N::acot),
-            NativeFunction::Log => NFPointer::Dual(N::log),
-            NativeFunction::Log2 => NFPointer::Single(N::log2),
-            NativeFunction::Log10 => NFPointer::Single(N::log10),
-            NativeFunction::Ln => NFPointer::Single(N::ln),
-            NativeFunction::Exp => NFPointer::Single(N::exp),
-            NativeFunction::Floor => NFPointer::Single(N::floor),
-            NativeFunction::Ceil => NFPointer::Single(N::ceil),
-            NativeFunction::Round => NFPointer::Single(N::round),
-            NativeFunction::Trunc => NFPointer::Single(N::trunc),
-            NativeFunction::Frac => NFPointer::Single(N::frac),
-            NativeFunction::Abs => NFPointer::Single(N::abs),
-            NativeFunction::Sign => NFPointer::Single(N::sign),
-            NativeFunction::Sqrt => NFPointer::Single(N::sqrt),
-            NativeFunction::Cbrt => NFPointer::Single(N::cbrt),
-            NativeFunction::Max => NFPointer::Flexible(N::max),
-            NativeFunction::Min => NFPointer::Flexible(N::min),
+            BuiltinFunction::Sin => BFPointer::Single(N::sin),
+            BuiltinFunction::Cos => BFPointer::Single(N::cos),
+            BuiltinFunction::Tan => BFPointer::Single(N::tan),
+            BuiltinFunction::Cot => BFPointer::Single(N::cot),
+            BuiltinFunction::Asin => BFPointer::Single(N::asin),
+            BuiltinFunction::Acos => BFPointer::Single(N::acos),
+            BuiltinFunction::Atan => BFPointer::Single(N::atan),
+            BuiltinFunction::Acot => BFPointer::Single(N::acot),
+            BuiltinFunction::Log => BFPointer::Dual(N::log),
+            BuiltinFunction::Log2 => BFPointer::Single(N::log2),
+            BuiltinFunction::Log10 => BFPointer::Single(N::log10),
+            BuiltinFunction::Ln => BFPointer::Single(N::ln),
+            BuiltinFunction::Exp => BFPointer::Single(N::exp),
+            BuiltinFunction::Floor => BFPointer::Single(N::floor),
+            BuiltinFunction::Ceil => BFPointer::Single(N::ceil),
+            BuiltinFunction::Round => BFPointer::Single(N::round),
+            BuiltinFunction::Trunc => BFPointer::Single(N::trunc),
+            BuiltinFunction::Frac => BFPointer::Single(N::frac),
+            BuiltinFunction::Abs => BFPointer::Single(N::abs),
+            BuiltinFunction::Sign => BFPointer::Single(N::sign),
+            BuiltinFunction::Sqrt => BFPointer::Single(N::sqrt),
+            BuiltinFunction::Cbrt => BFPointer::Single(N::cbrt),
+            BuiltinFunction::Max => BFPointer::Flexible(N::max),
+            BuiltinFunction::Min => BFPointer::Flexible(N::min),
         }
     }
     pub fn as_markedfunc<N: Number, F: FuncId>(self, argc: u8) -> MarkedFunc<'static, N, F> {
         match self.as_pointer::<N>() {
-            NFPointer::Single(func) => MarkedFunc {
+            BFPointer::Single(func) => MarkedFunc {
                 func: CtxFuncPtr::Single(func),
                 _src: PhantomData,
                 #[cfg(debug_assertions)]
-                src: FunctionSource::NativeFunction(self),
+                src: FunctionSource::BuiltinFunction(self),
             },
-            NFPointer::Dual(func) => MarkedFunc {
+            BFPointer::Dual(func) => MarkedFunc {
                 func: CtxFuncPtr::Dual(func),
                 _src: PhantomData,
                 #[cfg(debug_assertions)]
-                src: FunctionSource::NativeFunction(self),
+                src: FunctionSource::BuiltinFunction(self),
             },
-            NFPointer::Flexible(func) => MarkedFunc {
+            BFPointer::Flexible(func) => MarkedFunc {
                 func: CtxFuncPtr::Flexible(func, argc),
                 _src: PhantomData,
                 #[cfg(debug_assertions)]
-                src: FunctionSource::NativeFunction(self),
+                src: FunctionSource::BuiltinFunction(self),
             },
         }
     }
     pub fn is_flex(self) -> bool {
-        matches!(self, NativeFunction::Min | NativeFunction::Max)
+        matches!(self, BuiltinFunction::Min | BuiltinFunction::Max)
     }
     pub fn min_args(self) -> u8 {
         match self {
-            NativeFunction::Log => 2,
-            NativeFunction::Max => 2,
-            NativeFunction::Min => 2,
+            BuiltinFunction::Log => 2,
+            BuiltinFunction::Max => 2,
+            BuiltinFunction::Min => 2,
             _ => 1,
         }
     }
     pub fn max_args(self) -> Option<u8> {
         match self {
-            NativeFunction::Log => Some(2),
-            NativeFunction::Max => None,
-            NativeFunction::Min => None,
+            BuiltinFunction::Log => Some(2),
+            BuiltinFunction::Max => None,
+            BuiltinFunction::Min => None,
             _ => Some(1),
         }
     }
     pub fn name(self) -> &'static str {
         match self {
-            NativeFunction::Sin => "sin",
-            NativeFunction::Cos => "cos",
-            NativeFunction::Tan => "tan",
-            NativeFunction::Cot => "cot",
-            NativeFunction::Asin => "asin",
-            NativeFunction::Acos => "acos",
-            NativeFunction::Atan => "atan",
-            NativeFunction::Acot => "acot",
-            NativeFunction::Log => "log",
-            NativeFunction::Log2 => "log2",
-            NativeFunction::Log10 => "log10",
-            NativeFunction::Ln => "ln",
-            NativeFunction::Exp => "exp",
-            NativeFunction::Floor => "floor",
-            NativeFunction::Ceil => "ceil",
-            NativeFunction::Round => "round",
-            NativeFunction::Trunc => "trunc",
-            NativeFunction::Frac => "frac",
-            NativeFunction::Abs => "abs",
-            NativeFunction::Sign => "sign",
-            NativeFunction::Sqrt => "sqrt",
-            NativeFunction::Cbrt => "cbrt",
-            NativeFunction::Max => "max",
-            NativeFunction::Min => "min",
+            BuiltinFunction::Sin => "sin",
+            BuiltinFunction::Cos => "cos",
+            BuiltinFunction::Tan => "tan",
+            BuiltinFunction::Cot => "cot",
+            BuiltinFunction::Asin => "asin",
+            BuiltinFunction::Acos => "acos",
+            BuiltinFunction::Atan => "atan",
+            BuiltinFunction::Acot => "acot",
+            BuiltinFunction::Log => "log",
+            BuiltinFunction::Log2 => "log2",
+            BuiltinFunction::Log10 => "log10",
+            BuiltinFunction::Ln => "ln",
+            BuiltinFunction::Exp => "exp",
+            BuiltinFunction::Floor => "floor",
+            BuiltinFunction::Ceil => "ceil",
+            BuiltinFunction::Round => "round",
+            BuiltinFunction::Trunc => "trunc",
+            BuiltinFunction::Frac => "frac",
+            BuiltinFunction::Abs => "abs",
+            BuiltinFunction::Sign => "sign",
+            BuiltinFunction::Sqrt => "sqrt",
+            BuiltinFunction::Cbrt => "cbrt",
+            BuiltinFunction::Max => "max",
+            BuiltinFunction::Min => "min",
         }
     }
 }
 
-const NATIVE_FUNCS_TRIE_NODES: [TrieNode; 94] = [
+const BUILTIN_FUNCS_TRIE_NODES: [TrieNode; 94] = [
     TrieNode::Branch('a', 17),
     TrieNode::Branch('b', 2),
     TrieNode::Branch('s', 1),
@@ -251,18 +251,18 @@ const NATIVE_FUNCS_TRIE_NODES: [TrieNode; 94] = [
     TrieNode::Leaf(16),
 ];
 
-pub struct NativeFuncsNameTrie;
+pub struct BuiltinFuncsNameTrie;
 
-impl NameTrie<NativeFunction> for NativeFuncsNameTrie {
+impl NameTrie<BuiltinFunction> for BuiltinFuncsNameTrie {
     fn nodes(&self) -> &[TrieNode] {
-        &NATIVE_FUNCS_TRIE_NODES
+        &BUILTIN_FUNCS_TRIE_NODES
     }
-    fn leaf_to_value(&self, leaf: u32) -> NativeFunction {
-        NativeFunction::from_repr(leaf as u8).unwrap()
+    fn leaf_to_value(&self, leaf: u32) -> BuiltinFunction {
+        BuiltinFunction::from_repr(leaf as u8).unwrap()
     }
 }
 
-impl Display for NativeFunction {
+impl Display for BuiltinFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.name())
     }

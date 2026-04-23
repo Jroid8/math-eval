@@ -3,7 +3,7 @@ use std::{fmt::Debug, marker::PhantomData, slice::Iter};
 use crate::{
     BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, UnaryOp, VariableIdentifier as VarId,
     VariableStore,
-    number::{NativeFunction, Number},
+    number::{BuiltinFunction, Number},
     syntax::{AstNode, FunctionType, MathAst},
 };
 
@@ -142,7 +142,7 @@ impl<N: Number> From<UnaryOp> for CtxFuncPtr<'static, N> {
 pub enum FunctionSource<F: FuncId> {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
-    NativeFunction(NativeFunction),
+    BuiltinFunction(BuiltinFunction),
     CustomFunction(F),
 }
 
@@ -258,7 +258,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
     ) -> Self {
         let tree = ast.as_tree();
         let is_flex = |n: usize| match tree[n] {
-            AstNode::Function(FunctionType::Native(nf), _) => nf.is_flex(),
+            AstNode::Function(FunctionType::Builtin(bf), _) => bf.is_flex(),
             AstNode::Function(FunctionType::Custom(cf), _) => matches!(
                 function_to_pointer(cf),
                 FunctionPointer::Flexible(_) | FunctionPointer::DynFlexible(_)
@@ -318,14 +318,14 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                         FunctionSource::UnaryOp(opr),
                     )));
                 }
-                AstNode::Function(FunctionType::Native(nf), argc) => {
-                    if nf.is_flex() {
+                AstNode::Function(FunctionType::Builtin(bf), argc) => {
+                    if bf.is_flex() {
                         stack_exclusive = true;
                     }
                     arg_cons = argc;
                     instructions.push(Instr::Calculate(MarkedFunc::new(
-                        CtxFuncPtr::from_ptr_args(nf.into(), argc),
-                        FunctionSource::NativeFunction(nf),
+                        CtxFuncPtr::from_ptr_args(bf.into(), argc),
+                        FunctionSource::BuiltinFunction(bf),
                     )));
                 }
                 AstNode::Function(FunctionType::Custom(cf), argc) => {
@@ -671,7 +671,7 @@ mod tests {
                 param_sources: vec![Source::Variable],
                 literals: vec![],
                 variables: vec![TestVar::X],
-                instructions: vec![Instr::Calculate(NativeFunction::Sin.as_markedfunc(0))],
+                instructions: vec![Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(0))],
             },
         );
         assert_eq!(
@@ -681,7 +681,7 @@ mod tests {
                 literals: vec![1.0],
                 variables: vec![TestVar::X],
                 instructions: vec![
-                    Instr::Calculate(NativeFunction::Sin.as_markedfunc(0)),
+                    Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(0)),
                     Instr::Calculate(BinaryOp::Add.into())
                 ],
             },
@@ -699,7 +699,7 @@ mod tests {
                 literals: vec![1.0],
                 variables: vec![TestVar::X, TestVar::Y],
                 instructions: vec![
-                    Instr::Calculate(NativeFunction::Sin.as_markedfunc(0)),
+                    Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(0)),
                     Instr::Calculate(BinaryOp::Mul.into()),
                     Instr::Calculate(BinaryOp::Add.into())
                 ],
@@ -733,7 +733,7 @@ mod tests {
                     Instr::Push(Source::Variable),
                     Instr::Calculate(BinaryOp::Mul.into()),
                     Instr::Push(Source::Literal),
-                    Instr::Calculate(NativeFunction::Max.as_markedfunc(3)),
+                    Instr::Calculate(BuiltinFunction::Max.as_markedfunc(3)),
                 ]
             }
         );
@@ -751,7 +751,7 @@ mod tests {
                 variables: vec![TestVar::X, TestVar::Y],
                 instructions: vec![
                     Instr::Calculate(BinaryOp::Pow.into()),
-                    Instr::Calculate(NativeFunction::Sin.as_markedfunc(0)),
+                    Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(0)),
                     Instr::Calculate(BinaryOp::Add.into())
                 ]
             }
@@ -766,7 +766,7 @@ mod tests {
                     Instr::Push(Source::Literal),
                     Instr::Push(Source::Variable),
                     Instr::Push(Source::Literal),
-                    Instr::Calculate(NativeFunction::Min.as_markedfunc(3)),
+                    Instr::Calculate(BuiltinFunction::Min.as_markedfunc(3)),
                     Instr::Calculate(BinaryOp::Add.into()),
                 ]
             }

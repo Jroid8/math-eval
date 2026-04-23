@@ -9,7 +9,7 @@ use std::fmt::Debug;
 
 use crate::{
     FunctionIdentifier as FuncId, VariableIdentifier as VarId,
-    number::NativeFuncsNameTrie,
+    number::BuiltinFuncsNameTrie,
     syntax::{SyntaxError, SyntaxErrorKind},
     tokenizer::{DelimEdge, DelimKind, DelimiterToken, OprToken, Token},
     trie::NameTrie,
@@ -32,7 +32,7 @@ fn suffix_is_fnp<V: VarId, F: FuncId>(
     }
     for (i, _) in name.char_indices() {
         let name = &name[i..];
-        if NativeFuncsNameTrie.exact_match(name).is_some()
+        if BuiltinFuncsNameTrie.exact_match(name).is_some()
             || custom_functions.exact_match(name).is_some()
         {
             return true;

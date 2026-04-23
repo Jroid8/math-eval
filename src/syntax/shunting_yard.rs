@@ -4,7 +4,7 @@ use super::{AstNode, FunctionType, MathAst, SyntaxError, SyntaxErrorKind};
 use crate::{
     BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, UnaryOp, VariableIdentifier as VarId,
     VariableStore,
-    number::{NFPointer, NativeFuncsNameTrie, NativeFunction, Number},
+    number::{BFPointer, BuiltinFuncsNameTrie, BuiltinFunction, Number},
     postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans, SubtreeCollection},
     syntax::{
         grammar::{ResOprToken, ResToken, ResolvedTkStream},
@@ -15,7 +15,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SyFunction<F: FuncId> {
-    Native(NativeFunction),
+    Builtin(BuiltinFunction),
     Custom(F, u8, Option<u8>),
 }
 
@@ -65,13 +65,13 @@ impl<F: FuncId> SyOperator<F> {
             SyOperator::BinaryOp(opr) => AstNode::BinaryOp(opr),
             SyOperator::UnaryOp(opr) => AstNode::UnaryOp(opr),
             SyOperator::HpNeg => AstNode::UnaryOp(UnaryOp::Neg),
-            SyOperator::Function(SyFunction::Native(nf), args) => {
-                AstNode::Function(nf.into(), args)
+            SyOperator::Function(SyFunction::Builtin(bf), args) => {
+                AstNode::Function(bf.into(), args)
             }
             SyOperator::Function(SyFunction::Custom(cf, _, _), args) => {
                 AstNode::Function(FunctionType::Custom(cf), args)
             }
-            SyOperator::FuncNoParen(FunctionType::Native(nf)) => AstNode::Function(nf.into(), 1),
+            SyOperator::FuncNoParen(FunctionType::Builtin(bf)) => AstNode::Function(bf.into(), 1),
             SyOperator::FuncNoParen(FunctionType::Custom(cf)) => {
                 AstNode::Function(FunctionType::Custom(cf), 1)
             }
@@ -220,10 +220,10 @@ where
             }
             SyOperator::UnaryOp(opr) => opr.eval(self.args_pop()?.asarg()),
             SyOperator::HpNeg => -self.args_pop()?,
-            SyOperator::FuncNoParen(FunctionType::Native(nf)) => match nf.as_pointer() {
-                NFPointer::Single(func) => func(self.args_pop()?.asarg()),
-                NFPointer::Flexible(func) => func(&[self.args_pop()?]),
-                NFPointer::Dual(_) => unreachable!(),
+            SyOperator::FuncNoParen(FunctionType::Builtin(bf)) => match bf.as_pointer() {
+                BFPointer::Single(func) => func(self.args_pop()?.asarg()),
+                BFPointer::Flexible(func) => func(&[self.args_pop()?]),
+                BFPointer::Dual(_) => unreachable!(),
             },
             SyOperator::FuncNoParen(FunctionType::Custom(cf)) => match (self.cf2pointer)(cf) {
                 FunctionPointer::Single(func) => func(self.args_pop()?.asarg()),
@@ -249,13 +249,13 @@ where
         let res = match node {
             AstNode::Number(num) => num,
             AstNode::Variable(var) => self.variable_store.get(var).to_owned(),
-            AstNode::Function(FunctionType::Native(nf), args) => match nf.as_pointer::<N>() {
-                NFPointer::Single(func) => func(self.args_pop()?.asarg()),
-                NFPointer::Dual(func) => {
+            AstNode::Function(FunctionType::Builtin(bf), args) => match bf.as_pointer::<N>() {
+                BFPointer::Single(func) => func(self.args_pop()?.asarg()),
+                BFPointer::Dual(func) => {
                     let rhs = self.args_pop()?;
                     func(self.args_pop()?.asarg(), rhs.asarg())
                 }
-                NFPointer::Flexible(func) => {
+                BFPointer::Flexible(func) => {
                     let res = func(&self.args[self.args.len() - args as usize..]);
                     self.args.truncate(self.args.len() - args as usize);
                     res
@@ -427,12 +427,12 @@ where
                     })
                 {
                     output_queue.push(node)?;
-                } else if let Some((func, min)) = NativeFuncsNameTrie
+                } else if let Some((func, min)) = BuiltinFuncsNameTrie
                     .exact_match(name)
-                    .map(|nf| {
+                    .map(|bf| {
                         (
-                            SyOperator::FuncNoParen(FunctionType::Native(nf)),
-                            nf.min_args(),
+                            SyOperator::FuncNoParen(FunctionType::Builtin(bf)),
+                            bf.min_args(),
                         )
                     })
                     .or_else(|| {
@@ -465,9 +465,9 @@ where
                 if name.chars().count() > NAME_LIMIT as usize {
                     return Err(SyntaxError(SyntaxErrorKind::NameTooLong, pos..=pos));
                 }
-                if let Some(func) = NativeFuncsNameTrie
+                if let Some(func) = BuiltinFuncsNameTrie
                     .exact_match(name)
-                    .map(|nf| SyOperator::Function(SyFunction::Native(nf), 1))
+                    .map(|bf| SyOperator::Function(SyFunction::Builtin(bf), 1))
                     .or_else(|| {
                         custom_functions.exact_match(name).map(|(cf, min, max)| {
                             SyOperator::Function(SyFunction::Custom(cf, min, max), 1)
@@ -516,7 +516,7 @@ where
                         }
                         operator_stack.push(SyOperator::Function(
                             match func {
-                                FunctionType::Native(nf) => SyFunction::Native(nf),
+                                FunctionType::Builtin(bf) => SyFunction::Builtin(bf),
                                 FunctionType::Custom(cf) => SyFunction::Custom(cf, min, max),
                             },
                             1,
@@ -552,33 +552,33 @@ where
             ResToken::CloseDelim => {
                 output_queue.flush(&mut operator_stack)?;
                 match operator_stack.pop().unwrap() {
-                    SyOperator::Function(SyFunction::Native(mut nf), args) => {
-                        if nf == NativeFunction::Log {
+                    SyOperator::Function(SyFunction::Builtin(mut bf), args) => {
+                        if bf == BuiltinFunction::Log {
                             // FIX: recieve 10 and 2 from MathEvalNumber so it can be const
                             let ten = N::from(10);
                             let two = N::from(2);
                             match output_queue.last_num() {
                                 Some(num) if num == ten.asarg() => {
                                     output_queue.pop_arg();
-                                    nf = NativeFunction::Log10;
+                                    bf = BuiltinFunction::Log10;
                                 }
                                 Some(num) if num == two.asarg() => {
                                     output_queue.pop_arg();
-                                    nf = NativeFunction::Log2;
+                                    bf = BuiltinFunction::Log2;
                                 }
                                 _ if args == 1 => {
-                                    nf = NativeFunction::Log10;
+                                    bf = BuiltinFunction::Log10;
                                 }
                                 _ => (),
                             }
-                            output_queue.push(AstNode::Function(nf.into(), args))?;
+                            output_queue.push(AstNode::Function(bf.into(), args))?;
                             Ok(())
-                        } else if args < nf.min_args() {
+                        } else if args < bf.min_args() {
                             Err(SyntaxErrorKind::NotEnoughArguments)
-                        } else if nf.max_args().is_some_and(|m| args > m) {
+                        } else if bf.max_args().is_some_and(|m| args > m) {
                             Err(SyntaxErrorKind::TooManyArguments)
                         } else {
-                            output_queue.push(AstNode::Function(nf.into(), args))?;
+                            output_queue.push(AstNode::Function(bf.into(), args))?;
                             Ok(())
                         }
                         .map_err(|e| SyntaxError(e, find_opening(&stream, pos).unwrap()..=pos))?
@@ -600,17 +600,17 @@ where
             }
             ResToken::OpenPipe => {
                 operator_stack.push(SyOperator::Function(
-                    SyFunction::Native(NativeFunction::Abs),
+                    SyFunction::Builtin(BuiltinFunction::Abs),
                     1,
                 ));
             }
             ResToken::ClosePipe => {
                 output_queue.flush(&mut operator_stack)?;
-                if let Some(SyOperator::Function(SyFunction::Native(NativeFunction::Abs), args)) =
+                if let Some(SyOperator::Function(SyFunction::Builtin(BuiltinFunction::Abs), args)) =
                     operator_stack.pop()
                 {
                     if args == 1 {
-                        output_queue.push(AstNode::Function(NativeFunction::Abs.into(), 1))?;
+                        output_queue.push(AstNode::Function(BuiltinFunction::Abs.into(), 1))?;
                     } else {
                         return Err(SyntaxError(
                             SyntaxErrorKind::TooManyArguments,
