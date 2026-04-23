@@ -82,7 +82,7 @@ impl From<Option<usize>> for OptUsize {
 }
 
 /// Holds info crucial for optimal traversal of the tree
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Entry<T: Node> {
     node: T,
     descendants_count: usize,

@@ -138,7 +138,7 @@ impl<N: Number> From<UnaryOp> for CtxFuncPtr<'static, N> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FunctionSource<F: FuncId> {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
@@ -146,7 +146,7 @@ pub enum FunctionSource<F: FuncId> {
     CustomFunction(F),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct MarkedFunc<'a, N: Number, F: FuncId> {
     pub func: CtxFuncPtr<'a, N>,
     pub _src: PhantomData<F>,
@@ -201,7 +201,7 @@ impl<N: Number, F: FuncId> From<UnaryOp> for MarkedFunc<'static, N, F> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Instr<'a, N: Number, F: FuncId> {
     Push(Source),
     Calculate(MarkedFunc<'a, N, F>),
