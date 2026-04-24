@@ -214,10 +214,9 @@ pub enum ParsingErrorKind {
     UnknownError,
 }
 
-impl Display for ParsingErrorKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // FIX: put these in a const function
-        f.write_str(match self {
+impl ParsingErrorKind {
+    const fn message(self) -> &'static str {
+        match self {
             ParsingErrorKind::UnexpectedCharacter => "Unexpected character encountered",
             ParsingErrorKind::CommaOutsideFunction => "Comma found outside of function",
             ParsingErrorKind::MissingOpeningParenthesis => "Missing opening parenthesis",
@@ -248,7 +247,13 @@ impl Display for ParsingErrorKind {
                 "Pairs of vertical bars for the absolute value shouldn not be empty"
             }
             Self::UnknownError => "Unknown error",
-        })
+        }
+    }
+}
+
+impl Display for ParsingErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
     }
 }
 
