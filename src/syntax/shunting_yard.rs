@@ -226,19 +226,19 @@ where
         let res = match operator_stack.pop().unwrap() {
             SyOperator::BinaryOp(opr) => {
                 let rhs = self.args_pop()?;
-                opr.eval(self.args_pop()?.asarg(), rhs.asarg())
+                opr.eval(self.args_pop()?, rhs.asarg())
             }
-            SyOperator::UnaryOp(opr) => opr.eval(self.args_pop()?.asarg()),
+            SyOperator::UnaryOp(opr) => opr.eval(self.args_pop()?),
             SyOperator::HpNeg => -self.args_pop()?,
             SyOperator::FuncNoParen(FunctionType::Builtin(bf)) => match bf.as_pointer() {
-                BFPointer::Single(func) => func(self.args_pop()?.asarg()),
+                BFPointer::Single(func) => func(self.args_pop()?),
                 BFPointer::Flexible(func) => func(&[self.args_pop()?]),
                 BFPointer::Dual(_) => unreachable!(),
             },
             SyOperator::FuncNoParen(FunctionType::Custom(cf)) => match (self.cf2pointer)(cf) {
-                FunctionPointer::Single(func) => func(self.args_pop()?.asarg()),
+                FunctionPointer::Single(func) => func(self.args_pop()?),
                 FunctionPointer::Flexible(func) => func(&[self.args_pop()?]),
-                FunctionPointer::DynSingle(func) => func(self.args_pop()?.asarg()),
+                FunctionPointer::DynSingle(func) => func(self.args_pop()?),
                 FunctionPointer::DynFlexible(func) => func(&[self.args_pop()?]),
                 _ => unreachable!(),
             },
@@ -259,10 +259,10 @@ where
             AstNode::Number(num) => num,
             AstNode::Variable(var) => self.variable_store.get(var).to_owned(),
             AstNode::Function(FunctionType::Builtin(bf), args) => match bf.as_pointer::<N>() {
-                BFPointer::Single(func) => func(self.args_pop()?.asarg()),
+                BFPointer::Single(func) => func(self.args_pop()?),
                 BFPointer::Dual(func) => {
                     let rhs = self.args_pop()?;
-                    func(self.args_pop()?.asarg(), rhs.asarg())
+                    func(self.args_pop()?, rhs.asarg())
                 }
                 BFPointer::Flexible(func) => {
                     let res = func(&self.args[self.args.len() - args.get() as usize..]);
@@ -271,30 +271,30 @@ where
                 }
             },
             AstNode::Function(FunctionType::Custom(cf), args) => match (self.cf2pointer)(cf) {
-                FunctionPointer::Single(func) => func(self.args_pop()?.asarg()),
+                FunctionPointer::Single(func) => func(self.args_pop()?),
                 FunctionPointer::Dual(func) => {
                     let rhs = self.args_pop()?;
-                    func(self.args_pop()?.asarg(), rhs.asarg())
+                    func(self.args_pop()?, rhs.asarg())
                 }
                 FunctionPointer::Triple(func) => {
                     let a3 = self.args_pop()?;
                     let a2 = self.args_pop()?;
-                    func(self.args_pop()?.asarg(), a2.asarg(), a3.asarg())
+                    func(self.args_pop()?, a2.asarg(), a3.asarg())
                 }
                 FunctionPointer::Flexible(func) => {
                     let res = func(&self.args[self.args.len() - args.get() as usize..]);
                     self.args.truncate(self.args.len() - args.get() as usize);
                     res
                 }
-                FunctionPointer::DynSingle(func) => func(self.args_pop()?.asarg()),
+                FunctionPointer::DynSingle(func) => func(self.args_pop()?),
                 FunctionPointer::DynDual(func) => {
                     let rhs = self.args_pop()?;
-                    func(self.args_pop()?.asarg(), rhs.asarg())
+                    func(self.args_pop()?, rhs.asarg())
                 }
                 FunctionPointer::DynTriple(func) => {
                     let a3 = self.args_pop()?;
                     let a2 = self.args_pop()?;
-                    func(self.args_pop()?.asarg(), a2.asarg(), a3.asarg())
+                    func(self.args_pop()?, a2.asarg(), a3.asarg())
                 }
                 FunctionPointer::DynFlexible(func) => {
                     let res = func(&self.args[self.args.len() - args.get() as usize..]);

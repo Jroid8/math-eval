@@ -12,72 +12,63 @@ use crate::{
 pub enum Source {
     Literal,
     Variable,
-    Stack(u8),
+    Stack,
 }
 
 impl Source {
     #[inline]
-    fn resolve<'a, 'b, N: Number, V: VarId>(
-        self,
-        literals: &mut Iter<'b, N>,
-        variables: &mut Iter<'b, V>,
-        variable_values: &'a impl VariableStore<N, V>,
-        stack: &'a [N],
-        removed: &mut u8,
-    ) -> Result<N::AsArg<'a>, OptExprEvalError>
-    where
-        'b: 'a,
-    {
-        match self {
-            Source::Literal => literals
-                .next()
-                .map(N::asarg)
-                .ok_or(OptExprEvalError::NotEnoughLiterals),
-            Source::Variable => variables
-                .next()
-                .map(|var| variable_values.get(*var))
-                .ok_or(OptExprEvalError::NotEnoughVariables),
-            Source::Stack(offset) => {
-                *removed += 1;
-                stack
-                    .get(stack.len() - 1 - offset as usize)
-                    .map(N::asarg)
-                    .ok_or(OptExprEvalError::NotEnoughArgumentsInStack)
-            }
-        }
-    }
-
-    #[inline]
-    fn resolve_owned<N: Number, V: VarId>(
+    fn fetch_owned<N: Number, V: VarId>(
         self,
         literals: &mut Iter<'_, N>,
         variables: &mut Iter<'_, V>,
-        variable_values: &'_ impl VariableStore<N, V>,
-        stack: &[N],
-        removed: &mut u8,
-    ) -> Result<N, OptExprEvalError> {
+        variable_values: &impl VariableStore<N, V>,
+        stack: &mut Vec<N>,
+    ) -> Result<N, QuickExprEvalError> {
         match self {
             Source::Literal => literals
                 .next()
-                .map(|num| num.to_owned())
-                .ok_or(OptExprEvalError::NotEnoughLiterals),
+                .cloned()
+                .ok_or(QuickExprEvalError::NotEnoughLiterals),
             Source::Variable => variables
                 .next()
                 .map(|var| variable_values.get(*var).to_owned())
-                .ok_or(OptExprEvalError::NotEnoughVariables),
-            Source::Stack(offset) => {
-                *removed += 1;
-                stack
-                    .get(stack.len() - 1 - offset as usize)
-                    .map(|num| num.to_owned())
-                    .ok_or(OptExprEvalError::NotEnoughArgumentsInStack)
-            }
+                .ok_or(QuickExprEvalError::NotEnoughVariables),
+            Source::Stack => stack
+                .pop()
+                .ok_or(QuickExprEvalError::NotEnoughArgumentsInStack),
         }
     }
+}
 
-    pub fn is_stack(self) -> bool {
-        matches!(self, Self::Stack(_))
+fn fetch_args<'a, 'b: 'a, const A: usize, N: Number, V: VarId>(
+    param_sources: &mut impl Iterator<Item = Source>,
+    literals: &mut Iter<'b, N>,
+    variables: &mut Iter<'b, V>,
+    variable_values: &'a impl VariableStore<N, V>,
+) -> Result<[Option<N::AsArg<'a>>; A], QuickExprEvalError> {
+    let mut res = [None; A];
+    for (i, ps) in param_sources.enumerate().take(A) {
+        match ps {
+            Source::Literal => {
+                res[i] = Some(
+                    literals
+                        .next()
+                        .map(|num| num.asarg())
+                        .ok_or(QuickExprEvalError::NotEnoughLiterals)?,
+                )
+            }
+            Source::Variable => {
+                res[i] = Some(
+                    variables
+                        .next()
+                        .map(|var| variable_values.get(*var))
+                        .ok_or(QuickExprEvalError::NotEnoughLiterals)?,
+                )
+            }
+            Source::Stack => res[i] = None,
+        }
     }
+    Ok(res)
 }
 
 #[derive(Clone)]
@@ -85,13 +76,13 @@ pub enum CtxFuncPtr<'a, N>
 where
     N: Number,
 {
-    Single(for<'b> fn(N::AsArg<'b>) -> N),
-    Dual(for<'b, 'c> fn(N::AsArg<'b>, N::AsArg<'c>) -> N),
-    Triple(for<'b, 'c, 'd> fn(N::AsArg<'b>, N::AsArg<'c>, N::AsArg<'d>) -> N),
+    Single(fn(N) -> N),
+    Dual(for<'b> fn(N, N::AsArg<'b>) -> N),
+    Triple(for<'b, 'c> fn(N, N::AsArg<'b>, N::AsArg<'c>) -> N),
     Flexible(fn(&[N]) -> N, NonZeroU8),
-    DynSingle(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N),
-    DynDual(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N),
-    DynTriple(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
+    DynSingle(&'a dyn Fn(N) -> N),
+    DynDual(&'a dyn for<'b> Fn(N, N::AsArg<'b>) -> N),
+    DynTriple(&'a dyn for<'b, 'c> Fn(N, N::AsArg<'b>, N::AsArg<'c>) -> N),
     DynFlexible(&'a dyn Fn(&[N]) -> N, NonZeroU8),
 }
 
@@ -231,7 +222,7 @@ enum InstrArg<N: Number, V: VarId> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum OptExprEvalError {
+pub enum QuickExprEvalError {
     NotEnoughArgumentsInStack,
     EmptyExpr,
     NotEnoughLiterals,
@@ -348,10 +339,6 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                 }
             } else {
                 let range = args.len() - arg_cons as usize..;
-                let mut stack_offset = args[range.clone()]
-                    .iter()
-                    .filter(|a| matches!(a, InstrArg::Stack))
-                    .count() as u8;
                 for arg in args.drain(range) {
                     match arg {
                         InstrArg::Literal(num) => {
@@ -363,8 +350,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                             variables.push(var);
                         }
                         InstrArg::Stack => {
-                            stack_offset -= 1;
-                            param_sources.push(Source::Stack(stack_offset));
+                            param_sources.push(Source::Stack);
                         }
                     }
                 }
@@ -396,7 +382,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                         .checked_sub(
                             self.param_sources[p..p + $argc]
                                 .iter()
-                                .filter(|s| s.is_stack())
+                                .filter(|&&s| s == Source::Stack)
                                 .count(),
                         )
                         .ok_or(StackCapCalcError::StackUnderflow)?;
@@ -429,61 +415,110 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
         &self,
         variable_values: &impl VariableStore<N, V>,
         stack: &mut Vec<N>,
-    ) -> Result<N, OptExprEvalError> {
+    ) -> Result<N, QuickExprEvalError> {
         let mut param_sources = self.param_sources.iter().copied();
         let mut literals = self.literals.iter();
         let mut variables = self.variables.iter();
         for instr in &self.instructions {
             let mut removed = 0;
-            macro_rules! arg {
+            macro_rules! fetch_args {
                 () => {
-                    param_sources
-                        .next()
-                        .ok_or(OptExprEvalError::NotEnoughParams)?
-                        .resolve(
-                            &mut literals,
-                            &mut variables,
-                            variable_values,
-                            &stack,
-                            &mut removed,
-                        )?
+                    fetch_args(
+                        &mut param_sources,
+                        &mut literals,
+                        &mut variables,
+                        variable_values,
+                    )?
+                };
+            }
+            macro_rules! resolve_arg {
+                ($arg: expr, $binding: ident) => {
+                    if let Some(arg) = $arg {
+                        arg
+                    } else {
+                        $binding = stack
+                            .pop()
+                            .ok_or(QuickExprEvalError::NotEnoughArgumentsInStack)?;
+                        $binding.asarg()
+                    }
+                };
+            }
+            macro_rules! resolve_arg_owned {
+                ($a: expr) => {
+                    if let Some(arg) = $a {
+                        arg.to_owned()
+                    } else {
+                        stack
+                            .pop()
+                            .ok_or(QuickExprEvalError::NotEnoughArgumentsInStack)?
+                    }
                 };
             }
             let result = match instr {
-                Instr::Push(src) => src.resolve_owned(
-                    &mut literals,
-                    &mut variables,
-                    variable_values,
-                    stack,
-                    &mut removed,
-                )?,
+                Instr::Push(src) => {
+                    src.fetch_owned(&mut literals, &mut variables, variable_values, stack)?
+                }
                 Instr::Calculate(idfunc) => match idfunc.func {
-                    CtxFuncPtr::Single(func) => func(arg!()),
-                    CtxFuncPtr::Dual(func) => func(arg!(), arg!()),
-                    CtxFuncPtr::Triple(func) => func(arg!(), arg!(), arg!()),
-                    CtxFuncPtr::Flexible(func, argc) => {
-                        if stack.len() < argc.get() as usize {
-                            return Err(OptExprEvalError::NotEnoughArgumentsInStack);
-                        }
-                        removed += argc.get();
-                        func(&stack[stack.len() - argc.get() as usize..])
+                    CtxFuncPtr::Single(func) => {
+                        let args: [_; 1] = fetch_args!();
+                        func(resolve_arg_owned!(args[0]))
                     }
-                    CtxFuncPtr::DynSingle(func) => func(arg!()),
-                    CtxFuncPtr::DynDual(func) => func(arg!(), arg!()),
-                    CtxFuncPtr::DynTriple(func) => func(arg!(), arg!(), arg!()),
-                    CtxFuncPtr::DynFlexible(func, argc) => {
-                        if stack.len() < argc.get() as usize {
-                            return Err(OptExprEvalError::NotEnoughArgumentsInStack);
+                    CtxFuncPtr::Dual(func) => {
+                        let args: [_; 2] = fetch_args!();
+                        let a1b;
+                        let arg1 = resolve_arg!(args[1], a1b);
+                        let arg0 = resolve_arg_owned!(args[0]);
+                        func(arg0, arg1)
+                    }
+                    CtxFuncPtr::Triple(func) => {
+                        let args: [_; 3] = fetch_args!();
+                        let (a1b, a2b);
+                        let arg2 = resolve_arg!(args[2], a2b);
+                        let arg1 = resolve_arg!(args[1], a1b);
+                        let arg0 = resolve_arg_owned!(args[0]);
+                        func(arg0, arg1, arg2)
+                    }
+                    CtxFuncPtr::Flexible(func, argc) => {
+                        let argc = argc.get();
+                        if stack.len() < argc as usize {
+                            return Err(QuickExprEvalError::NotEnoughArgumentsInStack);
                         }
-                        removed += argc.get();
-                        func(&stack[stack.len() - argc.get() as usize..])
+                        removed = argc;
+                        func(&stack[stack.len() - argc as usize..])
+                    }
+                    CtxFuncPtr::DynSingle(func) => {
+                        let args: [_; 1] = fetch_args!();
+                        func(resolve_arg_owned!(args[0]))
+                    }
+                    CtxFuncPtr::DynDual(func) => {
+                        let args: [_; 2] = fetch_args!();
+                        let a1b;
+                        let arg1 = resolve_arg!(args[1], a1b);
+                        let arg0 = resolve_arg_owned!(args[0]);
+                        func(arg0, arg1)
+                    }
+                    CtxFuncPtr::DynTriple(func) => {
+                        let args: [_; 3] = fetch_args!();
+                        let (a1b, a2b);
+                        let arg2 = resolve_arg!(args[2], a2b);
+                        let arg1 = resolve_arg!(args[1], a1b);
+                        let arg0 = resolve_arg_owned!(args[0]);
+                        func(arg0, arg1, arg2)
+                    }
+                    CtxFuncPtr::DynFlexible(func, argc) => {
+                        let argc = argc.get();
+                        if stack.len() < argc as usize {
+                            return Err(QuickExprEvalError::NotEnoughArgumentsInStack);
+                        }
+                        removed = argc;
+                        func(&stack[stack.len() - argc as usize..])
                     }
                 },
             };
             stack.truncate(stack.len() - removed as usize);
             stack.push(result);
         }
-        stack.pop().ok_or(OptExprEvalError::EmptyExpr)
+        stack.pop().ok_or(QuickExprEvalError::EmptyExpr)
     }
 }
 
@@ -680,7 +715,7 @@ mod tests {
         assert_eq!(
             convert("sin(x)+1"),
             QuickExpr {
-                param_sources: vec![Source::Variable, Source::Stack(0), Source::Literal],
+                param_sources: vec![Source::Variable, Source::Stack, Source::Literal],
                 literals: vec![1.0],
                 variables: vec![TestVar::X],
                 instructions: vec![
@@ -695,8 +730,8 @@ mod tests {
                 param_sources: vec![
                     Source::Variable,
                     Source::Variable,
-                    Source::Stack(0),
-                    Source::Stack(0),
+                    Source::Stack,
+                    Source::Stack,
                     Source::Literal,
                 ],
                 literals: vec![1.0],
@@ -715,7 +750,7 @@ mod tests {
                     Source::Literal,
                     Source::Variable,
                     Source::Variable,
-                    Source::Stack(0),
+                    Source::Stack,
                     Source::Literal,
                 ],
                 literals: vec![5.0, 1.0],
@@ -747,8 +782,8 @@ mod tests {
                     Source::Variable,
                     Source::Literal,
                     Source::Variable,
-                    Source::Stack(1),
-                    Source::Stack(0)
+                    Source::Stack,
+                    Source::Stack
                 ],
                 literals: vec![2.0],
                 variables: vec![TestVar::X, TestVar::Y],
@@ -762,7 +797,7 @@ mod tests {
         assert_eq!(
             convert("min(5, t, 3) + 2"),
             QuickExpr {
-                param_sources: vec![Source::Stack(0), Source::Literal,],
+                param_sources: vec![Source::Stack, Source::Literal,],
                 literals: vec![5.0, 3.0, 2.0],
                 variables: vec![TestVar::T],
                 instructions: vec![
@@ -800,7 +835,7 @@ mod tests {
         );
         assert_eq!(
             QuickExpr::<f64, TestVar, TestFunc> {
-                param_sources: vec![Source::Stack(1), Source::Stack(0)],
+                param_sources: vec![Source::Stack, Source::Stack],
                 literals: vec![],
                 variables: vec![],
                 instructions: vec![Instr::Calculate(BinaryOp::Add.into())]
@@ -876,7 +911,7 @@ mod tests {
         );
         assert_eq!(
             evaluate(
-                vec![Source::Literal, Source::Stack(0), Source::Variable],
+                vec![Source::Literal, Source::Stack, Source::Variable],
                 vec![12.0, 5.0],
                 vec![TestVar::X],
                 vec![
@@ -888,7 +923,7 @@ mod tests {
         );
         assert_eq!(
             evaluate(
-                vec![Source::Stack(2), Source::Stack(1), Source::Stack(0)],
+                vec![Source::Stack, Source::Stack, Source::Stack],
                 vec![8.0, 4.0, 2.0],
                 vec![],
                 vec![

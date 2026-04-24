@@ -21,8 +21,8 @@ use crate::quick_expr::FunctionSource;
 
 #[derive(Debug, Clone, Copy, Hash)]
 pub enum BFPointer<N: Number> {
-    Single(for<'a> fn(N::AsArg<'a>) -> N),
-    Dual(for<'a, 'b> fn(N::AsArg<'a>, N::AsArg<'b>) -> N),
+    Single(for<'a> fn(N) -> N),
+    Dual(for<'a> fn(N, N::AsArg<'a>) -> N),
     Flexible(fn(&[N]) -> N),
 }
 
@@ -266,47 +266,20 @@ impl Display for BuiltinFunction {
     }
 }
 
-pub trait Reborrow {
-    type This<'a>
-    where
-        Self: 'a;
-    fn reborrow(&self) -> Self::This<'_>;
-}
-
-impl<T> Reborrow for &'_ T {
-    type This<'a>
-        = &'a T
-    where
-        Self: 'a;
-    fn reborrow(&self) -> Self::This<'_> {
-        self
-    }
-}
-
 pub trait Number:
-    Add<Output = Self>
-    + Sub<Output = Self>
-    + Mul<Output = Self>
-    + Div<Output = Self>
+    for<'a> Add<Self::AsArg<'a>, Output = Self>
+    + for<'a> Sub<Self::AsArg<'a>, Output = Self>
+    + for<'a> Mul<Self::AsArg<'a>, Output = Self>
+    + for<'a> Div<Self::AsArg<'a>, Output = Self>
+    + Neg<Output = Self>
     + PartialEq
     + From<i32>
     + FromStr
-    + Neg<Output = Self>
     + Clone
     + Debug
     + 'static
 {
-    type AsArg<'a>: ToOwned<Owned = Self>
-        + for<'b> Add<Self::AsArg<'b>, Output = Self>
-        + for<'b> Sub<Self::AsArg<'b>, Output = Self>
-        + for<'b> Mul<Self::AsArg<'b>, Output = Self>
-        + for<'b> Div<Self::AsArg<'b>, Output = Self>
-        + for<'b> Neg<Output = Self>
-        + for<'b> Reborrow<This<'b> = Self::AsArg<'b>>
-        + PartialEq
-        + Neg<Output = Self>
-        + Copy
-        + Debug;
+    type AsArg<'a>: ToOwned<Owned = Self> + Neg<Output = Self> + PartialEq + Copy + Debug;
     type Recognizer: NumberRecognizer;
     type ConstsNameTrieType: NameTrie<&'static Self>;
 
@@ -316,34 +289,34 @@ pub trait Number:
     fn is_ten(value: Self::AsArg<'_>) -> bool;
     fn asarg(&self) -> Self::AsArg<'_>;
 
-    fn modulo(value: Self::AsArg<'_>, rhs: Self::AsArg<'_>) -> Self;
-    fn pow(value: Self::AsArg<'_>, rhs: Self::AsArg<'_>) -> Self;
-    fn sin(value: Self::AsArg<'_>) -> Self;
-    fn cos(value: Self::AsArg<'_>) -> Self;
-    fn tan(value: Self::AsArg<'_>) -> Self;
-    fn cot(value: Self::AsArg<'_>) -> Self;
-    fn asin(value: Self::AsArg<'_>) -> Self;
-    fn acos(value: Self::AsArg<'_>) -> Self;
-    fn atan(value: Self::AsArg<'_>) -> Self;
-    fn acot(value: Self::AsArg<'_>) -> Self;
-    fn log(value: Self::AsArg<'_>, base: Self::AsArg<'_>) -> Self;
-    fn log2(value: Self::AsArg<'_>) -> Self;
-    fn log10(value: Self::AsArg<'_>) -> Self;
-    fn ln(value: Self::AsArg<'_>) -> Self;
-    fn exp(value: Self::AsArg<'_>) -> Self;
-    fn floor(value: Self::AsArg<'_>) -> Self;
-    fn ceil(value: Self::AsArg<'_>) -> Self;
-    fn round(value: Self::AsArg<'_>) -> Self;
-    fn trunc(value: Self::AsArg<'_>) -> Self;
-    fn frac(value: Self::AsArg<'_>) -> Self;
-    fn abs(value: Self::AsArg<'_>) -> Self;
-    fn sign(value: Self::AsArg<'_>) -> Self;
-    fn sqrt(value: Self::AsArg<'_>) -> Self;
-    fn cbrt(value: Self::AsArg<'_>) -> Self;
+    fn modulo(value: Self, rhs: Self::AsArg<'_>) -> Self;
+    fn pow(value: Self, rhs: Self::AsArg<'_>) -> Self;
+    fn sin(value: Self) -> Self;
+    fn cos(value: Self) -> Self;
+    fn tan(value: Self) -> Self;
+    fn cot(value: Self) -> Self;
+    fn asin(value: Self) -> Self;
+    fn acos(value: Self) -> Self;
+    fn atan(value: Self) -> Self;
+    fn acot(value: Self) -> Self;
+    fn log(value: Self, base: Self::AsArg<'_>) -> Self;
+    fn log2(value: Self) -> Self;
+    fn log10(value: Self) -> Self;
+    fn ln(value: Self) -> Self;
+    fn exp(value: Self) -> Self;
+    fn floor(value: Self) -> Self;
+    fn ceil(value: Self) -> Self;
+    fn round(value: Self) -> Self;
+    fn trunc(value: Self) -> Self;
+    fn frac(value: Self) -> Self;
+    fn abs(value: Self) -> Self;
+    fn sign(value: Self) -> Self;
+    fn sqrt(value: Self) -> Self;
+    fn cbrt(value: Self) -> Self;
     fn max(value: &[Self]) -> Self;
     fn min(value: &[Self]) -> Self;
-    fn factorial(value: Self::AsArg<'_>) -> Self;
-    fn double_factorial(value: Self::AsArg<'_>) -> Self;
+    fn factorial(value: Self) -> Self;
+    fn double_factorial(value: Self) -> Self;
 }
 
 const STD_FLOAT_CONSTS_TRIE_NODES: [TrieNode; 9] = [
@@ -546,13 +519,5 @@ impl Number for f64 {
             k -= 2;
         }
         result
-    }
-}
-
-impl Reborrow for f64 {
-    type This<'a> = f64;
-
-    fn reborrow(&self) -> Self::This<'_> {
-        *self
     }
 }

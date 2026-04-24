@@ -59,7 +59,7 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
         self
     }
 
-    pub fn add_fn1(mut self, name: &'n str, function: for<'a> fn(N::AsArg<'a>) -> N) -> Self {
+    pub fn add_fn1(mut self, name: &'n str, function: for<'a> fn(N) -> N) -> Self {
         self.function_identifier.push((
             name,
             CfInfo::new(self.functions.len(), nz!(1), Some(nz!(1))),
@@ -68,11 +68,7 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
         self
     }
 
-    pub fn add_fn2(
-        mut self,
-        name: &'n str,
-        function: for<'a, 'b> fn(N::AsArg<'a>, N::AsArg<'b>) -> N,
-    ) -> Self {
+    pub fn add_fn2(mut self, name: &'n str, function: for<'a> fn(N, N::AsArg<'a>) -> N) -> Self {
         self.function_identifier.push((
             name,
             CfInfo::new(self.functions.len(), nz!(2), Some(nz!(2))),
@@ -84,7 +80,7 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
     pub fn add_fn3(
         mut self,
         name: &'n str,
-        function: for<'i, 'j, 'k> fn(N::AsArg<'i>, N::AsArg<'j>, N::AsArg<'k>) -> N,
+        function: for<'a, 'b> fn(N, N::AsArg<'a>, N::AsArg<'b>) -> N,
     ) -> Self {
         self.function_identifier.push((
             name,
@@ -116,7 +112,7 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
     pub fn add_dyn_fn1(
         mut self,
         name: &'n str,
-        function: &'f dyn for<'b> Fn(N::AsArg<'b>) -> N,
+        function: &'f dyn for<'b> Fn(N) -> N,
     ) -> Self {
         self.function_identifier.push((
             name,
@@ -129,7 +125,7 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
     pub fn add_dyn_fn2(
         mut self,
         name: &'n str,
-        function: &'f dyn for<'a, 'b> Fn(N::AsArg<'a>, N::AsArg<'b>) -> N,
+        function: &'f dyn for<'a> Fn(N, N::AsArg<'a>) -> N,
     ) -> Self {
         self.function_identifier.push((
             name,
@@ -142,7 +138,7 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
     pub fn add_dyn_fn3(
         mut self,
         name: &'n str,
-        function: &'f dyn for<'i, 'j, 'k> Fn(N::AsArg<'i>, N::AsArg<'j>, N::AsArg<'k>) -> N,
+        function: &'f dyn for<'a, 'b> Fn(N, N::AsArg<'a>, N::AsArg<'b>) -> N,
     ) -> Self {
         self.function_identifier.push((
             name,

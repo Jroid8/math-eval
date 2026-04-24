@@ -37,7 +37,7 @@ pub enum UnaryOp {
 }
 
 impl UnaryOp {
-    pub fn eval<N: Number>(self, value: N::AsArg<'_>) -> N {
+    pub fn eval<N: Number>(self, value: N) -> N {
         match self {
             UnaryOp::Fac => N::factorial(value),
             UnaryOp::Neg => -value,
@@ -52,10 +52,10 @@ impl UnaryOp {
         }
     }
 
-    pub fn as_pointer<N: Number>(self) -> for<'a> fn(N::AsArg<'a>) -> N {
+    pub fn as_pointer<N: Number>(self) -> fn(N) -> N {
         match self {
             UnaryOp::Fac => N::factorial,
-            UnaryOp::Neg => |v| -v,
+            UnaryOp::Neg => N::neg,
             UnaryOp::DoubleFac => N::double_factorial,
         }
     }
@@ -82,7 +82,7 @@ pub enum BinaryOp {
 }
 
 impl BinaryOp {
-    pub fn eval<N: Number>(self, lhs: N::AsArg<'_>, rhs: N::AsArg<'_>) -> N {
+    pub fn eval<N: Number>(self, lhs: N, rhs: N::AsArg<'_>) -> N {
         match self {
             BinaryOp::Add => lhs + rhs,
             BinaryOp::Sub => lhs - rhs,
@@ -116,7 +116,7 @@ impl BinaryOp {
         }
     }
 
-    pub fn as_pointer<N: Number>(self) -> for<'a, 'b> fn(N::AsArg<'a>, N::AsArg<'b>) -> N {
+    pub fn as_pointer<N: Number>(self) -> for<'a> fn(N, N::AsArg<'a>) -> N {
         match self {
             BinaryOp::Add => |x, y| x + y,
             BinaryOp::Sub => |x, y| x - y,
@@ -284,13 +284,13 @@ where
 
 #[derive(Clone)]
 pub enum FunctionPointer<'a, N: Number> {
-    Single(for<'b> fn(N::AsArg<'b>) -> N),
-    Dual(for<'b, 'c> fn(N::AsArg<'b>, N::AsArg<'c>) -> N),
-    Triple(for<'b, 'c, 'd> fn(N::AsArg<'b>, N::AsArg<'c>, N::AsArg<'d>) -> N),
+    Single(fn(N) -> N),
+    Dual(for<'b> fn(N, N::AsArg<'b>) -> N),
+    Triple(for<'b, 'c> fn(N, N::AsArg<'b>, N::AsArg<'c>) -> N),
     Flexible(fn(&[N]) -> N),
-    DynSingle(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N),
-    DynDual(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N),
-    DynTriple(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
+    DynSingle(&'a dyn Fn(N) -> N),
+    DynDual(&'a dyn for<'b> Fn(N, N::AsArg<'b>) -> N),
+    DynTriple(&'a dyn for<'b, 'c> Fn(N, N::AsArg<'b>, N::AsArg<'c>) -> N),
     DynFlexible(&'a dyn Fn(&[N]) -> N),
 }
 

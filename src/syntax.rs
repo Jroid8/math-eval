@@ -306,14 +306,14 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
                 AstNode::Variable(var) => variable_values.get(*var).to_owned(),
                 AstNode::BinaryOp(opr) => {
                     let rhs = pop()?;
-                    opr.eval(pop()?.asarg(), rhs.asarg())
+                    opr.eval(pop()?, rhs.asarg())
                 }
-                AstNode::UnaryOp(opr) => opr.eval(pop()?.asarg()),
+                AstNode::UnaryOp(opr) => opr.eval(pop()?),
                 AstNode::Function(FunctionType::Builtin(bf), argc) => match bf.as_pointer() {
-                    BFPointer::Single(func) => func(pop()?.asarg()),
+                    BFPointer::Single(func) => func(pop()?),
                     BFPointer::Dual(func) => {
                         let arg2 = pop()?;
-                        func(pop()?.asarg(), arg2.asarg())
+                        func(pop()?, arg2.asarg())
                     }
                     BFPointer::Flexible(func) => {
                         let new_len = stack.len() - argc.get() as usize;
@@ -324,15 +324,15 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
                 },
                 AstNode::Function(FunctionType::Custom(cf), argc) => match functibn_to_pointer(*cf)
                 {
-                    FunctionPointer::Single(func) => func(pop()?.asarg()),
+                    FunctionPointer::Single(func) => func(pop()?),
                     FunctionPointer::Dual(func) => {
                         let arg2 = pop()?;
-                        func(pop()?.asarg(), arg2.asarg())
+                        func(pop()?, arg2.asarg())
                     }
                     FunctionPointer::Triple(func) => {
                         let arg3 = pop()?;
                         let arg2 = pop()?;
-                        func(pop()?.asarg(), arg2.asarg(), arg3.asarg())
+                        func(pop()?, arg2.asarg(), arg3.asarg())
                     }
                     FunctionPointer::Flexible(func) => {
                         let new_len = stack.len() - argc.get() as usize;
@@ -340,15 +340,15 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
                         stack.truncate(new_len);
                         res
                     }
-                    FunctionPointer::DynSingle(func) => func(pop()?.asarg()),
+                    FunctionPointer::DynSingle(func) => func(pop()?),
                     FunctionPointer::DynDual(func) => {
                         let arg2 = pop()?;
-                        func(pop()?.asarg(), arg2.asarg())
+                        func(pop()?, arg2.asarg())
                     }
                     FunctionPointer::DynTriple(func) => {
                         let arg3 = pop()?;
                         let arg2 = pop()?;
-                        func(pop()?.asarg(), arg2.asarg(), arg3.asarg())
+                        func(pop()?, arg2.asarg(), arg3.asarg())
                     }
                     FunctionPointer::DynFlexible(func) => {
                         let new_len = stack.len() - argc.get() as usize;
@@ -474,7 +474,7 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
         for (arm_pos, (arm, arm_idx)) in self.0.children_iter(head_idx).enumerate() {
             let sign = apply_pos(head_opr, arm_pos);
             match arm {
-                AstNode::Number(num) => lhs = sign.eval(lhs.asarg(), num.asarg()),
+                AstNode::Number(num) => lhs = sign.eval(lhs, num.asarg()),
                 AstNode::BinaryOp(arm_opr) => {
                     for (tail_pos, (tail, tail_idx)) in self.0.children_iter(arm_idx).enumerate() {
                         let sign = multiply_oprs(
@@ -483,7 +483,7 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
                         );
                         match tail {
                             AstNode::Number(num) => {
-                                lhs = sign.eval(lhs.asarg(), num.asarg());
+                                lhs = sign.eval(lhs, num.asarg());
                             }
                             _ => symbols[symbols[0].is_some() as usize] = Some((tail_idx, sign)),
                         }
