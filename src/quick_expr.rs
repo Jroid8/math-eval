@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
+enum Source {
     Literal,
     Variable,
     Stack,
@@ -23,19 +23,11 @@ impl Source {
         variables: &mut Iter<'_, V>,
         variable_values: &impl VariableStore<N, V>,
         stack: &mut Vec<N>,
-    ) -> Result<N, QuickExprEvalError> {
+    ) -> N {
         match self {
-            Source::Literal => literals
-                .next()
-                .cloned()
-                .ok_or(QuickExprEvalError::NotEnoughLiterals),
-            Source::Variable => variables
-                .next()
-                .map(|var| variable_values.get(*var).to_owned())
-                .ok_or(QuickExprEvalError::NotEnoughVariables),
-            Source::Stack => stack
-                .pop()
-                .ok_or(QuickExprEvalError::NotEnoughArgumentsInStack),
+            Source::Literal => literals.next().unwrap().clone(),
+            Source::Variable => variable_values.get(*variables.next().unwrap()).to_owned(),
+            Source::Stack => stack.pop().unwrap(),
         }
     }
 }
@@ -45,34 +37,20 @@ fn fetch_args<'a, 'b: 'a, const A: usize, N: Number, V: VarId>(
     literals: &mut Iter<'b, N>,
     variables: &mut Iter<'b, V>,
     variable_values: &'a impl VariableStore<N, V>,
-) -> Result<[Option<N::AsArg<'a>>; A], QuickExprEvalError> {
+) -> [Option<N::AsArg<'a>>; A] {
     let mut res = [None; A];
     for (i, ps) in param_sources.enumerate().take(A) {
         match ps {
-            Source::Literal => {
-                res[i] = Some(
-                    literals
-                        .next()
-                        .map(|num| num.asarg())
-                        .ok_or(QuickExprEvalError::NotEnoughLiterals)?,
-                )
-            }
-            Source::Variable => {
-                res[i] = Some(
-                    variables
-                        .next()
-                        .map(|var| variable_values.get(*var))
-                        .ok_or(QuickExprEvalError::NotEnoughLiterals)?,
-                )
-            }
+            Source::Literal => res[i] = Some(literals.next().unwrap().asarg()),
+            Source::Variable => res[i] = Some(variable_values.get(*variables.next().unwrap())),
             Source::Stack => res[i] = None,
         }
     }
-    Ok(res)
+    res
 }
 
 #[derive(Clone)]
-pub enum CtxFuncPtr<'a, N>
+pub(crate) enum CtxFuncPtr<'a, N>
 where
     N: Number,
 {
@@ -131,7 +109,7 @@ impl<N: Number> From<UnaryOp> for CtxFuncPtr<'static, N> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FunctionSource<F: FuncId> {
+pub(crate) enum FunctionSource<F: FuncId> {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
     BuiltinFunction(BuiltinFunction),
@@ -139,16 +117,16 @@ pub enum FunctionSource<F: FuncId> {
 }
 
 #[derive(Clone, Copy)]
-pub struct MarkedFunc<'a, N: Number, F: FuncId> {
-    pub func: CtxFuncPtr<'a, N>,
-    pub _src: PhantomData<F>,
+pub(crate) struct MarkedFunc<'a, N: Number, F: FuncId> {
+    pub(crate) func: CtxFuncPtr<'a, N>,
+    pub(crate) _src: PhantomData<F>,
     #[cfg(debug_assertions)]
-    pub src: FunctionSource<F>,
+    pub(crate) src: FunctionSource<F>,
 }
 
 impl<'a, N: Number, F: FuncId> MarkedFunc<'a, N, F> {
     #[allow(unused_variables)]
-    pub fn new(func: CtxFuncPtr<'a, N>, src: FunctionSource<F>) -> Self {
+    pub(crate) fn new(func: CtxFuncPtr<'a, N>, src: FunctionSource<F>) -> Self {
         Self {
             func,
             _src: PhantomData,
@@ -195,7 +173,7 @@ impl<N: Number, F: FuncId> From<UnaryOp> for MarkedFunc<'static, N, F> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum Instr<'a, N: Number, F: FuncId> {
+enum Instr<'a, N: Number, F: FuncId> {
     Push(Source),
     Calculate(MarkedFunc<'a, N, F>),
 }
@@ -221,27 +199,12 @@ enum InstrArg<N: Number, V: VarId> {
     Stack,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum QuickExprEvalError {
-    NotEnoughArgumentsInStack,
-    EmptyExpr,
-    NotEnoughLiterals,
-    NotEnoughVariables,
-    NotEnoughParams,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StackCapCalcError {
-    StackUnderflow,
-    NotEnoughParameters,
-}
-
 #[derive(Clone, Debug)]
 pub struct QuickExpr<'a, N: Number, V: VarId, F: FuncId> {
-    pub param_sources: Vec<Source>,
-    pub literals: Vec<N>,
-    pub variables: Vec<V>,
-    pub instructions: Vec<Instr<'a, N, F>>,
+    param_sources: Vec<Source>,
+    literals: Vec<N>,
+    variables: Vec<V>,
+    instructions: Vec<Instr<'a, N, F>>,
 }
 
 impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
@@ -368,16 +331,13 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
         }
     }
 
-    pub fn stack_req_capacity(&self) -> Result<usize, StackCapCalcError> {
+    pub fn stack_req_capacity(&self) -> usize {
         let mut p: usize = 0;
         let mut length: usize = 0;
         let mut capacity: usize = 0;
         for instr in &self.instructions {
             macro_rules! asc {
                 ($argc: expr) => {{
-                    if p + $argc > self.param_sources.len() {
-                        return Err(StackCapCalcError::NotEnoughParameters);
-                    }
                     length = length
                         .checked_sub(
                             self.param_sources[p..p + $argc]
@@ -385,7 +345,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                                 .filter(|&&s| s == Source::Stack)
                                 .count(),
                         )
-                        .ok_or(StackCapCalcError::StackUnderflow)?;
+                        .unwrap();
                     length += 1;
                     p += $argc;
                 }};
@@ -397,9 +357,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                     CtxFuncPtr::DynDual(_) | CtxFuncPtr::Dual(_) => asc!(2),
                     CtxFuncPtr::DynTriple(_) | CtxFuncPtr::Triple(_) => asc!(3),
                     CtxFuncPtr::DynFlexible(_, argc) | CtxFuncPtr::Flexible(_, argc) => {
-                        length = length
-                            .checked_sub(argc.get() as usize)
-                            .ok_or(StackCapCalcError::StackUnderflow)?;
+                        length -= argc.get() as usize;
                         length += 1;
                     }
                 },
@@ -408,14 +366,10 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                 capacity = length;
             }
         }
-        Ok(capacity)
+        capacity
     }
 
-    pub fn eval(
-        &self,
-        variable_values: &impl VariableStore<N, V>,
-        stack: &mut Vec<N>,
-    ) -> Result<N, QuickExprEvalError> {
+    pub fn eval(&self, variable_values: &impl VariableStore<N, V>, stack: &mut Vec<N>) -> N {
         let mut param_sources = self.param_sources.iter().copied();
         let mut literals = self.literals.iter();
         let mut variables = self.variables.iter();
@@ -428,7 +382,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                         &mut literals,
                         &mut variables,
                         variable_values,
-                    )?
+                    )
                 };
             }
             macro_rules! resolve_arg {
@@ -436,9 +390,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                     if let Some(arg) = $arg {
                         arg
                     } else {
-                        $binding = stack
-                            .pop()
-                            .ok_or(QuickExprEvalError::NotEnoughArgumentsInStack)?;
+                        $binding = stack.pop().unwrap();
                         $binding.asarg()
                     }
                 };
@@ -446,17 +398,15 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
             macro_rules! resolve_arg_owned {
                 ($a: expr) => {
                     if let Some(arg) = $a {
-                        arg.to_owned()
+                        <N as Number>::AsArg::to_owned(&arg)
                     } else {
-                        stack
-                            .pop()
-                            .ok_or(QuickExprEvalError::NotEnoughArgumentsInStack)?
+                        stack.pop().unwrap()
                     }
                 };
             }
             let result = match instr {
                 Instr::Push(src) => {
-                    src.fetch_owned(&mut literals, &mut variables, variable_values, stack)?
+                    src.fetch_owned(&mut literals, &mut variables, variable_values, stack)
                 }
                 Instr::Calculate(idfunc) => match idfunc.func {
                     CtxFuncPtr::Single(func) => {
@@ -479,12 +429,8 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                         func(arg0, arg1, arg2)
                     }
                     CtxFuncPtr::Flexible(func, argc) => {
-                        let argc = argc.get();
-                        if stack.len() < argc as usize {
-                            return Err(QuickExprEvalError::NotEnoughArgumentsInStack);
-                        }
-                        removed = argc;
-                        func(&stack[stack.len() - argc as usize..])
+                        removed = argc.get();
+                        func(&stack[stack.len() - argc.get() as usize..])
                     }
                     CtxFuncPtr::DynSingle(func) => {
                         let args: [_; 1] = fetch_args!();
@@ -506,19 +452,15 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                         func(arg0, arg1, arg2)
                     }
                     CtxFuncPtr::DynFlexible(func, argc) => {
-                        let argc = argc.get();
-                        if stack.len() < argc as usize {
-                            return Err(QuickExprEvalError::NotEnoughArgumentsInStack);
-                        }
-                        removed = argc;
-                        func(&stack[stack.len() - argc as usize..])
+                        removed = argc.get();
+                        func(&stack[stack.len() - argc.get() as usize..])
                     }
                 },
             };
             stack.truncate(stack.len() - removed as usize);
             stack.push(result);
         }
-        stack.pop().ok_or(QuickExprEvalError::EmptyExpr)
+        stack.pop().unwrap()
     }
 }
 
@@ -821,7 +763,7 @@ mod tests {
                 instructions: vec![Instr::Push(Source::Literal)],
             }
             .stack_req_capacity(),
-            Ok(1)
+            1
         );
         assert_eq!(
             QuickExpr::<f64, TestVar, TestFunc> {
@@ -831,27 +773,23 @@ mod tests {
                 instructions: vec![Instr::Calculate(BinaryOp::Add.into())],
             }
             .stack_req_capacity(),
-            Ok(1)
+            1
         );
         assert_eq!(
-            QuickExpr::<f64, TestVar, TestFunc> {
-                param_sources: vec![Source::Stack, Source::Stack],
-                literals: vec![],
-                variables: vec![],
-                instructions: vec![Instr::Calculate(BinaryOp::Add.into())]
+            QuickExpr {
+                param_sources: vec![Source::Stack, Source::Literal,],
+                literals: vec![5.0, 3.0, 2.0],
+                variables: vec![TestVar::T],
+                instructions: vec![
+                    Instr::<f64, TestFunc>::Push(Source::Literal),
+                    Instr::Push(Source::Variable),
+                    Instr::Push(Source::Literal),
+                    Instr::Calculate(BuiltinFunction::Min.as_markedfunc(nz!(3))),
+                    Instr::Calculate(BinaryOp::Add.into()),
+                ]
             }
             .stack_req_capacity(),
-            Err(StackCapCalcError::StackUnderflow)
-        );
-        assert_eq!(
-            QuickExpr::<f64, TestVar, TestFunc> {
-                param_sources: vec![Source::Literal],
-                literals: vec![5.8],
-                variables: vec![],
-                instructions: vec![Instr::Calculate(BinaryOp::Add.into())]
-            }
-            .stack_req_capacity(),
-            Err(StackCapCalcError::NotEnoughParameters)
+            3
         );
     }
 
@@ -870,7 +808,6 @@ mod tests {
                 instructions,
             }
             .eval(&TestStore, &mut Vec::new())
-            .unwrap()
         }
 
         assert_eq!(

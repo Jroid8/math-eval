@@ -261,13 +261,13 @@ impl BaselineTestCase {
         let ctxful_funcs = CtxfulMyFuncs::new();
         let mf2p = |f| MyFunc::to_pointer(f, &ctxful_funcs);
         let quick = QuickExpr::new(ast.clone(), mf2p);
-        let mut stack = Vec::with_capacity(quick.stack_req_capacity().unwrap());
+        let mut stack = Vec::with_capacity(quick.stack_req_capacity());
         for _ in 0..200 {
             let x = f64_range(self.x_range.clone());
             let y = f64_range(self.y_range.clone());
             let sigma = f64_range(self.sigma_range.clone());
             let comp_res = (self.rust_func)(x, y, sigma, &ctxful_funcs);
-            let quick_res = quick.eval(&MyStore { x, y, sigma }, &mut stack).unwrap();
+            let quick_res = quick.eval(&MyStore { x, y, sigma }, &mut stack);
             let ast_res = ast.eval(mf2p, &MyStore { x, y, sigma });
             let syno_res = MathAst::parse_and_eval(
                 &TokenStream::new::<Sfr>(self.str_expr).unwrap(),
@@ -431,8 +431,8 @@ fn correctness_alignment() {
         };
         let ast_res = ast.eval(mf2p, &vars);
         let quick = QuickExpr::new(ast.clone(), mf2p);
-        let mut stack = Vec::with_capacity(quick.stack_req_capacity().unwrap());
-        let quick_res = quick.eval(&vars, &mut stack).unwrap();
+        let mut stack = Vec::with_capacity(quick.stack_req_capacity());
+        let quick_res = quick.eval(&vars, &mut stack);
         if (ast_res - quick_res).abs() > TOLERANCE {
             panic!(
                 "evaluation of \"{}\" produced inconsistent results for values x={}, y={}, σ={}.\nast:\t{ast_res}\nquick:\t{quick_res}\nast (debug): {:?}",

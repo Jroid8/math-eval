@@ -101,9 +101,7 @@ fn fuzz_quickexpr() {
             let expr = rand_ast(4usize.pow(size as u32));
             if let Err(pan) = std::panic::catch_unwind(|| {
                 let expr = QuickExpr::new(expr.clone(), MyFunc::as_pointer);
-                let Ok(stack_cap) = expr.stack_req_capacity() else {
-                    return;
-                };
+                let stack_cap = expr.stack_req_capacity();
                 let _ = expr.eval(&MyStore::randomize(), &mut Vec::with_capacity(stack_cap));
             }) {
                 report_ast_panic(expr, pan);

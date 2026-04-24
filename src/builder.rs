@@ -207,8 +207,8 @@ where
             &EmptyNameTrie,
             |idx| self.functions[idx],
         )?;
-        let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
-        Ok(move || expr.eval(&(), &mut stack).unwrap())
+        let mut stack = Vec::with_capacity(expr.stack_req_capacity());
+        Ok(move || expr.eval(&(), &mut stack))
     }
 }
 
@@ -250,8 +250,8 @@ impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
             &variable_parser,
             |idx| self.functions[idx],
         )?;
-        let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
-        Ok(move |v0| expr.eval(&(v0,), &mut stack).unwrap())
+        let mut stack = Vec::with_capacity(expr.stack_req_capacity());
+        Ok(move |v0| expr.eval(&(v0,), &mut stack))
     }
 }
 
@@ -295,8 +295,8 @@ macro_rules! fn_build_as_function {
                     &variable_parser,
                     |idx| self.functions[idx],
                 )?;
-                let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
-                Ok(move |#(v~I,)*| expr.eval(&[#(v~I,)*], &mut stack).unwrap())
+                let mut stack = Vec::with_capacity(expr.stack_req_capacity());
+                Ok(move |#(v~I,)*| expr.eval(&[#(v~I,)*], &mut stack))
             }
         });
     };
@@ -392,8 +392,8 @@ impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ManyVariables<'n>> {
             &variable_parser,
             |idx| self.functions[idx],
         )?;
-        let mut stack = Vec::with_capacity(expr.stack_req_capacity().unwrap());
-        Ok(move |vars| expr.eval(&vars, &mut stack).unwrap())
+        let mut stack = Vec::with_capacity(expr.stack_req_capacity());
+        Ok(move |vars| expr.eval(&vars, &mut stack))
     }
 }
 

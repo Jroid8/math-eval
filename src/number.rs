@@ -84,7 +84,8 @@ impl BuiltinFunction {
             BuiltinFunction::Min => BFPointer::Flexible(N::min),
         }
     }
-    pub fn as_markedfunc<N: Number, F: FuncId>(self, argc: NonZeroU8) -> MarkedFunc<'static, N, F> {
+    #[allow(dead_code)]
+    pub(crate) fn as_markedfunc<N: Number, F: FuncId>(self, argc: NonZeroU8) -> MarkedFunc<'static, N, F> {
         match self.as_pointer::<N>() {
             BFPointer::Single(func) => MarkedFunc {
                 func: CtxFuncPtr::Single(func),

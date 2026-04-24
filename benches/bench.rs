@@ -182,11 +182,11 @@ impl VariableStore<f64, MyVar> for MyStore {
 }
 
 fn matheval_calc_bencher(b: &mut Bencher<'_>, qexpr: &QuickExpr<'_, f64, MyVar, MyFunc>) {
-    let mut stack = Vec::with_capacity(qexpr.stack_req_capacity().unwrap());
+    let mut stack = Vec::with_capacity(qexpr.stack_req_capacity());
     let mut rng = fastrand::Rng::new();
     b.iter_batched(
         || MyStore::rand(&mut rng),
-        |store| black_box(qexpr.eval(&store, &mut stack).unwrap()),
+        |store| black_box(qexpr.eval(&store, &mut stack)),
         criterion::BatchSize::SmallInput,
     )
 }
@@ -267,11 +267,11 @@ fn meval_parse_bencher(b: &mut Bencher<'_>, input: &str) {
     context.func("rand", move |x| detrand_f64(x, seed));
     let vars = MyStore::rand(&mut Rng::new());
     b.iter(|| {
-        input
+        black_box(input
             .parse::<Expr>()
             .unwrap()
             .bind3_with_context(context.clone(), "x", "y", "t")
-            .unwrap()(vars.x, vars.y, vars.t);
+            .unwrap()(vars.x, vars.y, vars.t));
     });
 }
 
