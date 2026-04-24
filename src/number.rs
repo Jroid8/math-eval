@@ -312,6 +312,10 @@ pub trait Number:
 
     const CONSTS_NAME_TRIE: Self::ConstsNameTrieType;
 
+    fn is_two(value: Self::AsArg<'_>) -> bool;
+    fn is_ten(value: Self::AsArg<'_>) -> bool;
+    fn asarg(&self) -> Self::AsArg<'_>;
+
     fn modulo(value: Self::AsArg<'_>, rhs: Self::AsArg<'_>) -> Self;
     fn pow(value: Self::AsArg<'_>, rhs: Self::AsArg<'_>) -> Self;
     fn sin(value: Self::AsArg<'_>) -> Self;
@@ -340,7 +344,6 @@ pub trait Number:
     fn min(value: &[Self]) -> Self;
     fn factorial(value: Self::AsArg<'_>) -> Self;
     fn double_factorial(value: Self::AsArg<'_>) -> Self;
-    fn asarg(&self) -> Self::AsArg<'_>;
 }
 
 const STD_FLOAT_CONSTS_TRIE_NODES: [TrieNode; 9] = [
@@ -386,6 +389,18 @@ impl Number for f64 {
         e: &E,
         tau: &TAU,
     };
+
+    fn asarg(&self) -> Self::AsArg<'_> {
+        *self
+    }
+
+    fn is_two(value: Self::AsArg<'_>) -> bool {
+        value == 2.0
+    }
+
+    fn is_ten(value: Self::AsArg<'_>) -> bool {
+        value == 10.0
+    }
 
     fn pow(value: Self, rhs: Self) -> Self {
         value.powf(rhs)
@@ -531,10 +546,6 @@ impl Number for f64 {
             k -= 2;
         }
         result
-    }
-
-    fn asarg(&self) -> Self::AsArg<'_> {
-        *self
     }
 }
 

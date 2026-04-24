@@ -255,7 +255,6 @@ where
         }
     }
     fn push(&mut self, node: AstNode<N, V, F>) -> Result<(), NotEnoughOrphans> {
-        // FIX: unwrap in one place
         let res = match node {
             AstNode::Number(num) => num,
             AstNode::Variable(var) => self.variable_store.get(var).to_owned(),
@@ -574,15 +573,12 @@ where
                 match operator_stack.pop().unwrap() {
                     SyOperator::Function(SyFunction::Builtin(mut bf), args) => {
                         if bf == BuiltinFunction::Log {
-                            // FIX: recieve 10 and 2 from MathEvalNumber so it can be const
-                            let ten = N::from(10);
-                            let two = N::from(2);
                             match output_queue.last_num() {
-                                Some(num) if num == ten.asarg() => {
+                                Some(num) if N::is_ten(num) => {
                                     output_queue.pop_arg();
                                     bf = BuiltinFunction::Log10;
                                 }
-                                Some(num) if num == two.asarg() => {
+                                Some(num) if N::is_two(num) => {
                                     output_queue.pop_arg();
                                     bf = BuiltinFunction::Log2;
                                 }
