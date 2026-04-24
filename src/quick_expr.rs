@@ -1,9 +1,10 @@
-use std::{fmt::Debug, marker::PhantomData, slice::Iter};
+use std::{fmt::Debug, marker::PhantomData, num::NonZeroU8, slice::Iter};
 
 use crate::{
     BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, UnaryOp, VariableIdentifier as VarId,
     VariableStore,
     number::{BuiltinFunction, Number},
+    nz,
     syntax::{AstNode, FunctionType, MathAst},
 };
 
@@ -87,15 +88,15 @@ where
     Single(for<'b> fn(N::AsArg<'b>) -> N),
     Dual(for<'b, 'c> fn(N::AsArg<'b>, N::AsArg<'c>) -> N),
     Triple(for<'b, 'c, 'd> fn(N::AsArg<'b>, N::AsArg<'c>, N::AsArg<'d>) -> N),
-    Flexible(fn(&[N]) -> N, u8),
+    Flexible(fn(&[N]) -> N, NonZeroU8),
     DynSingle(&'a dyn for<'b> Fn(N::AsArg<'b>) -> N),
     DynDual(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>) -> N),
     DynTriple(&'a dyn for<'b> Fn(N::AsArg<'b>, N::AsArg<'b>, N::AsArg<'b>) -> N),
-    DynFlexible(&'a dyn Fn(&[N]) -> N, u8),
+    DynFlexible(&'a dyn Fn(&[N]) -> N, NonZeroU8),
 }
 
 impl<'a, N: Number> CtxFuncPtr<'a, N> {
-    fn from_ptr_args(func: FunctionPointer<'a, N>, argc: u8) -> Self {
+    fn from_ptr_args(func: FunctionPointer<'a, N>, argc: NonZeroU8) -> Self {
         match func {
             FunctionPointer::Single(f) => Self::Single(f),
             FunctionPointer::Dual(f) => Self::Dual(f),
@@ -308,14 +309,14 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                 AstNode::BinaryOp(opr) => {
                     arg_cons = 2;
                     instructions.push(Instr::Calculate(MarkedFunc::new(
-                        CtxFuncPtr::from_ptr_args(opr.into(), 2),
+                        CtxFuncPtr::from_ptr_args(opr.into(), nz!(2)),
                         FunctionSource::BinaryOp(opr),
                     )));
                 }
                 AstNode::UnaryOp(opr) => {
                     arg_cons = 1;
                     instructions.push(Instr::Calculate(MarkedFunc::new(
-                        CtxFuncPtr::from_ptr_args(opr.into(), 1),
+                        CtxFuncPtr::from_ptr_args(opr.into(), nz!(1)),
                         FunctionSource::UnaryOp(opr),
                     )));
                 }
@@ -325,7 +326,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                     }
                     arg_cons = argc.get();
                     instructions.push(Instr::Calculate(MarkedFunc::new(
-                        CtxFuncPtr::from_ptr_args(bf.into(), argc.get()),
+                        CtxFuncPtr::from_ptr_args(bf.into(), argc),
                         FunctionSource::BuiltinFunction(bf),
                     )));
                 }
@@ -336,7 +337,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                     }
                     arg_cons = argc.get();
                     instructions.push(Instr::Calculate(MarkedFunc::new(
-                        CtxFuncPtr::from_ptr_args(ptr, argc.get()),
+                        CtxFuncPtr::from_ptr_args(ptr, argc),
                         FunctionSource::CustomFunction(cf),
                     )));
                 }
@@ -411,7 +412,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                     CtxFuncPtr::DynTriple(_) | CtxFuncPtr::Triple(_) => asc!(3),
                     CtxFuncPtr::DynFlexible(_, argc) | CtxFuncPtr::Flexible(_, argc) => {
                         length = length
-                            .checked_sub(argc as usize)
+                            .checked_sub(argc.get() as usize)
                             .ok_or(StackCapCalcError::StackUnderflow)?;
                         length += 1;
                     }
@@ -461,22 +462,21 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                     CtxFuncPtr::Dual(func) => func(arg!(), arg!()),
                     CtxFuncPtr::Triple(func) => func(arg!(), arg!(), arg!()),
                     CtxFuncPtr::Flexible(func, argc) => {
-                        // FIX: account for zero argc
-                        if stack.len() < argc as usize {
+                        if stack.len() < argc.get() as usize {
                             return Err(OptExprEvalError::NotEnoughArgumentsInStack);
                         }
-                        removed += argc;
-                        func(&stack[stack.len() - argc as usize..])
+                        removed += argc.get();
+                        func(&stack[stack.len() - argc.get() as usize..])
                     }
                     CtxFuncPtr::DynSingle(func) => func(arg!()),
                     CtxFuncPtr::DynDual(func) => func(arg!(), arg!()),
                     CtxFuncPtr::DynTriple(func) => func(arg!(), arg!(), arg!()),
                     CtxFuncPtr::DynFlexible(func, argc) => {
-                        if stack.len() < argc as usize {
+                        if stack.len() < argc.get() as usize {
                             return Err(OptExprEvalError::NotEnoughArgumentsInStack);
                         }
-                        removed += argc;
-                        func(&stack[stack.len() - argc as usize..])
+                        removed += argc.get();
+                        func(&stack[stack.len() - argc.get() as usize..])
                     }
                 },
             };
@@ -557,7 +557,7 @@ mod tests {
                 TestFunc::Digits => FunctionPointer::Flexible(digits),
             }
         }
-        fn as_marked(self, argc: u8) -> MarkedFunc<'static, f64, Self> {
+        fn as_marked(self, argc: NonZeroU8) -> MarkedFunc<'static, f64, Self> {
             MarkedFunc::new(
                 CtxFuncPtr::from_ptr_args(self.as_pointer(), argc),
                 FunctionSource::CustomFunction(self),
@@ -674,7 +674,7 @@ mod tests {
                 param_sources: vec![Source::Variable],
                 literals: vec![],
                 variables: vec![TestVar::X],
-                instructions: vec![Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(0))],
+                instructions: vec![Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(nz!(1)))],
             },
         );
         assert_eq!(
@@ -684,7 +684,7 @@ mod tests {
                 literals: vec![1.0],
                 variables: vec![TestVar::X],
                 instructions: vec![
-                    Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(0)),
+                    Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(nz!(1))),
                     Instr::Calculate(BinaryOp::Add.into())
                 ],
             },
@@ -702,7 +702,7 @@ mod tests {
                 literals: vec![1.0],
                 variables: vec![TestVar::X, TestVar::Y],
                 instructions: vec![
-                    Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(0)),
+                    Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(nz!(1))),
                     Instr::Calculate(BinaryOp::Mul.into()),
                     Instr::Calculate(BinaryOp::Add.into())
                 ],
@@ -722,7 +722,7 @@ mod tests {
                 variables: vec![TestVar::X, TestVar::Y],
                 instructions: vec![
                     Instr::Calculate(BinaryOp::Mul.into()),
-                    Instr::Calculate(TestFunc::F1.as_marked(0))
+                    Instr::Calculate(TestFunc::F1.as_marked(nz!(1)))
                 ],
             },
         );
@@ -736,7 +736,7 @@ mod tests {
                     Instr::Push(Source::Variable),
                     Instr::Calculate(BinaryOp::Mul.into()),
                     Instr::Push(Source::Literal),
-                    Instr::Calculate(BuiltinFunction::Max.as_markedfunc(3)),
+                    Instr::Calculate(BuiltinFunction::Max.as_markedfunc(nz!(3))),
                 ]
             }
         );
@@ -754,7 +754,7 @@ mod tests {
                 variables: vec![TestVar::X, TestVar::Y],
                 instructions: vec![
                     Instr::Calculate(BinaryOp::Pow.into()),
-                    Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(0)),
+                    Instr::Calculate(BuiltinFunction::Sin.as_markedfunc(nz!(1))),
                     Instr::Calculate(BinaryOp::Add.into())
                 ]
             }
@@ -769,7 +769,7 @@ mod tests {
                     Instr::Push(Source::Literal),
                     Instr::Push(Source::Variable),
                     Instr::Push(Source::Literal),
-                    Instr::Calculate(BuiltinFunction::Min.as_markedfunc(3)),
+                    Instr::Calculate(BuiltinFunction::Min.as_markedfunc(nz!(3))),
                     Instr::Calculate(BinaryOp::Add.into()),
                 ]
             }
@@ -881,7 +881,7 @@ mod tests {
                 vec![TestVar::X],
                 vec![
                     Instr::Push(Source::Literal),
-                    Instr::Calculate(TestFunc::F1.as_marked(1))
+                    Instr::Calculate(TestFunc::F1.as_marked(nz!(1)))
                 ]
             ),
             55.0
@@ -895,7 +895,7 @@ mod tests {
                     Instr::Push(Source::Literal),
                     Instr::Push(Source::Literal),
                     Instr::Push(Source::Literal),
-                    Instr::Calculate(TestFunc::Digits.as_marked(3))
+                    Instr::Calculate(TestFunc::Digits.as_marked(nz!(3)))
                 ]
             ),
             248.0
