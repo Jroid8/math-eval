@@ -53,6 +53,7 @@ pub enum BuiltinFunction {
     Log2,
     Log10,
     Ln,
+    Ln1p,
     Exp,
     Exp2,
     Exp10,
@@ -98,6 +99,7 @@ impl BuiltinFunction {
             BuiltinFunction::Log2 => BFPointer::Single(N::log2),
             BuiltinFunction::Log10 => BFPointer::Single(N::log10),
             BuiltinFunction::Ln => BFPointer::Single(N::ln),
+            BuiltinFunction::Ln1p => BFPointer::Single(N::ln_1p),
             BuiltinFunction::Exp => BFPointer::Single(N::exp),
             BuiltinFunction::Exp2 => BFPointer::Single(N::exp2),
             BuiltinFunction::Exp10 => BFPointer::Single(N::exp10),
@@ -184,6 +186,7 @@ impl BuiltinFunction {
             BuiltinFunction::Log2 => "log2",
             BuiltinFunction::Log10 => "log10",
             BuiltinFunction::Ln => "ln",
+            BuiltinFunction::Ln1p => "ln1p",
             BuiltinFunction::Exp => "exp",
             BuiltinFunction::Exp2 => "exp2",
             BuiltinFunction::Exp10 => "exp10",
@@ -205,7 +208,7 @@ impl BuiltinFunction {
     }
 }
 
-static BUILTIN_FUNCS_TRIE_NODES: [TrieNode; 128] = [
+static BUILTIN_FUNCS_TRIE_NODES: [TrieNode; 131] = [
     TrieNode::Branch('a', 19),
     TrieNode::Branch('b', 2),
     TrieNode::Branch('s', 1),
@@ -277,7 +280,7 @@ static BUILTIN_FUNCS_TRIE_NODES: [TrieNode; 128] = [
     TrieNode::Branch('m', 2),
     TrieNode::Branch('a', 1),
     TrieNode::Leaf(BuiltinFunction::Gamma as u32),
-    TrieNode::Branch('l', 19),
+    TrieNode::Branch('l', 22),
     TrieNode::Branch('b', 1),
     TrieNode::Leaf(BuiltinFunction::Log2 as u32),
     TrieNode::Branch('g', 6),
@@ -287,8 +290,11 @@ static BUILTIN_FUNCS_TRIE_NODES: [TrieNode; 128] = [
     TrieNode::Branch('m', 2),
     TrieNode::Branch('a', 1),
     TrieNode::Leaf(BuiltinFunction::Lgamma as u32),
-    TrieNode::Branch('n', 1),
+    TrieNode::Branch('n', 4),
     TrieNode::Leaf(BuiltinFunction::Ln as u32),
+    TrieNode::Branch('p', 2),
+    TrieNode::Branch('1', 1),
+    TrieNode::Leaf(BuiltinFunction::Ln1p as u32),
     TrieNode::Branch('o', 7),
     TrieNode::Branch('g', 6),
     TrieNode::Leaf(BuiltinFunction::Log as u32),
@@ -403,6 +409,7 @@ pub trait Number:
     fn log2(self) -> Self;
     fn log10(self) -> Self;
     fn ln(self) -> Self;
+    fn ln_1p(self) -> Self;
     fn exp(self) -> Self;
     fn exp2(self) -> Self;
     fn exp10(self) -> Self;

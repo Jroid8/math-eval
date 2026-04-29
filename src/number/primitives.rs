@@ -142,6 +142,10 @@ macro_rules! impl_primitive {
                 self.ln()
             }
 
+            fn ln_1p(self) -> Self {
+                self.ln_1p()
+            }
+
             fn exp(self) -> Self {
                 self.exp()
             }

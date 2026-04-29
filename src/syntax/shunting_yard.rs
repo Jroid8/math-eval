@@ -178,6 +178,7 @@ pub(super) enum SynoArg<N> {
     Erf(N),
     Exp(N),
     Gamma(N),
+    OnePlus(N),
 }
 
 impl<N: Number> SynoArg<N> {
@@ -188,6 +189,7 @@ impl<N: Number> SynoArg<N> {
             SynoArg::Erf(num) => num.erf(),
             SynoArg::Exp(num) => num.exp(),
             SynoArg::Gamma(num) => num.gamma(),
+            SynoArg::OnePlus(num) => num + N::one().asarg(),
         }
     }
 }
@@ -254,6 +256,13 @@ where
                     }
                 })
             }
+            SyOperator::BinaryOp(BinaryOp::Add) => match (self.args_pop()?, self.args_pop()?) {
+                (SynoArg::Number(y), x) if N::is_one(y.asarg()) => SynoArg::OnePlus(x.eval()),
+                (y, x) => {
+                    let y = y.eval();
+                    SynoArg::Number(x.eval() + y.asarg())
+                }
+            },
             SyOperator::BinaryOp(BinaryOp::Pow) => {
                 let exp = dbg!(self.args_pop()?).eval();
                 let base = dbg!(self.args_pop()?).eval();
@@ -290,9 +299,9 @@ where
             SyOperator::FuncNoParen(FunctionType::Builtin(BuiltinFunction::Ln)) => {
                 SynoArg::Number(match self.args_pop()? {
                     SynoArg::Gamma(num) => num.lgamma(),
-                    SynoArg::Erf(num) => num.erf().ln(),
-                    SynoArg::Number(num) => num.ln(),
                     SynoArg::Exp(num) => num,
+                    SynoArg::OnePlus(x) => x.ln_1p(),
+                    arg => arg.eval().ln(),
                 })
             }
             SyOperator::FuncNoParen(FunctionType::Builtin(bf)) => {
@@ -339,9 +348,9 @@ where
             AstNode::Function(FunctionType::Builtin(BuiltinFunction::Ln), _) => {
                 SynoArg::Number(match self.args_pop()? {
                     SynoArg::Gamma(num) => num.lgamma(),
-                    SynoArg::Erf(num) => num.erf().ln(),
-                    SynoArg::Number(num) => num.ln(),
                     SynoArg::Exp(num) => num,
+                    SynoArg::OnePlus(x) => x.ln_1p(),
+                    arg => arg.eval().ln(),
                 })
             }
             AstNode::Function(FunctionType::Builtin(BuiltinFunction::Log), _) => {
