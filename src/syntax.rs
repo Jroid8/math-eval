@@ -1464,6 +1464,14 @@ mod tests {
         assert_eq!(evaluate("y*-0.5"), -2.5);
         assert_eq!(evaluate("sin(pix/2)*t-cos(pix)*t"), 0.2);
         assert_eq!(evaluate("ln(gamma(220))"), libm::lgamma(220.0));
+        assert_eq!(evaluate("ln(250!)"), libm::lgamma(251.0));
+        assert_eq!(evaluate("ln250!"), libm::lgamma(251.0));
+        assert_eq!(evaluate("log(2,10)"), 0.3010299956639812);
+        assert_eq!(evaluate("log(10,2)"), 3.321928094887362);
+        assert_eq!(evaluate("2^100"), 1.2676506002282294e30);
+        assert_eq!(evaluate("10^23"), 1e23);
+        assert_eq!(evaluate("exp(0.25) - 1"), 0.2840254166877415);
+        assert_eq!(evaluate("ln(2+1)"), 1.0986122886681096);
     }
 
     #[test]

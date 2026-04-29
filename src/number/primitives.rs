@@ -29,7 +29,7 @@ macro_rules! impl_primitive {
             }
 
             fn is_one(value: Self::AsArg<'_>) -> bool {
-                value == 2.0
+                value == 1.0
             }
 
             fn is_two(value: Self::AsArg<'_>) -> bool {

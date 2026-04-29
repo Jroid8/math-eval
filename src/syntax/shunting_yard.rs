@@ -349,9 +349,9 @@ where
                 let base = base.asarg();
                 let num = self.args_pop()?.eval();
                 SynoArg::Number(if N::is_two(base) {
-                    num.log10()
-                } else if N::is_ten(base) {
                     num.log2()
+                } else if N::is_ten(base) {
+                    num.log10()
                 } else {
                     num.log(base)
                 })
