@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
-use std::marker::PhantomData;
 use std::mem;
 use std::num::NonZeroU8;
 use std::ops::RangeInclusive;
@@ -236,13 +235,7 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
         function_to_pointer: impl Fn(F) -> FunctionPointer<'b, N>,
     ) -> Result<N, SyntaxError> {
         parse_or_eval(
-            SyNumberOutput {
-                args: Vec::new(),
-                variable_store: variable_values,
-                cf2pointer: function_to_pointer,
-                var_ident: PhantomData,
-                func_ident: PhantomData,
-            },
+            SyNumberOutput::new(variable_values, function_to_pointer),
             ResolvedTkStream::new(&tokens, custom_variables, custom_functions)?,
             custom_constants,
             custom_functions,
@@ -936,7 +929,7 @@ mod tests {
             syntaxify("log(100)"),
             Ok(vec![
                 AstNode::Number(100.0),
-                AstNode::Function(BuiltinFunction::Log10.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1457,7 +1450,7 @@ mod tests {
         assert_eq!(evaluate("clamp(x, 0, 2)"), 1.0);
         assert_eq!(evaluate("digits(x, y, t, 9)/1000"), 9.061);
         assert_eq!(evaluate("lb(2048)"), 11.0);
-        assert_eq!(evaluate("log(1000000)"), 6.0);
+        assert_eq!(evaluate("log(99)"), 99f64.ln());
         assert_eq!(evaluate("lg(0.0001)"), -4.0);
         assert_eq!(evaluate("ln(e^23)"), 23.0);
         assert_eq!(evaluate("ln(cos(0))"), 0.0);
@@ -1470,6 +1463,7 @@ mod tests {
         assert_eq!(evaluate("x^2 + y^2"), 26.0);
         assert_eq!(evaluate("y*-0.5"), -2.5);
         assert_eq!(evaluate("sin(pix/2)*t-cos(pix)*t"), 0.2);
+        assert_eq!(evaluate("ln(gamma(220))"), libm::lgamma(220.0));
     }
 
     #[test]
