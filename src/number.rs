@@ -1,5 +1,4 @@
 use std::{
-    f64::consts::{E, PI, TAU},
     fmt::{Debug, Display},
     marker::PhantomData,
     num::NonZeroU8,
@@ -12,9 +11,11 @@ use strum::{EnumIter, FromRepr};
 use crate::{
     FunctionIdentifier as FuncId, nz,
     quick_expr::{CtxFuncPtr, MarkedFunc},
-    tokenizer::{NumberRecognizer, StandardFloatRecognizer},
+    tokenizer::NumberRecognizer,
     trie::{NameTrie, TrieNode},
 };
+
+mod primitives;
 
 #[cfg(debug_assertions)]
 use crate::quick_expr::FunctionSource;
@@ -33,15 +34,29 @@ pub enum BuiltinFunction {
     Cos,
     Tan,
     Cot,
+    Sinh,
+    Cosh,
+    Tanh,
+    Coth,
     Asin,
     Acos,
     Atan,
     Acot,
+    Atan2,
+    Asinh,
+    Acosh,
+    Atanh,
+    Acoth,
+    Erf,
+    Erfc,
     Log,
     Log2,
     Log10,
     Ln,
     Exp,
+    Exp2,
+    Exp10,
+    Expm1,
     Floor,
     Ceil,
     Round,
@@ -51,6 +66,8 @@ pub enum BuiltinFunction {
     Sign,
     Sqrt,
     Cbrt,
+    Gamma,
+    Lgamma,
     Max,
     Min,
 }
@@ -62,15 +79,29 @@ impl BuiltinFunction {
             BuiltinFunction::Cos => BFPointer::Single(N::cos),
             BuiltinFunction::Tan => BFPointer::Single(N::tan),
             BuiltinFunction::Cot => BFPointer::Single(N::cot),
+            BuiltinFunction::Sinh => BFPointer::Single(N::sinh),
+            BuiltinFunction::Cosh => BFPointer::Single(N::cosh),
+            BuiltinFunction::Tanh => BFPointer::Single(N::tanh),
+            BuiltinFunction::Coth => BFPointer::Single(N::coth),
             BuiltinFunction::Asin => BFPointer::Single(N::asin),
             BuiltinFunction::Acos => BFPointer::Single(N::acos),
             BuiltinFunction::Atan => BFPointer::Single(N::atan),
             BuiltinFunction::Acot => BFPointer::Single(N::acot),
+            BuiltinFunction::Atan2 => BFPointer::Dual(N::atan2),
+            BuiltinFunction::Asinh => BFPointer::Single(N::asinh),
+            BuiltinFunction::Acosh => BFPointer::Single(N::acosh),
+            BuiltinFunction::Atanh => BFPointer::Single(N::atanh),
+            BuiltinFunction::Acoth => BFPointer::Single(N::acoth),
+            BuiltinFunction::Erf => BFPointer::Single(N::erf),
+            BuiltinFunction::Erfc => BFPointer::Single(N::erfc),
             BuiltinFunction::Log => BFPointer::Dual(N::log),
             BuiltinFunction::Log2 => BFPointer::Single(N::log2),
             BuiltinFunction::Log10 => BFPointer::Single(N::log10),
             BuiltinFunction::Ln => BFPointer::Single(N::ln),
             BuiltinFunction::Exp => BFPointer::Single(N::exp),
+            BuiltinFunction::Exp2 => BFPointer::Single(N::exp2),
+            BuiltinFunction::Exp10 => BFPointer::Single(N::exp10),
+            BuiltinFunction::Expm1 => BFPointer::Single(N::exp_m1),
             BuiltinFunction::Floor => BFPointer::Single(N::floor),
             BuiltinFunction::Ceil => BFPointer::Single(N::ceil),
             BuiltinFunction::Round => BFPointer::Single(N::round),
@@ -80,12 +111,17 @@ impl BuiltinFunction {
             BuiltinFunction::Sign => BFPointer::Single(N::sign),
             BuiltinFunction::Sqrt => BFPointer::Single(N::sqrt),
             BuiltinFunction::Cbrt => BFPointer::Single(N::cbrt),
+            BuiltinFunction::Gamma => BFPointer::Single(N::gamma),
+            BuiltinFunction::Lgamma => BFPointer::Single(N::lgamma),
             BuiltinFunction::Max => BFPointer::Flexible(N::max),
             BuiltinFunction::Min => BFPointer::Flexible(N::min),
         }
     }
     #[allow(dead_code)]
-    pub(crate) fn as_markedfunc<N: Number, F: FuncId>(self, argc: NonZeroU8) -> MarkedFunc<'static, N, F> {
+    pub(crate) fn as_markedfunc<N: Number, F: FuncId>(
+        self,
+        argc: NonZeroU8,
+    ) -> MarkedFunc<'static, N, F> {
         match self.as_pointer::<N>() {
             BFPointer::Single(func) => MarkedFunc {
                 func: CtxFuncPtr::Single(func),
@@ -129,15 +165,29 @@ impl BuiltinFunction {
             BuiltinFunction::Cos => "cos",
             BuiltinFunction::Tan => "tan",
             BuiltinFunction::Cot => "cot",
+            BuiltinFunction::Sinh => "sinh",
+            BuiltinFunction::Cosh => "cosh",
+            BuiltinFunction::Tanh => "tanh",
+            BuiltinFunction::Coth => "coth",
             BuiltinFunction::Asin => "asin",
             BuiltinFunction::Acos => "acos",
             BuiltinFunction::Atan => "atan",
             BuiltinFunction::Acot => "acot",
+            BuiltinFunction::Atan2 => "atan2",
+            BuiltinFunction::Asinh => "asinh",
+            BuiltinFunction::Acosh => "acosh",
+            BuiltinFunction::Atanh => "atanh",
+            BuiltinFunction::Acoth => "acoth",
+            BuiltinFunction::Erf => "erf",
+            BuiltinFunction::Erfc => "erfc",
             BuiltinFunction::Log => "log",
             BuiltinFunction::Log2 => "log2",
             BuiltinFunction::Log10 => "log10",
             BuiltinFunction::Ln => "ln",
             BuiltinFunction::Exp => "exp",
+            BuiltinFunction::Exp2 => "exp2",
+            BuiltinFunction::Exp10 => "exp10",
+            BuiltinFunction::Expm1 => "expm1",
             BuiltinFunction::Floor => "floor",
             BuiltinFunction::Ceil => "ceil",
             BuiltinFunction::Round => "round",
@@ -147,107 +197,143 @@ impl BuiltinFunction {
             BuiltinFunction::Sign => "sign",
             BuiltinFunction::Sqrt => "sqrt",
             BuiltinFunction::Cbrt => "cbrt",
+            BuiltinFunction::Gamma => "gamma",
+            BuiltinFunction::Lgamma => "lgamma",
             BuiltinFunction::Max => "max",
             BuiltinFunction::Min => "min",
         }
     }
 }
 
-const BUILTIN_FUNCS_TRIE_NODES: [TrieNode; 94] = [
-    TrieNode::Branch('a', 17),
+static BUILTIN_FUNCS_TRIE_NODES: [TrieNode; 128] = [
+    TrieNode::Branch('a', 19),
     TrieNode::Branch('b', 2),
     TrieNode::Branch('s', 1),
-    TrieNode::Leaf(18),
+    TrieNode::Leaf(BuiltinFunction::Abs as u32),
     TrieNode::Branch('c', 5),
     TrieNode::Branch('o', 4),
     TrieNode::Branch('s', 1),
-    TrieNode::Leaf(5),
+    TrieNode::Leaf(BuiltinFunction::Acos as u32),
     TrieNode::Branch('t', 1),
-    TrieNode::Leaf(7),
+    TrieNode::Leaf(BuiltinFunction::Acot as u32),
     TrieNode::Branch('s', 3),
     TrieNode::Branch('i', 2),
     TrieNode::Branch('n', 1),
-    TrieNode::Leaf(4),
-    TrieNode::Branch('t', 3),
-    TrieNode::Branch('a', 2),
-    TrieNode::Branch('n', 1),
-    TrieNode::Leaf(6),
-    TrieNode::Branch('c', 13),
+    TrieNode::Leaf(BuiltinFunction::Asin as u32),
+    TrieNode::Branch('t', 5),
+    TrieNode::Branch('a', 4),
+    TrieNode::Branch('n', 3),
+    TrieNode::Leaf(BuiltinFunction::Atan as u32),
+    TrieNode::Branch('2', 1),
+    TrieNode::Leaf(BuiltinFunction::Atan2 as u32),
+    TrieNode::Branch('c', 17),
     TrieNode::Branch('b', 3),
     TrieNode::Branch('r', 2),
     TrieNode::Branch('t', 1),
-    TrieNode::Leaf(21),
+    TrieNode::Leaf(BuiltinFunction::Cbrt as u32),
     TrieNode::Branch('e', 3),
     TrieNode::Branch('i', 2),
     TrieNode::Branch('l', 1),
-    TrieNode::Leaf(14),
-    TrieNode::Branch('o', 4),
-    TrieNode::Branch('s', 1),
-    TrieNode::Leaf(1),
-    TrieNode::Branch('t', 1),
-    TrieNode::Leaf(3),
-    TrieNode::Branch('e', 3),
-    TrieNode::Branch('x', 2),
-    TrieNode::Branch('p', 1),
-    TrieNode::Leaf(12),
+    TrieNode::Leaf(BuiltinFunction::Ceil as u32),
+    TrieNode::Branch('o', 8),
+    TrieNode::Branch('s', 3),
+    TrieNode::Leaf(BuiltinFunction::Cos as u32),
+    TrieNode::Branch('h', 1),
+    TrieNode::Leaf(BuiltinFunction::Cosh as u32),
+    TrieNode::Branch('t', 3),
+    TrieNode::Leaf(BuiltinFunction::Cot as u32),
+    TrieNode::Branch('h', 1),
+    TrieNode::Leaf(BuiltinFunction::Coth as u32),
+    TrieNode::Branch('e', 16),
+    TrieNode::Branch('r', 4),
+    TrieNode::Branch('f', 3),
+    TrieNode::Leaf(BuiltinFunction::Erf as u32),
+    TrieNode::Branch('c', 1),
+    TrieNode::Leaf(BuiltinFunction::Erfc as u32),
+    TrieNode::Branch('x', 10),
+    TrieNode::Branch('p', 9),
+    TrieNode::Leaf(BuiltinFunction::Exp as u32),
+    TrieNode::Branch('1', 2),
+    TrieNode::Branch('0', 1),
+    TrieNode::Leaf(BuiltinFunction::Exp10 as u32),
+    TrieNode::Branch('2', 1),
+    TrieNode::Leaf(BuiltinFunction::Exp2 as u32),
+    TrieNode::Branch('m', 2),
+    TrieNode::Branch('1', 1),
+    TrieNode::Leaf(BuiltinFunction::Expm1 as u32),
     TrieNode::Branch('f', 9),
     TrieNode::Branch('l', 4),
     TrieNode::Branch('o', 3),
     TrieNode::Branch('o', 2),
     TrieNode::Branch('r', 1),
-    TrieNode::Leaf(13),
+    TrieNode::Leaf(BuiltinFunction::Floor as u32),
     TrieNode::Branch('r', 3),
     TrieNode::Branch('a', 2),
     TrieNode::Branch('c', 1),
-    TrieNode::Leaf(17),
-    TrieNode::Branch('l', 14),
+    TrieNode::Leaf(BuiltinFunction::Frac as u32),
+    TrieNode::Branch('g', 5),
+    TrieNode::Branch('a', 4),
+    TrieNode::Branch('m', 3),
+    TrieNode::Branch('m', 2),
+    TrieNode::Branch('a', 1),
+    TrieNode::Leaf(BuiltinFunction::Gamma as u32),
+    TrieNode::Branch('l', 19),
     TrieNode::Branch('b', 1),
-    TrieNode::Leaf(9),
-    TrieNode::Branch('g', 1),
-    TrieNode::Leaf(10),
+    TrieNode::Leaf(BuiltinFunction::Log2 as u32),
+    TrieNode::Branch('g', 6),
+    TrieNode::Leaf(BuiltinFunction::Log10 as u32),
+    TrieNode::Branch('a', 4),
+    TrieNode::Branch('m', 3),
+    TrieNode::Branch('m', 2),
+    TrieNode::Branch('a', 1),
+    TrieNode::Leaf(BuiltinFunction::Lgamma as u32),
     TrieNode::Branch('n', 1),
-    TrieNode::Leaf(11),
+    TrieNode::Leaf(BuiltinFunction::Ln as u32),
     TrieNode::Branch('o', 7),
     TrieNode::Branch('g', 6),
-    TrieNode::Leaf(8),
+    TrieNode::Leaf(BuiltinFunction::Log as u32),
     TrieNode::Branch('1', 2),
     TrieNode::Branch('0', 1),
-    TrieNode::Leaf(10),
+    TrieNode::Leaf(BuiltinFunction::Log10 as u32),
     TrieNode::Branch('2', 1),
-    TrieNode::Leaf(9),
+    TrieNode::Leaf(BuiltinFunction::Log2 as u32),
     TrieNode::Branch('m', 6),
     TrieNode::Branch('a', 2),
     TrieNode::Branch('x', 1),
-    TrieNode::Leaf(22),
+    TrieNode::Leaf(BuiltinFunction::Max as u32),
     TrieNode::Branch('i', 2),
     TrieNode::Branch('n', 1),
-    TrieNode::Leaf(23),
+    TrieNode::Leaf(BuiltinFunction::Min as u32),
     TrieNode::Branch('r', 5),
     TrieNode::Branch('o', 4),
     TrieNode::Branch('u', 3),
     TrieNode::Branch('n', 2),
     TrieNode::Branch('d', 1),
-    TrieNode::Leaf(15),
-    TrieNode::Branch('s', 10),
-    TrieNode::Branch('i', 5),
+    TrieNode::Leaf(BuiltinFunction::Round as u32),
+    TrieNode::Branch('s', 12),
+    TrieNode::Branch('i', 7),
     TrieNode::Branch('g', 2),
     TrieNode::Branch('n', 1),
-    TrieNode::Leaf(19),
-    TrieNode::Branch('n', 1),
-    TrieNode::Leaf(0),
+    TrieNode::Leaf(BuiltinFunction::Sign as u32),
+    TrieNode::Branch('n', 3),
+    TrieNode::Leaf(BuiltinFunction::Sin as u32),
+    TrieNode::Branch('h', 1),
+    TrieNode::Leaf(BuiltinFunction::Sinh as u32),
     TrieNode::Branch('q', 3),
     TrieNode::Branch('r', 2),
     TrieNode::Branch('t', 1),
-    TrieNode::Leaf(20),
-    TrieNode::Branch('t', 8),
-    TrieNode::Branch('a', 2),
-    TrieNode::Branch('n', 1),
-    TrieNode::Leaf(2),
+    TrieNode::Leaf(BuiltinFunction::Sqrt as u32),
+    TrieNode::Branch('t', 10),
+    TrieNode::Branch('a', 4),
+    TrieNode::Branch('n', 3),
+    TrieNode::Leaf(BuiltinFunction::Tan as u32),
+    TrieNode::Branch('h', 1),
+    TrieNode::Leaf(BuiltinFunction::Tanh as u32),
     TrieNode::Branch('r', 4),
     TrieNode::Branch('u', 3),
     TrieNode::Branch('n', 2),
     TrieNode::Branch('c', 1),
-    TrieNode::Leaf(16),
+    TrieNode::Leaf(BuiltinFunction::Trunc as u32),
 ];
 
 pub struct BuiltinFuncsNameTrie;
@@ -274,7 +360,6 @@ pub trait Number:
     + for<'a> Div<Self::AsArg<'a>, Output = Self>
     + Neg<Output = Self>
     + PartialEq
-    + From<i32>
     + FromStr
     + Clone
     + Debug
@@ -286,41 +371,60 @@ pub trait Number:
 
     const CONSTS_NAME_TRIE: Self::ConstsNameTrieType;
 
+    fn one() -> Self;
+    fn zero() -> Self;
+    fn is_one(value: Self::AsArg<'_>) -> bool;
     fn is_two(value: Self::AsArg<'_>) -> bool;
     fn is_ten(value: Self::AsArg<'_>) -> bool;
     fn asarg(&self) -> Self::AsArg<'_>;
 
-    fn modulo(value: Self, rhs: Self::AsArg<'_>) -> Self;
-    fn pow(value: Self, rhs: Self::AsArg<'_>) -> Self;
-    fn sin(value: Self) -> Self;
-    fn cos(value: Self) -> Self;
-    fn tan(value: Self) -> Self;
-    fn cot(value: Self) -> Self;
-    fn asin(value: Self) -> Self;
-    fn acos(value: Self) -> Self;
-    fn atan(value: Self) -> Self;
-    fn acot(value: Self) -> Self;
-    fn log(value: Self, base: Self::AsArg<'_>) -> Self;
-    fn log2(value: Self) -> Self;
-    fn log10(value: Self) -> Self;
-    fn ln(value: Self) -> Self;
-    fn exp(value: Self) -> Self;
-    fn floor(value: Self) -> Self;
-    fn ceil(value: Self) -> Self;
-    fn round(value: Self) -> Self;
-    fn trunc(value: Self) -> Self;
-    fn frac(value: Self) -> Self;
-    fn abs(value: Self) -> Self;
-    fn sign(value: Self) -> Self;
-    fn sqrt(value: Self) -> Self;
-    fn cbrt(value: Self) -> Self;
-    fn max(value: &[Self]) -> Self;
-    fn min(value: &[Self]) -> Self;
-    fn factorial(value: Self) -> Self;
-    fn double_factorial(value: Self) -> Self;
+    fn modulo(self, rhs: Self::AsArg<'_>) -> Self;
+    fn pow(self, rhs: Self::AsArg<'_>) -> Self;
+    fn sin(self) -> Self;
+    fn cos(self) -> Self;
+    fn tan(self) -> Self;
+    fn cot(self) -> Self;
+    fn sinh(self) -> Self;
+    fn cosh(self) -> Self;
+    fn tanh(self) -> Self;
+    fn coth(self) -> Self;
+    fn asin(self) -> Self;
+    fn acos(self) -> Self;
+    fn atan(self) -> Self;
+    fn acot(self) -> Self;
+    fn atan2(self, y: Self::AsArg<'_>) -> Self;
+    fn asinh(self) -> Self;
+    fn acosh(self) -> Self;
+    fn atanh(self) -> Self;
+    fn acoth(self) -> Self;
+    fn erf(self) -> Self;
+    fn erfc(self) -> Self;
+    fn log(self, base: Self::AsArg<'_>) -> Self;
+    fn log2(self) -> Self;
+    fn log10(self) -> Self;
+    fn ln(self) -> Self;
+    fn exp(self) -> Self;
+    fn exp2(self) -> Self;
+    fn exp10(self) -> Self;
+    fn exp_m1(self) -> Self;
+    fn floor(self) -> Self;
+    fn ceil(self) -> Self;
+    fn round(self) -> Self;
+    fn trunc(self) -> Self;
+    fn frac(self) -> Self;
+    fn abs(self) -> Self;
+    fn sign(self) -> Self;
+    fn sqrt(self) -> Self;
+    fn cbrt(self) -> Self;
+    fn lgamma(self) -> Self;
+    fn gamma(self) -> Self;
+    fn factorial(self) -> Self;
+    fn double_factorial(self) -> Self;
+    fn max(values: &[Self]) -> Self;
+    fn min(values: &[Self]) -> Self;
 }
 
-const STD_FLOAT_CONSTS_TRIE_NODES: [TrieNode; 9] = [
+static STD_FLOAT_CONSTS_TRIE_NODES: [TrieNode; 9] = [
     TrieNode::Branch('p', 2),
     TrieNode::Branch('i', 1),
     TrieNode::Leaf(0),
@@ -350,175 +454,5 @@ impl<F> NameTrie<&'static F> for StdFloatConstsNameTrie<F> {
             2 => self.tau,
             _ => unreachable!(),
         }
-    }
-}
-
-impl Number for f64 {
-    type AsArg<'a> = f64;
-    type Recognizer = StandardFloatRecognizer;
-    type ConstsNameTrieType = StdFloatConstsNameTrie<f64>;
-
-    const CONSTS_NAME_TRIE: StdFloatConstsNameTrie<f64> = StdFloatConstsNameTrie {
-        pi: &PI,
-        e: &E,
-        tau: &TAU,
-    };
-
-    fn asarg(&self) -> Self::AsArg<'_> {
-        *self
-    }
-
-    fn is_two(value: Self::AsArg<'_>) -> bool {
-        value == 2.0
-    }
-
-    fn is_ten(value: Self::AsArg<'_>) -> bool {
-        value == 10.0
-    }
-
-    fn pow(value: Self, rhs: Self) -> Self {
-        value.powf(rhs)
-    }
-
-    fn modulo(value: Self, rhs: Self) -> Self {
-        value.rem_euclid(rhs)
-    }
-
-    fn sin(value: Self) -> Self {
-        value.sin()
-    }
-
-    fn cos(value: Self) -> Self {
-        value.cos()
-    }
-
-    fn tan(value: Self) -> Self {
-        value.tan()
-    }
-
-    fn cot(value: Self) -> Self {
-        // FIX: replace with a more accurate version
-        let (sin, cos) = value.sin_cos();
-        cos / sin
-    }
-
-    fn asin(value: Self) -> Self {
-        value.asin()
-    }
-
-    fn acos(value: Self) -> Self {
-        value.acos()
-    }
-
-    fn atan(value: Self) -> Self {
-        value.atan()
-    }
-
-    fn acot(value: Self) -> Self {
-        (-value).atan() + std::f64::consts::FRAC_PI_2
-    }
-
-    fn log(value: Self, base: Self) -> Self {
-        value.log(base)
-    }
-
-    fn log2(value: Self) -> Self {
-        value.log2()
-    }
-
-    fn log10(value: Self) -> Self {
-        value.log10()
-    }
-
-    fn ln(value: Self) -> Self {
-        value.ln()
-    }
-
-    fn exp(value: Self) -> Self {
-        value.exp()
-    }
-
-    fn floor(value: Self) -> Self {
-        value.floor()
-    }
-
-    fn ceil(value: Self) -> Self {
-        value.ceil()
-    }
-
-    fn round(value: Self) -> Self {
-        value.round()
-    }
-
-    fn trunc(value: Self) -> Self {
-        value.trunc()
-    }
-
-    fn frac(value: Self) -> Self {
-        value.fract()
-    }
-
-    fn abs(value: Self) -> Self {
-        value.abs()
-    }
-
-    fn sign(value: Self) -> Self {
-        match value.partial_cmp(&0.0) {
-            Some(cmp) => match cmp {
-                std::cmp::Ordering::Less => -1.0,
-                std::cmp::Ordering::Equal => 0.0,
-                std::cmp::Ordering::Greater => 1.0,
-            },
-            None => value,
-        }
-    }
-
-    fn sqrt(value: Self) -> Self {
-        value.sqrt()
-    }
-
-    fn cbrt(value: Self) -> Self {
-        value.cbrt()
-    }
-
-    fn max(value: &[Self]) -> Self {
-        value.iter().copied().fold(f64::MIN, f64::max)
-    }
-
-    fn min(value: &[Self]) -> Self {
-        value.iter().copied().fold(f64::MAX, f64::min)
-    }
-
-    fn factorial(value: Self) -> Self {
-        // FIX: replace with gamma function
-        if value.is_infinite() || value < 0.0 || value.is_nan() {
-            return f64::NAN;
-        }
-        if value >= 171.0 {
-            return f64::INFINITY;
-        }
-        let mut result = 1.0;
-        let mut k = value as u32;
-        while k > 1 {
-            result *= k as f64;
-            k -= 1;
-        }
-        result
-    }
-
-    fn double_factorial(value: Self) -> Self {
-        if value.is_infinite() || value < 0.0 || value.is_nan() {
-            return f64::NAN;
-        }
-        if value >= 301.0 {
-            return f64::INFINITY;
-        }
-        let mut result = 1.0;
-        let mut k = value as u32;
-        while k > 1 {
-            result *= k as f64;
-            k -= 2;
-        }
-        result
     }
 }

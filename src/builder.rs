@@ -551,7 +551,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_fn1("f1", |_| 0.0)
                 .add_fn2("f2", |_, _| 1.0),
             [].into_iter(),
@@ -565,7 +565,7 @@ mod tests {
 
         let one = String::from("1");
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_dyn_fn1("f1", &|_| zero.parse().unwrap())
                 .add_dyn_fn2("f2", &|_, _| one.parse().unwrap()),
             [].into_iter(),
@@ -578,7 +578,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_dyn_fn2("f2", &|_, _| zero.parse().unwrap())
                 .add_fn3("f3", |_, _, _| 1.0),
             [].into_iter(),
@@ -591,7 +591,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_fn2("f2", |_, _| 0.0)
                 .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
                 .add_fn_flex("ff", nz!(3), None, |_| 2.0),
@@ -607,7 +607,7 @@ mod tests {
 
         let two = String::from("2");
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_variable("t")
                 .add_fn2("f2", |_, _| 0.0)
                 .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
@@ -623,21 +623,21 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new().add_variable("y").add_variable("x"),
+            EvalBuilder::<'_, '_, '_, f64>::new().add_variable("y").add_variable("x"),
             [].into_iter(),
             [].into_iter(),
             TwoVariables([("y", 0), ("x", 1)]),
         ));
 
         test!(compare(
-            EvalBuilder::new().add_variable("y").add_variable("x"),
+            EvalBuilder::<'_, '_, '_, f64>::new().add_variable("y").add_variable("x"),
             [].into_iter(),
             [].into_iter(),
             TwoVariables([("y", 0), ("x", 1)]),
         ));
 
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_variable("y")
                 .add_dyn_fn2("f2", &|_, _| zero.parse().unwrap())
                 .add_variable("x")
@@ -654,7 +654,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_variable("y")
                 .add_variable("x")
                 .add_variable("z"),
@@ -664,7 +664,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_fn3("f0", |_, _, _| 0.0)
                 .add_variable("y")
                 .add_fn3("f1", |_, _, _| 1.0)
@@ -684,7 +684,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_variable("y")
                 .add_variable("x")
                 .add_variable("z")
@@ -696,7 +696,7 @@ mod tests {
 
         let three = String::from("3");
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_dyn_fn1("f0", &|_| zero.parse().unwrap())
                 .add_variable("y")
                 .add_constant("c", &9.999999)
@@ -720,7 +720,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_variable("y")
                 .add_variable("x")
                 .add_variable("z")
@@ -732,7 +732,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_fn1("f0", |_| 0.0)
                 .add_variable("y")
                 .add_constant("c", &9.999999)
@@ -761,7 +761,7 @@ mod tests {
 
         let four = String::from("4");
         test!(compare(
-            EvalBuilder::new()
+            EvalBuilder::<'_, '_, '_, f64>::new()
                 .add_dyn_fn1("f0", &|_| zero.parse().unwrap())
                 .add_variable("y")
                 .add_constant("c", &9.999999)

@@ -456,8 +456,8 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
         symbol_space: &mut SubtreeCollection<AstNode<N, V, F>>,
     ) {
         let (positive, negative, mut lhs) = match head_opr {
-            BinaryOp::Add | BinaryOp::Sub => (BinaryOp::Add, BinaryOp::Sub, N::from(0)),
-            BinaryOp::Mul | BinaryOp::Div => (BinaryOp::Mul, BinaryOp::Div, N::from(1)),
+            BinaryOp::Add | BinaryOp::Sub => (BinaryOp::Add, BinaryOp::Sub, N::zero()),
+            BinaryOp::Mul | BinaryOp::Div => (BinaryOp::Mul, BinaryOp::Div, N::one()),
             _ => return,
         };
         let apply_pos = |parent: BinaryOp, pos: usize| -> BinaryOp {
@@ -528,7 +528,7 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
     }
 }
 
-pub fn parenthesis_required<N: Number, V: VarId, F: FuncId>(
+fn parenthesis_required<N: Number, V: VarId, F: FuncId>(
     tree: &PostfixTree<AstNode<N, V, F>>,
     parent: usize,
     target: usize,
