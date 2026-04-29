@@ -357,6 +357,7 @@ pub fn compile<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
         custom_variables,
     )
     .map_err(|e| e.to_general(input, &token_stream.0))?;
+    syntax_tree.use_stable_functions();
     syntax_tree.aot_evaluation(&function_to_pointer);
     syntax_tree.displacing_simplification();
     Ok(QuickExpr::new(syntax_tree, function_to_pointer))

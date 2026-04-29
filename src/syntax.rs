@@ -14,7 +14,7 @@ use crate::tokenizer::Token;
 use crate::trie::NameTrie;
 use crate::{
     Associativity, BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, ParsingError,
-    ParsingErrorKind, UnaryOp, VariableIdentifier as VarId, VariableStore,
+    ParsingErrorKind, UnaryOp, VariableIdentifier as VarId, VariableStore, nz,
 };
 use shunting_yard::{SyAstOutput, SyNumberOutput, parse_or_eval};
 
@@ -354,6 +354,173 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
             stack.push(result);
         }
         stack.pop().ok_or(0)
+    }
+
+    pub fn use_stable_functions(&mut self) {
+        macro_rules! log_detector {
+            ($is_base: expr, $node: expr) => {
+                (
+                    &|target, tree| {
+                        if matches!(
+                            tree[target],
+                            AstNode::Function(FunctionType::Builtin(BuiltinFunction::Log), _)
+                        ) {
+                            let mut children = tree.children_iter(target);
+                            match children.next().unwrap() {
+                                (AstNode::Number(base), _) if $is_base(base.asarg()) => {
+                                    Some(children.next().unwrap().1)
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    },
+                    AstNode::Function($node.into(), nz!(1)),
+                )
+            };
+        }
+        macro_rules! exp_detector {
+            ($is_base: expr, $node: expr) => {
+                (
+                    &|target, tree| {
+                        if matches!(tree[target], AstNode::BinaryOp(BinaryOp::Pow)) {
+                            let mut children = tree.children_iter(target);
+                            let idx = children.next().unwrap().1;
+                            match children.next().unwrap() {
+                                (AstNode::Number(base), _) if $is_base(base.asarg()) => Some(idx),
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    },
+                    AstNode::Function($node.into(), nz!(1)),
+                )
+            };
+        }
+        let detrep_pairs: [(
+            &dyn Fn(usize, &PostfixTree<AstNode<N, V, F>>) -> Option<usize>,
+            AstNode<N, V, F>,
+        ); _] = [
+            (
+                &|target, tree: &PostfixTree<AstNode<N, V, F>>| {
+                    if matches!(tree[target], AstNode::BinaryOp(BinaryOp::Sub)) {
+                        let mut children = tree.children_iter(target);
+                        match (children.next().unwrap(), children.next().unwrap()) {
+                            (
+                                (
+                                    AstNode::Function(
+                                        FunctionType::Builtin(BuiltinFunction::Erf),
+                                        _,
+                                    ),
+                                    idx,
+                                ),
+                                (AstNode::Number(lhs), _),
+                            ) if N::is_one(lhs.asarg()) => {
+                                Some(tree.children_iter(idx).next().unwrap().1)
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                },
+                AstNode::Function(BuiltinFunction::Erfc.into(), nz!(1)),
+            ),
+            log_detector!(N::is_ten, BuiltinFunction::Log10),
+            log_detector!(N::is_two, BuiltinFunction::Log2),
+            exp_detector!(N::is_ten, BuiltinFunction::Exp10),
+            exp_detector!(N::is_two, BuiltinFunction::Exp2),
+            (
+                &|target, tree| {
+                    if matches!(tree[target], AstNode::BinaryOp(BinaryOp::Sub)) {
+                        let mut children = tree.children_iter(target);
+                        match (children.next().unwrap(), children.next().unwrap()) {
+                            (
+                                (AstNode::Number(rhs), _),
+                                (
+                                    AstNode::Function(
+                                        FunctionType::Builtin(BuiltinFunction::Exp),
+                                        _,
+                                    ),
+                                    idx,
+                                ),
+                            ) if N::is_one(rhs.asarg()) => {
+                                Some(tree.children_iter(idx).next().unwrap().1)
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                },
+                AstNode::Function(BuiltinFunction::Expm1.into(), nz!(1)),
+            ),
+            (
+                &|target, tree| {
+                    if matches!(
+                        tree[target],
+                        AstNode::Function(FunctionType::Builtin(BuiltinFunction::Ln), _)
+                    ) {
+                        let (child_node, child_idx) = tree.children_iter(target).next().unwrap();
+                        if matches!(child_node, AstNode::BinaryOp(BinaryOp::Add)) {
+                            let mut children = tree.children_iter(child_idx);
+                            match (children.next().unwrap(), children.next().unwrap()) {
+                                ((AstNode::Number(num), _), (_, idx))
+                                | ((_, idx), (AstNode::Number(num), _))
+                                    if N::is_one(num.asarg()) =>
+                                {
+                                    Some(idx)
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                },
+                AstNode::Function(BuiltinFunction::Ln1p.into(), nz!(1)),
+            ),
+            (
+                &|target, tree| {
+                    if matches!(
+                        tree[target],
+                        AstNode::Function(FunctionType::Builtin(BuiltinFunction::Ln), _)
+                    ) {
+                        let (child_node, child_idx) = tree.children_iter(target).next().unwrap();
+                        if matches!(
+                            child_node,
+                            AstNode::Function(FunctionType::Builtin(BuiltinFunction::Gamma), _)
+                        ) {
+                            Some(tree.children_iter(child_idx).next().unwrap().1)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                },
+                AstNode::Function(BuiltinFunction::Lgamma.into(), nz!(1)),
+            ),
+        ];
+        let mut symbol_space: SubtreeCollection<AstNode<N, V, F>> =
+            SubtreeCollection::from_alloc(Vec::with_capacity(0));
+        let mut idx = 2;
+        while idx < self.0.len() {
+            for (detector, replacement) in &detrep_pairs {
+                if let Some(param) = detector(idx, &self.0) {
+                    symbol_space.extend_from_tree(&self.0, param);
+                    symbol_space.push(replacement.clone()).unwrap();
+                    let sc_head = symbol_space.len() - 1;
+                    self.0.replace_from_sc_move(idx, &mut symbol_space, sc_head);
+                    break;
+                };
+            }
+            idx += 1;
+        }
     }
 
     pub fn aot_evaluation<'a>(
@@ -1729,6 +1896,150 @@ mod tests {
                 AstNode::BinaryOp(BinaryOp::Sub),
             ]
         )
+    }
+
+    #[test]
+    fn use_stable_functions() {
+        let usf = |nodes: &[AstNode<f64, TestVar, TestFunc>]| {
+            let mut ast = MathAst::from_nodes(nodes.iter().copied());
+            ast.use_stable_functions();
+            ast.0.postorder_iter().cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(
+            usf(&[
+                AstNode::Number(1.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Erf.into(), nz!(1)),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]),
+            vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Erfc.into(), nz!(1)),
+            ]
+        );
+        assert_eq!(
+            usf(&[
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Gamma.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(BuiltinFunction::Gamma.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Variable(TestVar::X),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Function(BuiltinFunction::Gamma.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Function(BuiltinFunction::Exp.into(), nz!(1))
+            ]),
+            vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Lgamma.into(), nz!(1)),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(BuiltinFunction::Lgamma.into(), nz!(1)),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Variable(TestVar::X),
+                AstNode::Variable(TestVar::Y),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Function(BuiltinFunction::Lgamma.into(), nz!(1)),
+                AstNode::BinaryOp(BinaryOp::Sub),
+                AstNode::Function(BuiltinFunction::Exp.into(), nz!(1))
+            ]
+        );
+        assert_eq!(
+            usf(&[
+                AstNode::Variable(TestVar::X),
+                AstNode::Number(2.0),
+                AstNode::Function(BuiltinFunction::Log.into(), nz!(2)),
+            ]),
+            vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Log2.into(), nz!(1)),
+            ]
+        );
+        assert_eq!(
+            usf(&[
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
+                AstNode::Number(2.0),
+                AstNode::Function(BuiltinFunction::Log.into(), nz!(2)),
+                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+            ]),
+            vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Log2.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+            ]
+        );
+        assert_eq!(
+            usf(&[
+                AstNode::Number(2.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::BinaryOp(BinaryOp::Pow),
+            ]),
+            vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Exp2.into(), nz!(1)),
+            ]
+        );
+        assert_eq!(
+            usf(&[
+                AstNode::Number(10.0),
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::BinaryOp(BinaryOp::Pow),
+            ]),
+            vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Exp10.into(), nz!(1)),
+            ]
+        );
+        assert_eq!(
+            usf(&[
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Exp.into(), nz!(1)),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Sub),
+            ]),
+            vec![
+                AstNode::Variable(TestVar::X),
+                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Expm1.into(), nz!(1)),
+            ]
+        );
+        assert_eq!(
+            usf(&[
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Number(1.0),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
+            ]),
+            vec![
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Ln1p.into(), nz!(1)),
+            ]
+        );
+        assert_eq!(
+            usf(&[
+                AstNode::Number(1.0),
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::BinaryOp(BinaryOp::Add),
+                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
+            ]),
+            vec![
+                AstNode::Variable(TestVar::Y),
+                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(BuiltinFunction::Ln1p.into(), nz!(1)),
+            ]
+        );
     }
 
     #[test]
