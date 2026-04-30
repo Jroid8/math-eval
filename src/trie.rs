@@ -6,7 +6,7 @@ pub enum TrieNode {
     Leaf(u32),
 }
 
-pub trait NameTrie<T: Copy>: Sized {
+pub trait NameTrie<T>: Sized {
     fn nodes(&self) -> &[TrieNode];
     fn leaf_to_value(&self, leaf: u32) -> T;
 
@@ -44,14 +44,14 @@ pub trait NameTrie<T: Copy>: Sized {
     }
 }
 
-pub struct TrieSearch<'a, T: Copy, R: NameTrie<T>> {
+pub struct TrieSearch<'a, T, R: NameTrie<T>> {
     trie: &'a R,
     idx: usize,
     end: usize,
     val_type: PhantomData<T>,
 }
 
-impl<'a, T: Copy, R: NameTrie<T>> TrieSearch<'a, T, R> {
+impl<'a, T, R: NameTrie<T>> TrieSearch<'a, T, R> {
     pub fn new(trie: &'a R) -> Self {
         Self {
             trie,
@@ -87,9 +87,9 @@ impl<'a, T: Copy, R: NameTrie<T>> TrieSearch<'a, T, R> {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct VecNameTrie<T: Copy>(Vec<TrieNode>, Vec<T>);
+pub struct VecNameTrie<T: Clone>(Vec<TrieNode>, Vec<T>);
 
-impl<T: Copy> VecNameTrie<T> {
+impl<T: Clone> VecNameTrie<T> {
     pub fn new(pairs: &mut [(&str, T)]) -> Self {
         pairs.sort_unstable_by_key(|x| x.0);
         Self::from_sorted_pairs(pairs)
@@ -106,7 +106,7 @@ impl<T: Copy> VecNameTrie<T> {
                 trie.push(TrieNode::Branch(ch, (first_cc - i) as u32));
             }
             trie.push(TrieNode::Leaf(0));
-            values.push(first.1);
+            values.push(first.1.clone());
             let mut leaf_idx = 0;
             let mut last = first;
             let mut last_cc = first_cc;
@@ -162,7 +162,7 @@ impl<T: Copy> VecNameTrie<T> {
                 }
                 leaf_idx += 1;
                 trie.push(TrieNode::Leaf(leaf_idx));
-                values.push(cur.1);
+                values.push(cur.1.clone());
 
                 last = cur;
                 last_cc = cur_cc;
@@ -172,7 +172,7 @@ impl<T: Copy> VecNameTrie<T> {
     }
 }
 
-impl<T: Copy + Debug> Debug for VecNameTrie<T> {
+impl<T: Clone + Debug> Debug for VecNameTrie<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("trie: [\n")?;
         for node in &self.0 {
@@ -185,19 +185,19 @@ impl<T: Copy + Debug> Debug for VecNameTrie<T> {
     }
 }
 
-impl<T: Copy> NameTrie<T> for VecNameTrie<T> {
+impl<T: Clone> NameTrie<T> for VecNameTrie<T> {
     fn nodes(&self) -> &[TrieNode] {
         &self.0
     }
     fn leaf_to_value(&self, leaf: u32) -> T {
-        self.1[leaf as usize]
+        self.1[leaf as usize].clone()
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct EmptyNameTrie;
 
-impl<T: Copy> NameTrie<T> for EmptyNameTrie {
+impl<T> NameTrie<T> for EmptyNameTrie {
     fn nodes(&self) -> &[TrieNode] {
         &[]
     }
