@@ -215,7 +215,7 @@ const W: f64 = 520.0;
 
 struct MyConstsNameTrie;
 
-impl NameTrie<&'static f64> for MyConstsNameTrie {
+impl NameTrie<f64> for MyConstsNameTrie {
     fn nodes(&self) -> &[TrieNode] {
         &[
             TrieNode::Branch('g', 1),
@@ -229,11 +229,11 @@ impl NameTrie<&'static f64> for MyConstsNameTrie {
         ]
     }
 
-    fn leaf_to_value(&self, leaf: u32) -> &'static f64 {
+    fn leaf_to_value(&self, leaf: u32) -> f64 {
         match leaf {
-            0 => &G,
-            1 => &C,
-            2 => &W,
+            0 => G,
+            1 => C,
+            2 => W,
             _ => unreachable!(),
         }
     }

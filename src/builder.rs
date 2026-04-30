@@ -29,14 +29,14 @@ pub struct FourVariables<'a>([(&'a str, u8); 4]);
 pub struct ManyVariables<'a>(Vec<(&'a str, usize)>);
 
 #[derive(Clone, Debug)]
-pub struct EvalBuilder<'c, 'n, 'f, N: Number, V = NoVariable> {
-    constants: Vec<(&'n str, &'c N)>,
+pub struct EvalBuilder<'n, 'f, N: Number, V = NoVariable> {
+    constants: Vec<(&'n str, N)>,
     function_identifier: Vec<(&'n str, CfInfo<usize>)>,
     functions: Vec<FunctionPointer<'f, N>>,
     variables: V,
 }
 
-impl<N: Number> Default for EvalBuilder<'_, '_, '_, N> {
+impl<N: Number> Default for EvalBuilder<'_, '_, N> {
     fn default() -> Self {
         Self {
             constants: Vec::default(),
@@ -47,14 +47,14 @@ impl<N: Number> Default for EvalBuilder<'_, '_, '_, N> {
     }
 }
 
-impl<N: Number> EvalBuilder<'_, '_, '_, N> {
+impl<N: Number> EvalBuilder<'_, '_, N> {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
-    pub fn add_constant(mut self, name: &'n str, value: &'c N) -> Self {
+impl<'n, 'f, N: Number, V> EvalBuilder<'n, 'f, N, V> {
+    pub fn add_constant(mut self, name: &'n str, value: N) -> Self {
         self.constants.push((name, value));
         self
     }
@@ -168,8 +168,8 @@ impl<'c, 'n, 'f, N: Number, V> EvalBuilder<'c, 'n, 'f, N, V> {
     }
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, NoVariable> {
-    pub fn add_variable(self, name: &'n str) -> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, NoVariable> {
+    pub fn add_variable(self, name: &'n str) -> EvalBuilder<'n, 'f, N, OneVariable<'n>> {
         EvalBuilder {
             variables: OneVariable(name),
             constants: self.constants,
@@ -193,7 +193,7 @@ impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, NoVariable> {
     }
 }
 
-impl<'c, 'n, 'f, N> EvalBuilder<'c, 'n, 'f, N, NoVariable>
+impl<'n, 'f, N> EvalBuilder<'n, 'f, N, NoVariable>
 where
     N: for<'b> Number<AsArg<'b> = N> + Copy,
 {
@@ -212,8 +212,8 @@ where
     }
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
-    pub fn add_variable(self, name: &'n str) -> EvalBuilder<'c, 'n, 'f, N, TwoVariables<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, OneVariable<'n>> {
+    pub fn add_variable(self, name: &'n str) -> EvalBuilder<'n, 'f, N, TwoVariables<'n>> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
@@ -238,7 +238,7 @@ impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
     }
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, OneVariable<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, OneVariable<'n>> {
     pub fn build_as_function(mut self, input: &str) -> Result<impl FnMut(N) -> N, ParsingError> {
         let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
         let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
@@ -305,7 +305,7 @@ macro_rules! fn_build_as_function {
 macro_rules! fn_add_variable {
     ($n: expr, $next: ident) => {
         seq!(I in 0..$n {
-            pub fn add_variable(self, name: &'n str) -> EvalBuilder<'c, 'n, 'f, N, $next<'n>> {
+            pub fn add_variable(self, name: &'n str) -> EvalBuilder<'n, 'f, N, $next<'n>> {
                 let mut iter = self.variables.0.into_iter();
                 EvalBuilder {
                     constants: self.constants,
@@ -318,26 +318,26 @@ macro_rules! fn_add_variable {
     };
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, TwoVariables<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, TwoVariables<'n>> {
     fn_add_variable!(2, ThreeVariables);
     fn_build_as_evaluator!(2);
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, TwoVariables<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, TwoVariables<'n>> {
     fn_build_as_function!(2);
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ThreeVariables<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, ThreeVariables<'n>> {
     fn_add_variable!(3, FourVariables);
     fn_build_as_evaluator!(3);
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ThreeVariables<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, ThreeVariables<'n>> {
     fn_build_as_function!(3);
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, FourVariables<'n>> {
-    pub fn add_variable(self, name: &'n str) -> EvalBuilder<'c, 'n, 'f, N, ManyVariables<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, FourVariables<'n>> {
+    pub fn add_variable(self, name: &'n str) -> EvalBuilder<'n, 'f, N, ManyVariables<'n>> {
         EvalBuilder {
             constants: self.constants,
             function_identifier: self.function_identifier,
@@ -355,11 +355,11 @@ impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, FourVariables<'n>> {
     fn_build_as_evaluator!(4);
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, FourVariables<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, FourVariables<'n>> {
     fn_build_as_function!(4);
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ManyVariables<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, ManyVariables<'n>> {
     pub fn build_as_evaluator(mut self) -> impl Fn(&str, &[N]) -> Result<N, ParsingError> {
         let constant_parser = VecNameTrie::new(self.constants.as_mut_slice());
         let function_parser = VecNameTrie::new(self.function_identifier.as_mut_slice());
@@ -377,7 +377,7 @@ impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ManyVariables<'n>> {
     }
 }
 
-impl<'c, 'n, 'f, N: Number> EvalBuilder<'c, 'n, 'f, N, ManyVariables<'n>> {
+impl<'n, 'f, N: Number> EvalBuilder<'n, 'f, N, ManyVariables<'n>> {
     pub fn build_as_function<'b>(
         mut self,
         input: &str,
@@ -405,14 +405,14 @@ mod tests {
     use crate::FunctionPointer;
 
     #[derive(PartialEq, Debug)]
-    struct UnexpectedBuilderFieldValues<'n, 'c, V> {
-        constants: Option<(Vec<(&'n str, &'c f64)>, Vec<(&'n str, &'c f64)>)>,
+    struct UnexpectedBuilderFieldValues<'n, V> {
+        constants: Option<(Vec<(&'n str, f64)>, Vec<(&'n str, f64)>)>,
         function_identifier: Option<(Vec<(&'n str, CfInfo<usize>)>, Vec<(&'n str, CfInfo<usize>)>)>,
         functions: Vec<(usize, f64)>,
         variables: Option<(V, V)>,
     }
 
-    impl<V: Debug> Display for UnexpectedBuilderFieldValues<'_, '_, V> {
+    impl<V: Debug> Display for UnexpectedBuilderFieldValues<'_, V> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             if let Some(consts) = &self.constants {
                 writeln!(f, "constants: {:?} != {:?}", consts.0, consts.1)?;
@@ -431,12 +431,12 @@ mod tests {
     }
 
     #[allow(clippy::result_large_err)]
-    fn compare<'n, 'c, V: PartialEq>(
-        builder: EvalBuilder<'c, 'n, '_, f64, V>,
-        constants: impl Iterator<Item = (&'n str, &'c f64)>,
+    fn compare<'n, V: PartialEq>(
+        builder: EvalBuilder<'n, '_, f64, V>,
+        constants: impl Iterator<Item = (&'n str, f64)>,
         function_identifier: impl Iterator<Item = (&'n str, usize, NonZeroU8, Option<NonZeroU8>)>,
         variables: V,
-    ) -> Option<UnexpectedBuilderFieldValues<'n, 'c, V>> {
+    ) -> Option<UnexpectedBuilderFieldValues<'n, V>> {
         let constants: Vec<_> = constants.collect();
         let function_identifier = function_identifier
             .map(|(n, id, min, max)| (n, CfInfo::new(id, min, max)))
@@ -504,8 +504,8 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::new().add_constant("c", &3.57),
-            [("c", &3.57)].into_iter(),
+            EvalBuilder::new().add_constant("c", 3.57),
+            [("c", 3.57)].into_iter(),
             [].into_iter(),
             NoVariable,
         ));
@@ -534,8 +534,8 @@ mod tests {
         test!(compare(
             EvalBuilder::new()
                 .add_fn1("f2", |_| 0.0)
-                .add_constant("c1", &7.319),
-            [("c1", &7.319)].into_iter(),
+                .add_constant("c1", 7.319),
+            [("c1", 7.319)].into_iter(),
             [("f2", 0, nz!(1), Some(nz!(1)))].into_iter(),
             NoVariable,
         ));
@@ -543,15 +543,15 @@ mod tests {
         let zero = String::from("0");
         test!(compare(
             EvalBuilder::new()
-                .add_constant("c1", &7.319)
+                .add_constant("c1", 7.319)
                 .add_dyn_fn1("f2", &|_| zero.parse().unwrap()),
-            [("c1", &7.319)].into_iter(),
+            [("c1", 7.319)].into_iter(),
             [("f2", 0, nz!(1), Some(nz!(1)))].into_iter(),
             NoVariable,
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_fn1("f1", |_| 0.0)
                 .add_fn2("f2", |_, _| 1.0),
             [].into_iter(),
@@ -565,7 +565,7 @@ mod tests {
 
         let one = String::from("1");
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_dyn_fn1("f1", &|_| zero.parse().unwrap())
                 .add_dyn_fn2("f2", &|_, _| one.parse().unwrap()),
             [].into_iter(),
@@ -578,7 +578,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_dyn_fn2("f2", &|_, _| zero.parse().unwrap())
                 .add_fn3("f3", |_, _, _| 1.0),
             [].into_iter(),
@@ -591,7 +591,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_fn2("f2", |_, _| 0.0)
                 .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
                 .add_fn_flex("ff", nz!(3), None, |_| 2.0),
@@ -607,7 +607,7 @@ mod tests {
 
         let two = String::from("2");
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_variable("t")
                 .add_fn2("f2", |_, _| 0.0)
                 .add_dyn_fn3("f3", &|_, _, _| one.parse().unwrap())
@@ -623,21 +623,21 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new().add_variable("y").add_variable("x"),
+            EvalBuilder::<'_, '_, f64>::new().add_variable("y").add_variable("x"),
             [].into_iter(),
             [].into_iter(),
             TwoVariables([("y", 0), ("x", 1)]),
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new().add_variable("y").add_variable("x"),
+            EvalBuilder::<'_, '_, f64>::new().add_variable("y").add_variable("x"),
             [].into_iter(),
             [].into_iter(),
             TwoVariables([("y", 0), ("x", 1)]),
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_variable("y")
                 .add_dyn_fn2("f2", &|_, _| zero.parse().unwrap())
                 .add_variable("x")
@@ -654,7 +654,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_variable("y")
                 .add_variable("x")
                 .add_variable("z"),
@@ -664,7 +664,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_fn3("f0", |_, _, _| 0.0)
                 .add_variable("y")
                 .add_fn3("f1", |_, _, _| 1.0)
@@ -684,7 +684,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_variable("y")
                 .add_variable("x")
                 .add_variable("z")
@@ -696,10 +696,10 @@ mod tests {
 
         let three = String::from("3");
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_dyn_fn1("f0", &|_| zero.parse().unwrap())
                 .add_variable("y")
-                .add_constant("c", &9.999999)
+                .add_constant("c", 9.999999)
                 .add_fn2("f1", |_, _| 1.0)
                 .add_variable("x")
                 .add_fn3("f2", |_, _, _| 2.0)
@@ -707,7 +707,7 @@ mod tests {
                 .add_dyn_fn_flex("f3", nz!(1), Some(nz!(5)), &|_| three.parse().unwrap())
                 .add_variable("w")
                 .add_fn1("f4", |_| 4.0),
-            [("c", &9.999999)].into_iter(),
+            [("c", 9.999999)].into_iter(),
             [
                 ("f0", 0, nz!(1), Some(nz!(1))),
                 ("f1", 1, nz!(2), Some(nz!(2))),
@@ -720,7 +720,7 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_variable("y")
                 .add_variable("x")
                 .add_variable("z")
@@ -732,11 +732,11 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_fn1("f0", |_| 0.0)
                 .add_variable("y")
-                .add_constant("c", &9.999999)
-                .add_constant("ce", &2.222222)
+                .add_constant("c", 9.999999)
+                .add_constant("ce", 2.222222)
                 .add_fn2("f1", |_, _| 1.0)
                 .add_variable("x")
                 .add_fn3("f2", |_, _, _| 2.0)
@@ -746,7 +746,7 @@ mod tests {
                 .add_fn1("f4", |_| 4.0)
                 .add_variable("t")
                 .add_fn_flex("f5", nz!(5), None, |_| 5.0),
-            [("c", &9.999999), ("ce", &2.222222)].into_iter(),
+            [("c", 9.999999), ("ce", 2.222222)].into_iter(),
             [
                 ("f0", 0, nz!(1), Some(nz!(1))),
                 ("f1", 1, nz!(2), Some(nz!(2))),
@@ -761,11 +761,11 @@ mod tests {
 
         let four = String::from("4");
         test!(compare(
-            EvalBuilder::<'_, '_, '_, f64>::new()
+            EvalBuilder::<'_, '_, f64>::new()
                 .add_dyn_fn1("f0", &|_| zero.parse().unwrap())
                 .add_variable("y")
-                .add_constant("c", &9.999999)
-                .add_constant("ce", &2.222222)
+                .add_constant("c", 9.999999)
+                .add_constant("ce", 2.222222)
                 .add_dyn_fn2("f1", &|_, _| one.parse().unwrap())
                 .add_variable("x")
                 .add_dyn_fn3("f2", &|_, _, _| two.parse().unwrap())
@@ -776,7 +776,7 @@ mod tests {
                 .add_variable("t")
                 .add_dyn_fn_flex("f5", nz!(5), None, &|_| three.parse::<f64>().unwrap()
                     + two.parse::<f64>().unwrap()),
-            [("c", &9.999999), ("ce", &2.222222)].into_iter(),
+            [("c", 9.999999), ("ce", 2.222222)].into_iter(),
             [
                 ("f0", 0, nz!(1), Some(nz!(1))),
                 ("f1", 1, nz!(2), Some(nz!(2))),

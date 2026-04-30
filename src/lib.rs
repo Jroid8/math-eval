@@ -342,9 +342,9 @@ impl<N: Number> FunctionPointer<'_, N> {
     }
 }
 
-pub fn compile<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
+pub fn compile<'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
-    custom_constants: &impl NameTrie<&'c N>,
+    custom_constants: &impl NameTrie<N>,
     custom_functions: &impl NameTrie<CfInfo<F>>,
     custom_variables: &impl NameTrie<V>,
     function_to_pointer: impl Fn(F) -> FunctionPointer<'f, N>,
@@ -365,7 +365,7 @@ pub fn compile<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
 
 pub fn evaluate<'c, 'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
     input: &str,
-    custom_constants: &impl NameTrie<&'c N>,
+    custom_constants: &impl NameTrie<N>,
     custom_functions: &impl NameTrie<CfInfo<F>>,
     custom_variables: &impl NameTrie<V>,
     function_to_pointer: impl Fn(F) -> FunctionPointer<'f, N>,

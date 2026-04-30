@@ -211,9 +211,9 @@ impl From<MultipleRoots> for SyntaxError {
 pub struct MathAst<N: Number, V: VarId, F: FuncId>(PostfixTree<AstNode<N, V, F>>);
 
 impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
-    pub fn new<'a, S: AsRef<str>>(
+    pub fn new<S: AsRef<str>>(
         tokens: &impl AsRef<[Token<S>]>,
-        custom_constants: &impl NameTrie<&'a N>,
+        custom_constants: &impl NameTrie<N>,
         custom_functions: &impl NameTrie<CfInfo<F>>,
         custom_variables: &impl NameTrie<V>,
     ) -> Result<MathAst<N, V, F>, SyntaxError> {
@@ -228,7 +228,7 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
 
     pub fn parse_and_eval<'a, 'b, 'c, S: VariableStore<N, V>, A: AsRef<str>>(
         tokens: impl AsRef<[Token<A>]>,
-        custom_constants: &impl NameTrie<&'c N>,
+        custom_constants: &impl NameTrie<N>,
         custom_functions: &impl NameTrie<CfInfo<F>>,
         custom_variables: &impl NameTrie<V>,
         variable_values: &'a S,
@@ -871,13 +871,13 @@ mod tests {
 
     struct TestConstsNameTrie;
 
-    impl NameTrie<&'static f64> for TestConstsNameTrie {
+    impl NameTrie<f64> for TestConstsNameTrie {
         fn nodes(&self) -> &[TrieNode] {
             &[TrieNode::Branch('c', 1), TrieNode::Leaf(0)]
         }
 
-        fn leaf_to_value(&self, _leaf: u32) -> &'static f64 {
-            &299792458.0
+        fn leaf_to_value(&self, _leaf: u32) -> f64 {
+            299792458.0
         }
     }
 

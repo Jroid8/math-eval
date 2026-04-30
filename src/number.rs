@@ -373,7 +373,7 @@ pub trait Number:
 {
     type AsArg<'a>: ToOwned<Owned = Self> + Neg<Output = Self> + PartialEq + Copy + Debug;
     type Recognizer: NumberRecognizer;
-    type ConstsNameTrieType: NameTrie<&'static Self>;
+    type ConstsNameTrieType: NameTrie<Self>;
 
     const CONSTS_NAME_TRIE: Self::ConstsNameTrieType;
 
@@ -398,7 +398,7 @@ pub trait Number:
     fn acos(self) -> Self;
     fn atan(self) -> Self;
     fn acot(self) -> Self;
-    fn atan2(self, y: Self::AsArg<'_>) -> Self;
+    fn atan2(self, x: Self::AsArg<'_>) -> Self;
     fn asinh(self) -> Self;
     fn acosh(self) -> Self;
     fn atanh(self) -> Self;
@@ -443,22 +443,22 @@ static STD_FLOAT_CONSTS_TRIE_NODES: [TrieNode; 9] = [
     TrieNode::Leaf(2),
 ];
 
-pub struct StdFloatConstsNameTrie<F: 'static> {
-    pi: &'static F,
-    e: &'static F,
-    tau: &'static F,
+pub struct StdFloatConstsNameTrie<F: Clone> {
+    pi: F,
+    e: F,
+    tau: F,
 }
 
-impl<F> NameTrie<&'static F> for StdFloatConstsNameTrie<F> {
+impl<F: Clone> NameTrie<F> for StdFloatConstsNameTrie<F> {
     fn nodes(&self) -> &[TrieNode] {
         &STD_FLOAT_CONSTS_TRIE_NODES
     }
 
-    fn leaf_to_value(&self, leaf: u32) -> &'static F {
+    fn leaf_to_value(&self, leaf: u32) -> F {
         match leaf {
-            0 => self.pi,
-            1 => self.e,
-            2 => self.tau,
+            0 => self.pi.clone(),
+            1 => self.e.clone(),
+            2 => self.tau.clone(),
             _ => unreachable!(),
         }
     }

@@ -11,21 +11,21 @@ use crate::{
 pub const NAME_LIMIT: u8 = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum FragKind<'c, N: Number, V: VarId, F: FuncId> {
+pub(super) enum FragKind<N: Number, V: VarId, F: FuncId> {
     Literal(N),
-    Constant(N::AsArg<'c>),
+    Constant(N),
     Variable(V),
     Function(FunctionType<F>, NonZeroU8, Option<NonZeroU8>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct ParsedFragment<'c, N: Number, V: VarId, F: FuncId> {
-    pub(super) kind: FragKind<'c, N, V, F>,
+pub(super) struct ParsedFragment<N: Number, V: VarId, F: FuncId> {
+    pub(super) kind: FragKind<N, V, F>,
     pub(super) used_bytes: u8,
 }
 
-impl<'c, N: Number, V: VarId, F: FuncId> ParsedFragment<'c, N, V, F> {
-    pub(super) fn new(kind: FragKind<'c, N, V, F>, used_bytes: u8) -> Self {
+impl<'c, N: Number, V: VarId, F: FuncId> ParsedFragment<N, V, F> {
+    pub(super) fn new(kind: FragKind<N, V, F>, used_bytes: u8) -> Self {
         Self { kind, used_bytes }
     }
 }
@@ -42,8 +42,8 @@ fn longest_number<N: Number>(input: &str) -> Option<(N, u8)> {
 
 pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
     input: &str,
-    dest: &mut Vec<ParsedFragment<'c, N, V, F>>,
-    constants: &impl NameTrie<&'c N>,
+    dest: &mut Vec<ParsedFragment<N, V, F>>,
+    constants: &impl NameTrie<N>,
     variables: &impl NameTrie<V>,
     functions: &impl NameTrie<CfInfo<F>>,
 ) -> bool {
@@ -63,7 +63,7 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
                 .longest_match(slice)
                 .into_iter()
                 .chain(constants.longest_match(slice))
-                .map(|(c, i)| ParsedFragment::new(FragKind::Constant(c.asarg()), i as u8))
+                .map(|(c, i)| ParsedFragment::new(FragKind::Constant(c), i as u8))
                 .chain(
                     variables
                         .longest_match(slice)
@@ -150,7 +150,7 @@ mod tests {
                 CfInfo::new(TestFunc::VeryLongFunction, nz!(1), None),
             ),
         ]);
-        let myconsts = VecNameTrie::new(&mut [("c", &C), ("pi2", &FRAC_2_PI)]);
+        let myconsts = VecNameTrie::new(&mut [("c", C), ("pi2", FRAC_2_PI)]);
         let mut alloc = Vec::new();
         let mut fragment = |input: &str| {
             if super::fragment_token(input, &mut alloc, &myconsts, &myvars, &myfuncs) {

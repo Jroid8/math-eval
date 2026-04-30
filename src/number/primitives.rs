@@ -11,9 +11,9 @@ macro_rules! impl_primitive {
             type ConstsNameTrieType = StdFloatConstsNameTrie<Self>;
 
             const CONSTS_NAME_TRIE: StdFloatConstsNameTrie<Self> = StdFloatConstsNameTrie {
-                pi: &std::$t::consts::PI,
-                e: &std::$t::consts::E,
-                tau: &std::$t::consts::TAU,
+                pi: std::$t::consts::PI,
+                e: std::$t::consts::E,
+                tau: std::$t::consts::TAU,
             };
 
             fn one() -> Self {
@@ -82,8 +82,8 @@ macro_rules! impl_primitive {
                 self.cosh() / self.sinh()
             }
 
-            fn atan2(self, y: Self) -> Self {
-                self.atan2(y)
+            fn atan2(self, x: Self) -> Self {
+                self.atan2(x)
             }
 
             fn asin(self) -> Self {

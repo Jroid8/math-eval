@@ -468,7 +468,7 @@ fn find_opening<S: AsRef<str>>(stream: &ResolvedTkStream<'_, S>, target: usize) 
 }
 
 fn push_fragments<N, V, F, O>(
-    fragments: &mut Vec<ParsedFragment<'_, N, V, F>>,
+    fragments: &mut Vec<ParsedFragment<N, V, F>>,
     operator_stack: &mut Vec<SyOperator<F>>,
     output_queue: &mut O,
 ) -> Result<(), SyntaxErrorKind>
@@ -486,8 +486,7 @@ where
             output_queue.push_opr(SyOperator::BinaryOp(BinaryOp::Mul), operator_stack)?;
         }
         match frag {
-            FragKind::Literal(num) => output_queue.push(AstNode::Number(num))?,
-            FragKind::Constant(num) => output_queue.push(AstNode::Number(num.to_owned()))?,
+            FragKind::Literal(num) | FragKind::Constant(num) => output_queue.push(AstNode::Number(num))?,
             FragKind::Variable(var) => output_queue.push(AstNode::Variable(var))?,
             FragKind::Function(func, min, _) => {
                 if min.get() > 1 {
@@ -502,10 +501,10 @@ where
     Ok(())
 }
 
-pub(super) fn parse_or_eval<'a, O, N, V, F, S>(
+pub(super) fn parse_or_eval<O, N, V, F, S>(
     mut output_queue: O,
     stream: ResolvedTkStream<'_, S>,
-    custom_constants: &impl NameTrie<&'a N>,
+    custom_constants: &impl NameTrie<N>,
     custom_functions: &impl NameTrie<CfInfo<F>>,
     custom_variables: &impl NameTrie<V>,
 ) -> Result<O::Output, SyntaxError>
