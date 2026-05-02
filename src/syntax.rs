@@ -5,7 +5,7 @@ use std::mem;
 use std::num::NonZeroU8;
 use std::ops::RangeInclusive;
 
-use crate::number::{BFPointer, BuiltinFunction, Number};
+use crate::number::{BfPointer, BuiltinFuncId, Number};
 use crate::postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans};
 use crate::postfix_tree::tree_iterators::NodeEdge;
 use crate::postfix_tree::{Node, PostfixTree, subtree_collection::SubtreeCollection};
@@ -14,7 +14,7 @@ use crate::tokenizer::Token;
 use crate::trie::NameTrie;
 use crate::{
     Associativity, BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, ParsingError,
-    ParsingErrorKind, UnaryOp, VariableIdentifier as VarId, VariableStore, nz,
+    ParsingErrorKind, UnaryOp, VariableIdentifier as VarId, VariableStore,
 };
 use shunting_yard::{SyAstOutput, SyNumberOutput, parse_or_eval};
 
@@ -23,25 +23,16 @@ mod shunting_yard;
 mod token_fragmentation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FunctionType<F: FuncId> {
-    Builtin(BuiltinFunction),
-    Custom(F),
+pub enum FunctionType<B: BuiltinFuncId, C: FuncId> {
+    Builtin(B),
+    Custom(C),
 }
 
-impl<F: FuncId> From<BuiltinFunction> for FunctionType<F> {
-    fn from(value: BuiltinFunction) -> Self {
-        Self::Builtin(value)
-    }
-}
-
-impl<F> Display for FunctionType<F>
-where
-    F: FuncId + Display,
-{
+impl<B: BuiltinFuncId + Display, C: FuncId + Display> Display for FunctionType<B, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FunctionType::Builtin(bf) => <BuiltinFunction as Display>::fmt(bf, f),
-            FunctionType::Custom(cf) => <F as Display>::fmt(cf, f),
+            FunctionType::Builtin(bf) => <B as Display>::fmt(bf, f),
+            FunctionType::Custom(cf) => <C as Display>::fmt(cf, f),
         }
     }
 }
@@ -52,7 +43,7 @@ pub enum AstNode<N: Number, V: VarId, F: FuncId> {
     Variable(V),
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
-    Function(FunctionType<F>, NonZeroU8),
+    Function(FunctionType<N::BuiltinFuncId, F>, NonZeroU8),
 }
 
 impl<N: Number, V: VarId, F: FuncId> Node for AstNode<N, V, F> {
@@ -219,7 +210,7 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
     ) -> Result<MathAst<N, V, F>, SyntaxError> {
         parse_or_eval(
             SyAstOutput(SubtreeCollection::new()),
-            ResolvedTkStream::new(&tokens, custom_variables, custom_functions)?,
+            ResolvedTkStream::new::<N, V, F>(&tokens, custom_variables, custom_functions)?,
             custom_constants,
             custom_functions,
             custom_variables,
@@ -236,7 +227,7 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
     ) -> Result<N, SyntaxError> {
         parse_or_eval(
             SyNumberOutput::new(variable_values, function_to_pointer),
-            ResolvedTkStream::new(&tokens, custom_variables, custom_functions)?,
+            ResolvedTkStream::new::<N, V, F>(&tokens, custom_variables, custom_functions)?,
             custom_constants,
             custom_functions,
             custom_variables,
@@ -302,19 +293,21 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
                     opr.eval(pop()?, rhs.asarg())
                 }
                 AstNode::UnaryOp(opr) => opr.eval(pop()?),
-                AstNode::Function(FunctionType::Builtin(bf), argc) => match bf.as_pointer() {
-                    BFPointer::Single(func) => func(pop()?),
-                    BFPointer::Dual(func) => {
-                        let arg2 = pop()?;
-                        func(pop()?, arg2.asarg())
+                AstNode::Function(FunctionType::Builtin(bf), argc) => {
+                    match N::get_method_ptr(*bf) {
+                        BfPointer::Single(func) => func(pop()?),
+                        BfPointer::Dual(func) => {
+                            let arg2 = pop()?;
+                            func(pop()?, arg2.asarg())
+                        }
+                        BfPointer::Flexible(func) => {
+                            let new_len = stack.len() - argc.get() as usize;
+                            let res = func(&stack[new_len..]);
+                            stack.truncate(new_len);
+                            res
+                        }
                     }
-                    BFPointer::Flexible(func) => {
-                        let new_len = stack.len() - argc.get() as usize;
-                        let res = func(&stack[new_len..]);
-                        stack.truncate(new_len);
-                        res
-                    }
-                },
+                }
                 AstNode::Function(FunctionType::Custom(cf), argc) => match functibn_to_pointer(*cf)
                 {
                     FunctionPointer::Single(func) => func(pop()?),
@@ -356,171 +349,8 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
         stack.pop().ok_or(0)
     }
 
-    pub fn use_stable_functions(&mut self) {
-        macro_rules! log_detector {
-            ($is_base: expr, $node: expr) => {
-                (
-                    &|target, tree| {
-                        if matches!(
-                            tree[target],
-                            AstNode::Function(FunctionType::Builtin(BuiltinFunction::Log), _)
-                        ) {
-                            let mut children = tree.children_iter(target);
-                            match children.next().unwrap() {
-                                (AstNode::Number(base), _) if $is_base(base.asarg()) => {
-                                    Some(children.next().unwrap().1)
-                                }
-                                _ => None,
-                            }
-                        } else {
-                            None
-                        }
-                    },
-                    AstNode::Function($node.into(), nz!(1)),
-                )
-            };
-        }
-        macro_rules! exp_detector {
-            ($is_base: expr, $node: expr) => {
-                (
-                    &|target, tree| {
-                        if matches!(tree[target], AstNode::BinaryOp(BinaryOp::Pow)) {
-                            let mut children = tree.children_iter(target);
-                            let idx = children.next().unwrap().1;
-                            match children.next().unwrap() {
-                                (AstNode::Number(base), _) if $is_base(base.asarg()) => Some(idx),
-                                _ => None,
-                            }
-                        } else {
-                            None
-                        }
-                    },
-                    AstNode::Function($node.into(), nz!(1)),
-                )
-            };
-        }
-        let detrep_pairs: [(
-            &dyn Fn(usize, &PostfixTree<AstNode<N, V, F>>) -> Option<usize>,
-            AstNode<N, V, F>,
-        ); _] = [
-            (
-                &|target, tree: &PostfixTree<AstNode<N, V, F>>| {
-                    if matches!(tree[target], AstNode::BinaryOp(BinaryOp::Sub)) {
-                        let mut children = tree.children_iter(target);
-                        match (children.next().unwrap(), children.next().unwrap()) {
-                            (
-                                (
-                                    AstNode::Function(
-                                        FunctionType::Builtin(BuiltinFunction::Erf),
-                                        _,
-                                    ),
-                                    idx,
-                                ),
-                                (AstNode::Number(lhs), _),
-                            ) if N::is_one(lhs.asarg()) => {
-                                Some(tree.children_iter(idx).next().unwrap().1)
-                            }
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    }
-                },
-                AstNode::Function(BuiltinFunction::Erfc.into(), nz!(1)),
-            ),
-            log_detector!(N::is_ten, BuiltinFunction::Log10),
-            log_detector!(N::is_two, BuiltinFunction::Log2),
-            exp_detector!(N::is_ten, BuiltinFunction::Exp10),
-            exp_detector!(N::is_two, BuiltinFunction::Exp2),
-            (
-                &|target, tree| {
-                    if matches!(tree[target], AstNode::BinaryOp(BinaryOp::Sub)) {
-                        let mut children = tree.children_iter(target);
-                        match (children.next().unwrap(), children.next().unwrap()) {
-                            (
-                                (AstNode::Number(rhs), _),
-                                (
-                                    AstNode::Function(
-                                        FunctionType::Builtin(BuiltinFunction::Exp),
-                                        _,
-                                    ),
-                                    idx,
-                                ),
-                            ) if N::is_one(rhs.asarg()) => {
-                                Some(tree.children_iter(idx).next().unwrap().1)
-                            }
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    }
-                },
-                AstNode::Function(BuiltinFunction::Expm1.into(), nz!(1)),
-            ),
-            (
-                &|target, tree| {
-                    if matches!(
-                        tree[target],
-                        AstNode::Function(FunctionType::Builtin(BuiltinFunction::Ln), _)
-                    ) {
-                        let (child_node, child_idx) = tree.children_iter(target).next().unwrap();
-                        if matches!(child_node, AstNode::BinaryOp(BinaryOp::Add)) {
-                            let mut children = tree.children_iter(child_idx);
-                            match (children.next().unwrap(), children.next().unwrap()) {
-                                ((AstNode::Number(num), _), (_, idx))
-                                | ((_, idx), (AstNode::Number(num), _))
-                                    if N::is_one(num.asarg()) =>
-                                {
-                                    Some(idx)
-                                }
-                                _ => None,
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                },
-                AstNode::Function(BuiltinFunction::Ln1p.into(), nz!(1)),
-            ),
-            (
-                &|target, tree| {
-                    if matches!(
-                        tree[target],
-                        AstNode::Function(FunctionType::Builtin(BuiltinFunction::Ln), _)
-                    ) {
-                        let (child_node, child_idx) = tree.children_iter(target).next().unwrap();
-                        if matches!(
-                            child_node,
-                            AstNode::Function(FunctionType::Builtin(BuiltinFunction::Gamma), _)
-                        ) {
-                            Some(tree.children_iter(child_idx).next().unwrap().1)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                },
-                AstNode::Function(BuiltinFunction::Lgamma.into(), nz!(1)),
-            ),
-        ];
-        let mut symbol_space: SubtreeCollection<AstNode<N, V, F>> =
-            SubtreeCollection::from_alloc(Vec::with_capacity(0));
-        let mut idx = 2;
-        while idx < self.0.len() {
-            for (detector, replacement) in &detrep_pairs {
-                if let Some(param) = detector(idx, &self.0) {
-                    symbol_space.extend_from_tree(&self.0, param);
-                    symbol_space.push(replacement.clone()).unwrap();
-                    let sc_head = symbol_space.len() - 1;
-                    self.0.replace_from_sc_move(idx, &mut symbol_space, sc_head);
-                    break;
-                };
-            }
-            idx += 1;
-        }
+    pub fn substitute_spec_funcs_equivalents(&mut self) {
+        N::substitute_spec_funcs_equivalents(&mut self.0);
     }
 
     pub fn aot_evaluation<'a>(
@@ -736,6 +566,7 @@ fn parenthesis_required<N: Number, V: VarId, F: FuncId>(
 impl<V, N, F> Display for MathAst<N, V, F>
 where
     N: Number + Display,
+    N::BuiltinFuncId: Display,
     V: VarId + Display,
     F: FuncId + Display,
 {
@@ -787,6 +618,7 @@ mod tests {
     use strum::FromRepr;
 
     use super::*;
+    use crate::number::std_float::StdFloatFunc;
     use crate::tokenizer::{StandardFloatRecognizer as Sfr, TokenStream};
     use crate::trie::TrieNode;
     use crate::{VariableStore, nz};
@@ -1046,7 +878,10 @@ mod tests {
             syntaxify("sin(14)"),
             Ok(vec![
                 AstNode::Number(14.0),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::<f64, TestVar, TestFunc>::Function(
+                    FunctionType::Builtin(StdFloatFunc::Sin),
+                    nz!(1)
+                ),
             ])
         );
         assert_eq!(
@@ -1089,22 +924,22 @@ mod tests {
             syntaxify("lb(8)"),
             Ok(vec![
                 AstNode::Number(8.0),
-                AstNode::Function(BuiltinFunction::Log2.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log2), nz!(1)),
             ])
         );
         assert_eq!(
             syntaxify("log(100)"),
             Ok(vec![
                 AstNode::Number(100.0),
-                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln), nz!(1)),
             ])
         );
         assert_eq!(
             syntaxify("sin(cos(0))"),
             Ok(vec![
                 AstNode::Number(0.0),
-                AstNode::Function(BuiltinFunction::Cos.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Cos), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1114,7 +949,7 @@ mod tests {
                 AstNode::Number(2.0),
                 AstNode::BinaryOp(BinaryOp::Pow),
                 AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Add),
             ])
         );
@@ -1123,8 +958,8 @@ mod tests {
             Ok(vec![
                 AstNode::Number(4.0),
                 AstNode::Number(9.0),
-                AstNode::Function(BuiltinFunction::Max.into(), nz!(2)),
-                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Max), nz!(2)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1142,7 +977,7 @@ mod tests {
             Ok(vec![
                 AstNode::Variable(TestVar::Y),
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Mul),
                 AstNode::Number(1.0),
                 AstNode::BinaryOp(BinaryOp::Add),
@@ -1161,7 +996,7 @@ mod tests {
                 AstNode::BinaryOp(BinaryOp::Mul),
                 AstNode::Number(1.0),
                 AstNode::BinaryOp(BinaryOp::Add),
-                AstNode::Function(BuiltinFunction::Max.into(), nz!(4)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Max), nz!(4)),
             ])
         );
         assert_eq!(
@@ -1180,7 +1015,7 @@ mod tests {
             syntaxify("log10(1000)"),
             Ok(vec![
                 AstNode::Number(1000.0),
-                AstNode::Function(BuiltinFunction::Log10.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log10), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1221,14 +1056,14 @@ mod tests {
             syntaxify("sqrt(16)"),
             Ok(vec![
                 AstNode::Number(16.0),
-                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt), nz!(1)),
             ])
         );
         assert_eq!(
             syntaxify("abs(-5)"),
             Ok(vec![
                 AstNode::Number(-5.0),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1247,7 +1082,7 @@ mod tests {
             syntaxify("|x|"),
             Ok(vec![
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1255,7 +1090,7 @@ mod tests {
             Ok(vec![
                 AstNode::Variable(TestVar::X),
                 AstNode::UnaryOp(UnaryOp::Neg),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1329,7 +1164,7 @@ mod tests {
             syntaxify("sinx"),
             Ok(vec![
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1337,7 +1172,7 @@ mod tests {
             Ok(vec![
                 AstNode::Variable(TestVar::X),
                 AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Cos.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Cos), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Mul),
             ])
         );
@@ -1347,7 +1182,7 @@ mod tests {
                 AstNode::Number(2.0),
                 AstNode::Variable(TestVar::X),
                 AstNode::BinaryOp(BinaryOp::Mul),
-                AstNode::Function(FunctionType::Builtin(BuiltinFunction::Ln), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1355,7 +1190,7 @@ mod tests {
             Ok(vec![
                 AstNode::Variable(TestVar::X),
                 AstNode::UnaryOp(UnaryOp::Neg),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1364,23 +1199,23 @@ mod tests {
                 AstNode::Number(PI),
                 AstNode::Variable(TestVar::X),
                 AstNode::BinaryOp(BinaryOp::Mul),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
             ])
         );
         assert_eq!(
             syntaxify("lnsqrtx"),
             Ok(vec![
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln), nz!(1)),
             ])
         );
         assert_eq!(
             syntaxify("lnsqrt(x)"),
             Ok(vec![
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1389,8 +1224,8 @@ mod tests {
                 AstNode::Variable(TestVar::X),
                 AstNode::Variable(TestVar::Y),
                 AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1400,7 +1235,7 @@ mod tests {
                 AstNode::UnaryOp(UnaryOp::Fac),
                 AstNode::Number(1.0),
                 AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
             ])
         );
         assert_eq!(
@@ -1410,7 +1245,7 @@ mod tests {
                 AstNode::Variable(TestVar::X),
                 AstNode::Number(1.0),
                 AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Mul),
                 AstNode::Number(2.0),
                 AstNode::BinaryOp(BinaryOp::Div),
@@ -1423,18 +1258,18 @@ mod tests {
             Ok(vec![
                 AstNode::Number(1.0),
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs), nz!(1)),
             ])
         );
         assert_eq!(
             syntaxify("|x||y|"),
             Ok(vec![
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs), nz!(1)),
                 AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Mul)
             ])
         );
@@ -1630,15 +1465,7 @@ mod tests {
         assert_eq!(evaluate("x^2 + y^2"), 26.0);
         assert_eq!(evaluate("y*-0.5"), -2.5);
         assert_eq!(evaluate("sin(pix/2)*t-cos(pix)*t"), 0.2);
-        assert_eq!(evaluate("ln(gamma(220))"), libm::lgamma(220.0));
-        assert_eq!(evaluate("ln(250!)"), libm::lgamma(251.0));
-        assert_eq!(evaluate("ln250!"), libm::lgamma(251.0));
-        assert_eq!(evaluate("log(2,10)"), 0.3010299956639812);
-        assert_eq!(evaluate("log(10,2)"), 3.321928094887362);
-        assert_eq!(evaluate("2^100"), 1.2676506002282294e30);
         assert_eq!(evaluate("10^23"), 1e23);
-        assert_eq!(evaluate("exp(0.25) - 1"), 0.2840254166877415);
-        assert_eq!(evaluate("ln(2+1)"), 1.0986122886681096);
     }
 
     #[test]
@@ -1661,7 +1488,7 @@ mod tests {
         assert_eq!(
             simplify(&[
                 AstNode::Number(9.0),
-                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt), nz!(1)),
             ]),
             vec![AstNode::Number(3.0)]
         );
@@ -1672,13 +1499,13 @@ mod tests {
                 AstNode::BinaryOp(BinaryOp::Div),
                 AstNode::Variable(TestVar::T),
                 AstNode::BinaryOp(BinaryOp::Add),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
             ]),
             vec![
                 AstNode::Number(0.125),
                 AstNode::Variable(TestVar::T),
                 AstNode::BinaryOp(BinaryOp::Add),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
             ]
         );
         assert_eq!(
@@ -1691,11 +1518,11 @@ mod tests {
                 AstNode::BinaryOp(BinaryOp::Pow),
                 AstNode::Number(1.0),
                 AstNode::Number(0.0),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Min.into(), nz!(2)),
-                AstNode::Function(BuiltinFunction::Max.into(), nz!(3)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Min), nz!(2)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Max), nz!(3)),
                 AstNode::Number(121.0),
-                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Add)
             ]),
             vec![
@@ -1704,7 +1531,7 @@ mod tests {
                 AstNode::Number(2.0),
                 AstNode::BinaryOp(BinaryOp::Pow),
                 AstNode::Number(0.0),
-                AstNode::Function(BuiltinFunction::Max.into(), nz!(3)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Max), nz!(3)),
                 AstNode::Number(11.0),
                 AstNode::BinaryOp(BinaryOp::Add)
             ]
@@ -1800,7 +1627,7 @@ mod tests {
             simplify(&[
                 AstNode::Number(17.0),
                 AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Log.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Sub),
                 AstNode::Number(10.0),
                 AstNode::Number(1.0),
@@ -1810,7 +1637,7 @@ mod tests {
             vec![
                 AstNode::Number(8.0),
                 AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Log.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Sub),
             ]
         );
@@ -1821,7 +1648,7 @@ mod tests {
                 AstNode::BinaryOp(BinaryOp::Mul),
                 AstNode::Number(2.0),
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Mul),
                 AstNode::BinaryOp(BinaryOp::Div),
             ]),
@@ -1829,7 +1656,7 @@ mod tests {
                 AstNode::Number(3.5),
                 AstNode::Variable(TestVar::T),
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Div),
                 AstNode::BinaryOp(BinaryOp::Mul),
             ]
@@ -1856,13 +1683,13 @@ mod tests {
             simplify(&[
                 AstNode::Number(81.0),
                 AstNode::Number(3.0),
-                AstNode::Function(BuiltinFunction::Log.into(), nz!(2)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log), nz!(2)),
                 AstNode::Number(8.9),
                 AstNode::BinaryOp(BinaryOp::Sub),
                 AstNode::Number(1.4),
                 AstNode::Number(5.993),
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Max.into(), nz!(3)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Max), nz!(3)),
                 AstNode::Number(3.9),
                 AstNode::BinaryOp(BinaryOp::Sub),
                 AstNode::BinaryOp(BinaryOp::Sub),
@@ -1871,11 +1698,11 @@ mod tests {
                 AstNode::Number(-5.0),
                 AstNode::Number(81.0),
                 AstNode::Number(3.0),
-                AstNode::Function(BuiltinFunction::Log.into(), nz!(2)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log), nz!(2)),
                 AstNode::Number(1.4),
                 AstNode::Number(5.993),
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Max.into(), nz!(3)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Max), nz!(3)),
                 AstNode::BinaryOp(BinaryOp::Sub),
                 AstNode::BinaryOp(BinaryOp::Add),
             ]
@@ -1896,150 +1723,6 @@ mod tests {
                 AstNode::BinaryOp(BinaryOp::Sub),
             ]
         )
-    }
-
-    #[test]
-    fn use_stable_functions() {
-        let usf = |nodes: &[AstNode<f64, TestVar, TestFunc>]| {
-            let mut ast = MathAst::from_nodes(nodes.iter().copied());
-            ast.use_stable_functions();
-            ast.0.postorder_iter().cloned().collect::<Vec<_>>()
-        };
-        assert_eq!(
-            usf(&[
-                AstNode::Number(1.0),
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Erf.into(), nz!(1)),
-                AstNode::BinaryOp(BinaryOp::Sub),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Erfc.into(), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Gamma.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
-                AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Gamma.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
-                AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Variable(TestVar::X),
-                AstNode::Variable(TestVar::Y),
-                AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Function(BuiltinFunction::Gamma.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
-                AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Function(BuiltinFunction::Exp.into(), nz!(1))
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Lgamma.into(), nz!(1)),
-                AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Lgamma.into(), nz!(1)),
-                AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Variable(TestVar::X),
-                AstNode::Variable(TestVar::Y),
-                AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Function(BuiltinFunction::Lgamma.into(), nz!(1)),
-                AstNode::BinaryOp(BinaryOp::Sub),
-                AstNode::Function(BuiltinFunction::Exp.into(), nz!(1))
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Variable(TestVar::X),
-                AstNode::Number(2.0),
-                AstNode::Function(BuiltinFunction::Log.into(), nz!(2)),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Log2.into(), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
-                AstNode::Number(2.0),
-                AstNode::Function(BuiltinFunction::Log.into(), nz!(2)),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sqrt.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Log2.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Number(2.0),
-                AstNode::Variable(TestVar::X),
-                AstNode::BinaryOp(BinaryOp::Pow),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Exp2.into(), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Number(10.0),
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
-                AstNode::BinaryOp(BinaryOp::Pow),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Exp10.into(), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Exp.into(), nz!(1)),
-                AstNode::Number(1.0),
-                AstNode::BinaryOp(BinaryOp::Sub),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(BuiltinFunction::Sin.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Expm1.into(), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
-                AstNode::Number(1.0),
-                AstNode::BinaryOp(BinaryOp::Add),
-                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Ln1p.into(), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Number(1.0),
-                AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
-                AstNode::BinaryOp(BinaryOp::Add),
-                AstNode::Function(BuiltinFunction::Ln.into(), nz!(1)),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::Y),
-                AstNode::Function(BuiltinFunction::Abs.into(), nz!(1)),
-                AstNode::Function(BuiltinFunction::Ln1p.into(), nz!(1)),
-            ]
-        );
     }
 
     #[test]

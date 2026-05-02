@@ -9,7 +9,7 @@ use std::fmt::Debug;
 
 use crate::{
     FunctionIdentifier as FuncId, VariableIdentifier as VarId,
-    number::BuiltinFuncsNameTrie,
+    number::Number,
     syntax::{CfInfo, SyntaxError, SyntaxErrorKind},
     tokenizer::{DelimEdge, DelimKind, DelimiterToken, OprToken, Token},
     trie::NameTrie,
@@ -22,7 +22,7 @@ enum Expecting {
     Suffix,
 }
 
-fn suffix_is_fnp<V: VarId, F: FuncId>(
+fn suffix_is_fnp<N: Number, V: VarId, F: FuncId>(
     name: &str,
     custom_variables: &impl NameTrie<V>,
     custom_functions: &impl NameTrie<CfInfo<F>>,
@@ -32,7 +32,7 @@ fn suffix_is_fnp<V: VarId, F: FuncId>(
     }
     for (i, _) in name.char_indices() {
         let name = &name[i..];
-        if BuiltinFuncsNameTrie.exact_match(name).is_some()
+        if N::BUILTIN_FUNCS_TRIE.exact_match(name).is_some()
             || custom_functions.exact_match(name).is_some()
         {
             return true;
@@ -42,7 +42,7 @@ fn suffix_is_fnp<V: VarId, F: FuncId>(
 }
 
 impl Expecting {
-    fn next<S: AsRef<str>, V: VarId, F: FuncId>(
+    fn next<S: AsRef<str>, N: Number, V: VarId, F: FuncId>(
         self,
         cur: &Token<S>,
         opening_pipe: bool,
@@ -72,7 +72,8 @@ impl Expecting {
                 // terminal
                 Token::Number(_) => Ok(Expecting::Suffix),
                 Token::Variable(name) => Ok(
-                    if !suffix_is_fnp(name.as_ref(), custom_variables, custom_functions) {
+                    if !suffix_is_fnp::<N, V, F>(name.as_ref(), custom_variables, custom_functions)
+                    {
                         Expecting::Suffix
                     } else {
                         self
@@ -109,7 +110,7 @@ impl Expecting {
                 // terminal
                 Token::Number(_) => self,
                 Token::Variable(name) => {
-                    if suffix_is_fnp(name.as_ref(), custom_variables, custom_functions) {
+                    if suffix_is_fnp::<N, V, F>(name.as_ref(), custom_variables, custom_functions) {
                         Expecting::Prefix
                     } else {
                         self
@@ -375,7 +376,7 @@ impl<S: AsRef<str>> Debug for ResolvedTkStream<'_, S> {
 }
 
 impl<'a, S: AsRef<str>> ResolvedTkStream<'a, S> {
-    pub(super) fn new<V: VarId, F: FuncId>(
+    pub(super) fn new<N: Number, V: VarId, F: FuncId>(
         tokens: &'a impl AsRef<[Token<S>]>,
         custom_variables: &impl NameTrie<V>,
         custom_functions: &impl NameTrie<CfInfo<F>>,
@@ -405,7 +406,7 @@ impl<'a, S: AsRef<str>> ResolvedTkStream<'a, S> {
                 .last()
                 .copied()
                 .unwrap_or_default()
-                .next(
+                .next::<S, N, V, F>(
                     &tokens[pos],
                     opening_pipe,
                     custom_variables,
@@ -652,7 +653,7 @@ mod tests {
     #[test]
     fn disambiguation() {
         let disambiguate = |tokens: &[Token<&'static str>]| {
-            ResolvedTkStream::new(&tokens, &TestVarsNameTrie, &TestFuncNameTrie)
+            ResolvedTkStream::new::<f64, _, _>(&tokens, &TestVarsNameTrie, &TestFuncNameTrie)
                 .map(|restks| restks.exp_list)
         };
         assert_eq!(
@@ -693,7 +694,7 @@ mod tests {
 
     #[test]
     fn res_tk_stream_iter() {
-        let rtks = ResolvedTkStream::new(
+        let rtks = ResolvedTkStream::new::<f64, _, _>(
             &[
                 Token::Number("1"),
                 Token::Operator(OprToken::Plus),

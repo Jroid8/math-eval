@@ -2,7 +2,7 @@
 
 use math_eval::{
     BinaryOp, FunctionIdentifier, UnaryOp, VariableIdentifier,
-    number::BuiltinFunction,
+    number::std_float::StdFloatFunc,
     postfix_tree::Node,
     syntax::{AstNode, FunctionType},
 };
@@ -11,8 +11,8 @@ pub fn rand_f64() -> f64 {
     f64::from_bits(fastrand::u64(..))
 }
 
-fn rand_bf_1p() -> BuiltinFunction {
-    use BuiltinFunction::*;
+fn rand_bf_1p() -> StdFloatFunc {
+    use StdFloatFunc::*;
     *weighted_choice(&[
         (Sin, 4),
         (Cos, 4),
@@ -48,11 +48,11 @@ fn rand_unaryop() -> UnaryOp {
     }
 }
 
-fn rand_bf_2p() -> BuiltinFunction {
+fn rand_bf_2p() -> StdFloatFunc {
     match fastrand::u8(0..11) {
-        0..5 => BuiltinFunction::Min,
-        5..10 => BuiltinFunction::Max,
-        10 => BuiltinFunction::Log,
+        0..5 => StdFloatFunc::Min,
+        5..10 => StdFloatFunc::Max,
+        10 => StdFloatFunc::Log,
         _ => unreachable!(),
     }
 }
@@ -148,8 +148,8 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             },
             3 => AstNode::Function(
                 match fastrand::u8(0..7) {
-                    0 => FunctionType::Builtin(BuiltinFunction::Min),
-                    1 => FunctionType::Builtin(BuiltinFunction::Max),
+                    0 => FunctionType::Builtin(StdFloatFunc::Min),
+                    1 => FunctionType::Builtin(StdFloatFunc::Max),
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_3p).unwrap()),
                     _ => unreachable!(),
                 },
@@ -157,8 +157,8 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             ),
             4 => AstNode::Function(
                 match fastrand::u8(0..7) {
-                    0 => FunctionType::Builtin(BuiltinFunction::Min),
-                    1 => FunctionType::Builtin(BuiltinFunction::Max),
+                    0 => FunctionType::Builtin(StdFloatFunc::Min),
+                    1 => FunctionType::Builtin(StdFloatFunc::Max),
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_4p).unwrap()),
                     _ => unreachable!(),
                 },

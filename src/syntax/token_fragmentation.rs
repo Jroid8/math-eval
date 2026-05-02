@@ -2,7 +2,7 @@ use std::num::NonZeroU8;
 
 use crate::{
     FunctionIdentifier as FuncId, VariableIdentifier as VarId,
-    number::{BuiltinFuncsNameTrie, Number},
+    number::{BuiltinFuncId, Number},
     syntax::{CfInfo, FunctionType},
     tokenizer::NumberRecognizer,
     trie::NameTrie,
@@ -15,7 +15,11 @@ pub(super) enum FragKind<N: Number, V: VarId, F: FuncId> {
     Literal(N),
     Constant(N),
     Variable(V),
-    Function(FunctionType<F>, NonZeroU8, Option<NonZeroU8>),
+    Function(
+        FunctionType<N::BuiltinFuncId, F>,
+        NonZeroU8,
+        Option<NonZeroU8>,
+    ),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -59,7 +63,7 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
         let longest_frag = if first_char.is_numeric() {
             longest_number(slice).map(|(num, end)| ParsedFragment::new(FragKind::Literal(num), end))
         } else {
-            N::CONSTS_NAME_TRIE
+            N::CONSTS_TRIE
                 .longest_match(slice)
                 .into_iter()
                 .chain(constants.longest_match(slice))
@@ -69,9 +73,9 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
                         .longest_match(slice)
                         .map(|(var, i)| ParsedFragment::new(FragKind::Variable(var), i as u8)),
                 )
-                .chain(BuiltinFuncsNameTrie.longest_match(slice).map(|(func, i)| {
+                .chain(N::BUILTIN_FUNCS_TRIE.longest_match(slice).map(|(bf, i)| {
                     ParsedFragment::new(
-                        FragKind::Function(func.into(), func.min_args(), func.max_args()),
+                        FragKind::Function(FunctionType::Builtin(bf), bf.min_args(), bf.max_args()),
                         i as u8,
                     )
                 }))
@@ -111,7 +115,7 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{number::BuiltinFunction, nz, trie::VecNameTrie};
+    use crate::{number::std_float::StdFloatFunc, nz, trie::VecNameTrie};
 
     use super::*;
     use std::f64::consts::*;
@@ -181,7 +185,11 @@ mod tests {
             fragment("tcost"),
             Some(vec![
                 FragKind::Variable(TestVar::T),
-                FragKind::Function(BuiltinFunction::Cos.into(), nz!(1), Some(nz!(1))),
+                FragKind::Function(
+                    FunctionType::Builtin(StdFloatFunc::Cos),
+                    nz!(1),
+                    Some(nz!(1))
+                ),
                 FragKind::Variable(TestVar::T),
             ])
         );
@@ -225,14 +233,22 @@ mod tests {
             fragment("cmin"),
             Some(vec![
                 FragKind::Constant(299792458.0),
-                FragKind::Function(BuiltinFunction::Min.into(), nz!(2), None)
+                FragKind::Function(FunctionType::Builtin(StdFloatFunc::Min), nz!(2), None)
             ])
         );
         assert_eq!(
             fragment("sinsinangle"),
             Some(vec![
-                FragKind::Function(BuiltinFunction::Sin.into(), nz!(1), Some(nz!(1))),
-                FragKind::Function(BuiltinFunction::Sin.into(), nz!(1), Some(nz!(1))),
+                FragKind::Function(
+                    FunctionType::Builtin(StdFloatFunc::Sin),
+                    nz!(1),
+                    Some(nz!(1))
+                ),
+                FragKind::Function(
+                    FunctionType::Builtin(StdFloatFunc::Sin),
+                    nz!(1),
+                    Some(nz!(1))
+                ),
                 FragKind::Variable(TestVar::Angle),
             ])
         );
@@ -241,7 +257,11 @@ mod tests {
             Some(vec![
                 FragKind::Variable(TestVar::Sigma),
                 FragKind::Literal(55.0),
-                FragKind::Function(BuiltinFunction::Sin.into(), nz!(1), Some(nz!(1))),
+                FragKind::Function(
+                    FunctionType::Builtin(StdFloatFunc::Sin),
+                    nz!(1),
+                    Some(nz!(1))
+                ),
                 FragKind::Variable(TestVar::T),
             ])
         );
@@ -249,7 +269,11 @@ mod tests {
             fragment("anglesinvar5func1"),
             Some(vec![
                 FragKind::Variable(TestVar::Angle),
-                FragKind::Function(BuiltinFunction::Sin.into(), nz!(1), Some(nz!(1))),
+                FragKind::Function(
+                    FunctionType::Builtin(StdFloatFunc::Sin),
+                    nz!(1),
+                    Some(nz!(1))
+                ),
                 FragKind::Variable(TestVar::Var5),
                 FragKind::Function(FunctionType::Custom(TestFunc::Func1), nz!(1), None),
             ])
@@ -259,7 +283,11 @@ mod tests {
             Some(vec![
                 FragKind::Variable(TestVar::T),
                 FragKind::Variable(TestVar::T),
-                FragKind::Function(BuiltinFunction::Ln.into(), nz!(1), Some(nz!(1))),
+                FragKind::Function(
+                    FunctionType::Builtin(StdFloatFunc::Ln),
+                    nz!(1),
+                    Some(nz!(1))
+                ),
                 FragKind::Variable(TestVar::T),
                 FragKind::Variable(TestVar::T),
                 FragKind::Variable(TestVar::Var5),

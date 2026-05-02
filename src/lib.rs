@@ -9,7 +9,7 @@ use seq_macro::seq;
 use syntax::MathAst;
 use tokenizer::TokenStream;
 
-use crate::{number::BFPointer, quick_expr::QuickExpr, syntax::CfInfo, trie::NameTrie};
+use crate::{number::BfPointer, quick_expr::QuickExpr, syntax::CfInfo, trie::NameTrie};
 
 pub mod builder;
 pub mod number;
@@ -311,12 +311,12 @@ impl<N: Number> Debug for FunctionPointer<'_, N> {
     }
 }
 
-impl<N: Number> From<number::BuiltinFunction> for FunctionPointer<'static, N> {
-    fn from(value: number::BuiltinFunction) -> Self {
-        match value.as_pointer() {
-            BFPointer::Single(func) => FunctionPointer::Single(func),
-            BFPointer::Dual(func) => FunctionPointer::Dual(func),
-            BFPointer::Flexible(func) => FunctionPointer::Flexible(func),
+impl<N: Number> From<BfPointer<N>> for FunctionPointer<'static, N> {
+    fn from(value: BfPointer<N>) -> Self {
+        match value {
+            BfPointer::Single(func) => FunctionPointer::Single(func),
+            BfPointer::Dual(func) => FunctionPointer::Dual(func),
+            BfPointer::Flexible(func) => FunctionPointer::Flexible(func),
         }
     }
 }
@@ -357,7 +357,7 @@ pub fn compile<'f, N: Number, V: VariableIdentifier, F: FunctionIdentifier>(
         custom_variables,
     )
     .map_err(|e| e.to_general(input, &token_stream.0))?;
-    syntax_tree.use_stable_functions();
+    syntax_tree.substitute_spec_funcs_equivalents();
     syntax_tree.aot_evaluation(&function_to_pointer);
     syntax_tree.displacing_simplification();
     Ok(QuickExpr::new(syntax_tree, function_to_pointer))

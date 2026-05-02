@@ -2,7 +2,7 @@ use std::{any::Any, fmt::Display, iter::repeat_with, panic};
 
 use math_eval::{
     FunctionPointer, VariableStore,
-    number::BuiltinFunction,
+    number::std_float::StdFloatFunc,
     quick_expr::QuickExpr,
     syntax::{CfInfo, MathAst},
     tokenizer::{
@@ -41,9 +41,7 @@ fn fuzz_parser() {
             2 => Token::Variable(fastrand::choice(MyVar::iter()).unwrap().to_string()),
             3 => Token::Function(
                 if fastrand::u8(0..100) < 80 {
-                    fastrand::choice(BuiltinFunction::iter())
-                        .unwrap()
-                        .to_string()
+                    fastrand::choice(StdFloatFunc::iter()).unwrap().to_string()
                 } else {
                     fastrand::choice(MyFunc::iter()).unwrap().to_string()
                 },
