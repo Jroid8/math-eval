@@ -396,28 +396,16 @@ impl ImmEvalStabilityGuard<f64> for StdFloatStabilityGuard<f64> {
                 Self::OnePlus(x) => x.ln_1p(),
                 _ => self.eval().ln(),
             }),
-            StdFloatFunc::Log10 => {
-                // 171.6243769563027 IS FOR f64
-                // use 35.040096 for f32
-                Self::Number(
-                    if let Self::Gamma(num) = self
-                        && num > 171.6243769563027
-                    {
-                        libm::lgamma(num) / 10f64.ln()
-                    } else {
-                        self.eval().log10()
-                    },
-                )
-            }
-            StdFloatFunc::Log2 => Self::Number(
-                if let Self::Gamma(num) = self
-                    && num > 171.6243769563027
-                {
-                    libm::lgamma(num) / 2f64.ln()
-                } else {
-                    self.eval().log2()
-                },
-            ),
+            StdFloatFunc::Log10 => Self::Number(if let Self::Gamma(num) = self {
+                libm::lgamma(num) / 10f64.ln()
+            } else {
+                self.eval().log10()
+            }),
+            StdFloatFunc::Log2 => Self::Number(if let Self::Gamma(num) = self {
+                libm::lgamma(num) / 2f64.ln()
+            } else {
+                self.eval().log2()
+            }),
             _ => Self::Number(func(self.eval())),
         }
     }
@@ -425,9 +413,7 @@ impl ImmEvalStabilityGuard<f64> for StdFloatStabilityGuard<f64> {
     fn apply_func_dual(self, arg2: Self, id: StdFloatFunc, func: fn(f64, f64) -> f64) -> Self {
         Self::Number(if id == StdFloatFunc::Log {
             let base = arg2.eval();
-            if let Self::Gamma(num) = self
-                && num > 171.6243769563027
-            {
+            if let Self::Gamma(num) = self {
                 libm::lgamma(num) / base.ln()
             } else {
                 let num = self.eval();
@@ -693,10 +679,7 @@ impl Number for f64 {
                         AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln), _)
                     ) {
                         let (child_node, child_idx) = tree.children_iter(target).next().unwrap();
-                        if matches!(
-                            child_node,
-                            AstNode::UnaryOp(UnaryOp::Fac)
-                        ) {
+                        if matches!(child_node, AstNode::UnaryOp(UnaryOp::Fac)) {
                             Some(tree.children_iter(child_idx).next().unwrap().1)
                         } else {
                             None
