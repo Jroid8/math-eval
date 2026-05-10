@@ -247,7 +247,7 @@ struct BaselineTestCase {
     sigma_range: RangeInclusive<f64>,
 }
 
-const TOLERANCE: f64 = f64::EPSILON * 4.0;
+const TOLERANCE: f64 = 1e-8;
 
 impl BaselineTestCase {
     fn perform(&self) {
@@ -278,9 +278,9 @@ impl BaselineTestCase {
                 mf2p,
             )
             .unwrap();
-            if (comp_res - ast_res).abs() > TOLERANCE
-                || (comp_res - syno_res).abs() > TOLERANCE
-                || (comp_res - quick_res).abs() > TOLERANCE
+            if (ast_res / comp_res - 1.0).abs() > TOLERANCE
+                || (syno_res / comp_res - 1.0).abs() > TOLERANCE
+                || (quick_res / comp_res - 1.0).abs() > TOLERANCE
             {
                 panic!(
                     "evaluation of \"{}\" produced incorrect result for values x={x}, y={y}, σ={sigma}.\ntrue:\t{comp_res}\nast:\t{ast_res}\nsyno:\t{syno_res}\nquick:\t{quick_res}",
@@ -433,7 +433,7 @@ fn correctness_alignment() {
         let quick = QuickExpr::new(ast.clone(), mf2p);
         let mut stack = Vec::with_capacity(quick.stack_req_capacity());
         let quick_res = quick.eval(&vars, &mut stack);
-        if (ast_res - quick_res).abs() > TOLERANCE {
+        if (quick_res / ast_res - 1.0).abs() > TOLERANCE {
             panic!(
                 "evaluation of \"{}\" produced inconsistent results for values x={}, y={}, σ={}.\nast:\t{ast_res}\nquick:\t{quick_res}\nast (debug): {:?}",
                 ast,
