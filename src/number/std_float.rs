@@ -661,161 +661,165 @@ fn substitute_std_float_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
     }
 }
 
-#[cfg(all(not(feature = "libm"), not(feature = "num-traits")))]
-impl Number for f64 {
-    type AsArg<'a> = Self;
-    type Recognizer = crate::tokenizer::StandardFloatRecognizer;
-    type ConstsTrieType = StdFloatConstsNameTrie<Self>;
-    type BuiltinFuncId = StdFloatFunc;
-    type BuiltinFuncsTrieType = StdFloatFuncsTrie;
-    type ImmEvalStabilityGuard = StdFloatPrecisionGuard<Self>;
+macro_rules! impl_number_for_std_float {
+    ($t: ident) => {
+        #[cfg(all(not(feature = "libm"), not(feature = "num-traits")))]
+        impl Number for $t {
+            type AsArg<'a> = Self;
+            type Recognizer = crate::tokenizer::StandardFloatRecognizer;
+            type ConstsTrieType = StdFloatConstsNameTrie<Self>;
+            type BuiltinFuncId = StdFloatFunc;
+            type BuiltinFuncsTrieType = StdFloatFuncsTrie;
+            type ImmEvalStabilityGuard = StdFloatPrecisionGuard<Self>;
 
-    const CONSTS_TRIE: StdFloatConstsNameTrie<Self> = StdFloatConstsNameTrie {
-        pi: std::f64::consts::PI,
-        e: std::f64::consts::E,
-        tau: std::f64::consts::TAU,
+            const CONSTS_TRIE: StdFloatConstsNameTrie<Self> = StdFloatConstsNameTrie {
+                pi: std::$t::consts::PI,
+                e: std::$t::consts::E,
+                tau: std::$t::consts::TAU,
+            };
+            const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = StdFloatFuncsTrie;
+
+            fn one() -> Self {
+                1.0
+            }
+
+            fn zero() -> Self {
+                0.0
+            }
+
+            fn get_method_ptr(id: StdFloatFunc) -> super::BfPointer<Self> {
+                use crate::number::BfPointer;
+                match id {
+                    StdFloatFunc::Sin => BfPointer::Single(Self::sin),
+                    StdFloatFunc::Cos => BfPointer::Single(Self::cos),
+                    StdFloatFunc::Tan => BfPointer::Single(Self::tan),
+                    StdFloatFunc::Cot => BfPointer::Single(|x| {
+                        let (sin, cos) = x.sin_cos();
+                        cos / sin
+                    }),
+                    StdFloatFunc::Sinh => BfPointer::Single(Self::sinh),
+                    StdFloatFunc::Cosh => BfPointer::Single(Self::cosh),
+                    StdFloatFunc::Tanh => BfPointer::Single(Self::tanh),
+                    StdFloatFunc::Coth => {
+                        BfPointer::Single(|x| (-x).atan() + std::$t::consts::FRAC_PI_2)
+                    }
+                    StdFloatFunc::Asin => BfPointer::Single(Self::asin),
+                    StdFloatFunc::Acos => BfPointer::Single(Self::acos),
+                    StdFloatFunc::Atan => BfPointer::Single(Self::atan),
+                    StdFloatFunc::Acot => BfPointer::Single(|x| x.cosh() / x.sinh()),
+                    StdFloatFunc::Atan2 => BfPointer::<Self>::Dual(Self::atan2),
+                    StdFloatFunc::Asinh => BfPointer::Single(Self::asinh),
+                    StdFloatFunc::Acosh => BfPointer::Single(Self::acosh),
+                    StdFloatFunc::Atanh => BfPointer::Single(Self::atanh),
+                    StdFloatFunc::Acoth => BfPointer::Single(|x| x.recip().atanh()),
+                    StdFloatFunc::Log => BfPointer::<Self>::Dual(Self::log),
+                    StdFloatFunc::Log2 => BfPointer::Single(Self::log2),
+                    StdFloatFunc::Log10 => BfPointer::Single(Self::log10),
+                    StdFloatFunc::Ln => BfPointer::Single(Self::ln),
+                    StdFloatFunc::Ln1p => BfPointer::Single(Self::ln_1p),
+                    StdFloatFunc::Exp => BfPointer::Single(Self::exp),
+                    StdFloatFunc::Exp2 => BfPointer::Single(Self::exp2),
+                    StdFloatFunc::Expm1 => BfPointer::Single(Self::exp_m1),
+                    StdFloatFunc::Floor => BfPointer::Single(Self::floor),
+                    StdFloatFunc::Ceil => BfPointer::Single(Self::ceil),
+                    StdFloatFunc::Round => BfPointer::Single(Self::round),
+                    StdFloatFunc::Trunc => BfPointer::Single(Self::trunc),
+                    StdFloatFunc::Frac => BfPointer::Single(Self::fract),
+                    StdFloatFunc::Abs => BfPointer::Single(Self::abs),
+                    StdFloatFunc::Sign => BfPointer::Single(Self::sign),
+                    StdFloatFunc::Sqrt => BfPointer::Single(Self::sqrt),
+                    StdFloatFunc::Cbrt => BfPointer::Single(Self::cbrt),
+                    StdFloatFunc::Max => BfPointer::Flexible(<Self as Number>::max),
+                    StdFloatFunc::Min => BfPointer::Flexible(<Self as Number>::min),
+                }
+            }
+
+            fn substitute_spec_funcs_equivalents<V: VarId, F: FuncId>(
+                tree: &mut PostfixTree<AstNode<Self, V, F>>,
+            ) {
+                substitute_std_float_spec_funcs_eq(tree);
+            }
+
+            fn asarg(&self) -> Self::AsArg<'_> {
+                *self
+            }
+
+            fn pow(self, rhs: Self) -> Self {
+                self.powf(rhs)
+            }
+
+            fn modulo(self, rhs: Self) -> Self {
+                self.rem_euclid(rhs)
+            }
+
+            fn abs(self) -> Self {
+                self.abs()
+            }
+
+            fn sign(self) -> Self {
+                match self.partial_cmp(&0.0) {
+                    Some(cmp) => match cmp {
+                        std::cmp::Ordering::Less => -1.0,
+                        std::cmp::Ordering::Equal => 0.0,
+                        std::cmp::Ordering::Greater => 1.0,
+                    },
+                    None => self,
+                }
+            }
+
+            fn max(values: &[Self]) -> Self {
+                values
+                    .iter()
+                    .copied()
+                    .max_by(|x, y| x.total_cmp(y))
+                    .unwrap()
+            }
+
+            fn min(values: &[Self]) -> Self {
+                values
+                    .iter()
+                    .copied()
+                    .min_by(|x, y| x.total_cmp(y))
+                    .unwrap()
+            }
+
+            fn factorial(self) -> Self {
+                if self.is_infinite() || self < 0.0 || self.is_nan() {
+                    return Self::NAN;
+                }
+                if self >= 171.0 {
+                    return Self::INFINITY;
+                }
+                let mut result = 1.0;
+                let mut k = self as u32;
+                while k > 1 {
+                    result *= k as $t;
+                    k -= 1;
+                }
+                result
+            }
+
+            fn double_factorial(self) -> Self {
+                if self.is_infinite() || self < 0.0 || self.is_nan() {
+                    return Self::NAN;
+                }
+                if self >= 301.0 {
+                    return Self::INFINITY;
+                }
+                let mut result = 1.0;
+                let mut k = self as u32;
+                while k > 1 {
+                    result *= k as $t;
+                    k -= 2;
+                }
+                result
+            }
+        }
     };
-    const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = StdFloatFuncsTrie;
-
-    fn one() -> Self {
-        1.0
-    }
-
-    fn zero() -> Self {
-        0.0
-    }
-
-    fn get_method_ptr(id: StdFloatFunc) -> super::BfPointer<Self> {
-        use crate::number::BfPointer;
-        match id {
-            StdFloatFunc::Sin => BfPointer::Single(f64::sin),
-            StdFloatFunc::Cos => BfPointer::Single(f64::cos),
-            StdFloatFunc::Tan => BfPointer::Single(f64::tan),
-            StdFloatFunc::Cot => BfPointer::Single(|x| {
-                let (sin, cos) = x.sin_cos();
-                cos / sin
-            }),
-            StdFloatFunc::Sinh => BfPointer::Single(f64::sinh),
-            StdFloatFunc::Cosh => BfPointer::Single(f64::cosh),
-            StdFloatFunc::Tanh => BfPointer::Single(f64::tanh),
-            StdFloatFunc::Coth => BfPointer::Single(|x| (-x).atan() + std::f64::consts::FRAC_PI_2),
-            StdFloatFunc::Asin => BfPointer::Single(f64::asin),
-            StdFloatFunc::Acos => BfPointer::Single(f64::acos),
-            StdFloatFunc::Atan => BfPointer::Single(f64::atan),
-            StdFloatFunc::Acot => BfPointer::Single(|x| x.cosh() / x.sinh()),
-            StdFloatFunc::Atan2 => BfPointer::<f64>::Dual(f64::atan2),
-            StdFloatFunc::Asinh => BfPointer::Single(f64::asinh),
-            StdFloatFunc::Acosh => BfPointer::Single(f64::acosh),
-            StdFloatFunc::Atanh => BfPointer::Single(f64::atanh),
-            StdFloatFunc::Acoth => BfPointer::Single(|x| x.recip().atanh()),
-            StdFloatFunc::Erf => BfPointer::Single(libm::erf),
-            StdFloatFunc::Erfc => BfPointer::Single(libm::erfc),
-            StdFloatFunc::Log => BfPointer::<f64>::Dual(f64::log),
-            StdFloatFunc::Log2 => BfPointer::Single(f64::log2),
-            StdFloatFunc::Log10 => BfPointer::Single(f64::log10),
-            StdFloatFunc::Ln => BfPointer::Single(f64::ln),
-            StdFloatFunc::Ln1p => BfPointer::Single(f64::ln_1p),
-            StdFloatFunc::Exp => BfPointer::Single(f64::exp),
-            StdFloatFunc::Exp2 => BfPointer::Single(f64::exp2),
-            StdFloatFunc::Exp10 => BfPointer::Single(libm::exp10),
-            StdFloatFunc::Expm1 => BfPointer::Single(f64::exp_m1),
-            StdFloatFunc::Floor => BfPointer::Single(f64::floor),
-            StdFloatFunc::Ceil => BfPointer::Single(f64::ceil),
-            StdFloatFunc::Round => BfPointer::Single(f64::round),
-            StdFloatFunc::Trunc => BfPointer::Single(f64::trunc),
-            StdFloatFunc::Frac => BfPointer::Single(f64::fract),
-            StdFloatFunc::Abs => BfPointer::Single(f64::abs),
-            StdFloatFunc::Sign => BfPointer::Single(f64::sign),
-            StdFloatFunc::Sqrt => BfPointer::Single(f64::sqrt),
-            StdFloatFunc::Cbrt => BfPointer::Single(f64::cbrt),
-            StdFloatFunc::Gamma => BfPointer::Single(libm::tgamma),
-            StdFloatFunc::Lgamma => BfPointer::Single(libm::lgamma),
-            StdFloatFunc::Max => BfPointer::Flexible(<f64 as Number>::max),
-            StdFloatFunc::Min => BfPointer::Flexible(<f64 as Number>::min),
-        }
-    }
-
-    fn substitute_spec_funcs_equivalents<V: VarId, F: FuncId>(
-        tree: &mut PostfixTree<AstNode<Self, V, F>>,
-    ) {
-        substitute_std_float_spec_funcs_eq(tree);
-    }
-
-    fn asarg(&self) -> Self::AsArg<'_> {
-        *self
-    }
-
-    fn pow(self, rhs: Self) -> Self {
-        self.powf(rhs)
-    }
-
-    fn modulo(self, rhs: Self) -> Self {
-        self.rem_euclid(rhs)
-    }
-
-    fn abs(self) -> Self {
-        self.abs()
-    }
-
-    fn sign(self) -> Self {
-        match self.partial_cmp(&0.0) {
-            Some(cmp) => match cmp {
-                std::cmp::Ordering::Less => -1.0,
-                std::cmp::Ordering::Equal => 0.0,
-                std::cmp::Ordering::Greater => 1.0,
-            },
-            None => self,
-        }
-    }
-
-    fn max(values: &[Self]) -> Self {
-        values
-            .iter()
-            .copied()
-            .max_by(|x, y| x.total_cmp(y))
-            .unwrap()
-    }
-
-    fn min(values: &[Self]) -> Self {
-        values
-            .iter()
-            .copied()
-            .min_by(|x, y| x.total_cmp(y))
-            .unwrap()
-    }
-
-    fn factorial(self) -> Self {
-        if self.is_infinite() || self < 0.0 || self.is_nan() {
-            return Self::NAN;
-        }
-        if self >= 171.0 {
-            return Self::INFINITY;
-        }
-        let mut result = 1.0;
-        let mut k = self as u32;
-        while k > 1 {
-            result *= k as f64;
-            k -= 1;
-        }
-        result
-    }
-
-    fn double_factorial(self) -> Self {
-        if self.is_infinite() || self < 0.0 || self.is_nan() {
-            return Self::NAN;
-        }
-        if self >= 301.0 {
-            return Self::INFINITY;
-        }
-        let mut result = 1.0;
-        let mut k = self as u32;
-        while k > 1 {
-            result *= k as f64;
-            k -= 2;
-        }
-        result
-    }
 }
+
+impl_number_for_std_float!(f64);
+impl_number_for_std_float!(f32);
 
 macro_rules! impl_sfl_for_std_float {
     ($t: ident) => {
@@ -961,6 +965,7 @@ macro_rules! impl_sfl_for_std_float {
 }
 
 impl_sfl_for_std_float!(f64);
+impl_sfl_for_std_float!(f32);
 
 mod tests {
     #[test]

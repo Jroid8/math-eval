@@ -451,42 +451,6 @@ where
     }
 }
 
-macro_rules! impl_libmext_for_std_float {
-    ($t: ident) => {
-        impl LibmExtended for $t {
-            fn ln10() -> Self {
-                std::$t::consts::LN_10
-            }
-
-            fn ln2() -> Self {
-                std::$t::consts::LN_2
-            }
-
-            fn exp10(self) -> Self {
-                Libm::<Self>::exp10(self)
-            }
-
-            fn erf(self) -> Self {
-                Libm::<Self>::erf(self)
-            }
-
-            fn erfc(self) -> Self {
-                Libm::<Self>::erfc(self)
-            }
-
-            fn gamma(self) -> Self {
-                Libm::<Self>::tgamma(self)
-            }
-
-            fn lgamma(self) -> Self {
-                Libm::<Self>::lgamma(self)
-            }
-        }
-    };
-}
-
-impl_libmext_for_std_float!(f64);
-
 pub fn substitute_lgamma_eq<N, B, V: VarId, F: FuncId>(
     tree: &mut PostfixTree<AstNode<N, V, F>>,
     symbol_space: &mut SubtreeCollection<AstNode<N, V, F>>,
@@ -651,149 +615,201 @@ fn substitute_libm_ext_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
     }
 }
 
-impl Number for f64 {
-    type AsArg<'a> = Self;
-    type Recognizer = StandardFloatRecognizer;
-    type ConstsTrieType = StdFloatConstsNameTrie<Self>;
-    type BuiltinFuncId = StdLibmFunc;
-    type BuiltinFuncsTrieType = StdLibmFuncsTrie;
-    type ImmEvalStabilityGuard = StdLibmStabilityGuard<Self>;
+macro_rules! impl_number_for_std_float {
+    ($t: ident) => {
+        impl Number for $t {
+            type AsArg<'a> = Self;
+            type Recognizer = StandardFloatRecognizer;
+            type ConstsTrieType = StdFloatConstsNameTrie<Self>;
+            type BuiltinFuncId = StdLibmFunc;
+            type BuiltinFuncsTrieType = StdLibmFuncsTrie;
+            type ImmEvalStabilityGuard = StdLibmStabilityGuard<Self>;
 
-    const CONSTS_TRIE: StdFloatConstsNameTrie<Self> = StdFloatConstsNameTrie {
-        pi: std::f64::consts::PI,
-        e: std::f64::consts::E,
-        tau: std::f64::consts::TAU,
-    };
-    const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = StdLibmFuncsTrie;
+            const CONSTS_TRIE: StdFloatConstsNameTrie<Self> = StdFloatConstsNameTrie {
+                pi: std::$t::consts::PI,
+                e: std::$t::consts::E,
+                tau: std::$t::consts::TAU,
+            };
+            const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = StdLibmFuncsTrie;
 
-    fn one() -> Self {
-        1.0
-    }
-
-    fn zero() -> Self {
-        0.0
-    }
-
-    fn get_method_ptr(id: StdLibmFunc) -> BfPointer<f64> {
-        match id {
-            StdLibmFunc::Std(StdFloatFunc::Sin) => BfPointer::Single(Self::sin),
-            StdLibmFunc::Std(StdFloatFunc::Cos) => BfPointer::Single(Self::cos),
-            StdLibmFunc::Std(StdFloatFunc::Tan) => BfPointer::Single(Self::tan),
-            StdLibmFunc::Std(StdFloatFunc::Cot) => BfPointer::Single(|x| {
-                let (sin, cos) = x.sin_cos();
-                cos / sin
-            }),
-            StdLibmFunc::Std(StdFloatFunc::Sinh) => BfPointer::Single(Self::sinh),
-            StdLibmFunc::Std(StdFloatFunc::Cosh) => BfPointer::Single(Self::cosh),
-            StdLibmFunc::Std(StdFloatFunc::Tanh) => BfPointer::Single(Self::tanh),
-            StdLibmFunc::Std(StdFloatFunc::Coth) => {
-                BfPointer::Single(|x| (-x).atan() + std::f64::consts::FRAC_PI_2)
+            fn one() -> Self {
+                1.0
             }
-            StdLibmFunc::Std(StdFloatFunc::Asin) => BfPointer::Single(Self::asin),
-            StdLibmFunc::Std(StdFloatFunc::Acos) => BfPointer::Single(Self::acos),
-            StdLibmFunc::Std(StdFloatFunc::Atan) => BfPointer::Single(Self::atan),
-            StdLibmFunc::Std(StdFloatFunc::Acot) => BfPointer::Single(|x| x.cosh() / x.sinh()),
-            StdLibmFunc::Std(StdFloatFunc::Atan2) => BfPointer::<Self>::Dual(f64::atan2),
-            StdLibmFunc::Std(StdFloatFunc::Asinh) => BfPointer::Single(Self::asinh),
-            StdLibmFunc::Std(StdFloatFunc::Acosh) => BfPointer::Single(Self::acosh),
-            StdLibmFunc::Std(StdFloatFunc::Atanh) => BfPointer::Single(Self::atanh),
-            StdLibmFunc::Std(StdFloatFunc::Acoth) => BfPointer::Single(|x| x.recip().atanh()),
-            StdLibmFunc::Std(StdFloatFunc::Log) => BfPointer::<Self>::Dual(f64::log),
-            StdLibmFunc::Std(StdFloatFunc::Log2) => BfPointer::Single(Self::log2),
-            StdLibmFunc::Std(StdFloatFunc::Log10) => BfPointer::Single(Self::log10),
-            StdLibmFunc::Std(StdFloatFunc::Ln) => BfPointer::Single(Self::ln),
-            StdLibmFunc::Std(StdFloatFunc::Ln1p) => BfPointer::Single(Self::ln_1p),
-            StdLibmFunc::Std(StdFloatFunc::Exp) => BfPointer::Single(Self::exp),
-            StdLibmFunc::Std(StdFloatFunc::Exp2) => BfPointer::Single(Self::exp2),
-            StdLibmFunc::Std(StdFloatFunc::Expm1) => BfPointer::Single(Self::exp_m1),
-            StdLibmFunc::Std(StdFloatFunc::Floor) => BfPointer::Single(Self::floor),
-            StdLibmFunc::Std(StdFloatFunc::Ceil) => BfPointer::Single(Self::ceil),
-            StdLibmFunc::Std(StdFloatFunc::Round) => BfPointer::Single(Self::round),
-            StdLibmFunc::Std(StdFloatFunc::Trunc) => BfPointer::Single(Self::trunc),
-            StdLibmFunc::Std(StdFloatFunc::Frac) => BfPointer::Single(Self::fract),
-            StdLibmFunc::Std(StdFloatFunc::Abs) => BfPointer::Single(Self::abs),
-            StdLibmFunc::Std(StdFloatFunc::Sign) => BfPointer::Single(Self::sign),
-            StdLibmFunc::Std(StdFloatFunc::Sqrt) => BfPointer::Single(Self::sqrt),
-            StdLibmFunc::Std(StdFloatFunc::Cbrt) => BfPointer::Single(Self::cbrt),
-            StdLibmFunc::Std(StdFloatFunc::Max) => BfPointer::Flexible(<Self as Number>::max),
-            StdLibmFunc::Std(StdFloatFunc::Min) => BfPointer::Flexible(<Self as Number>::min),
-            StdLibmFunc::Libm(LibmFunc::Exp10) => BfPointer::Single(libm::exp10),
-            StdLibmFunc::Libm(LibmFunc::Erf) => BfPointer::Single(Libm::<Self>::erf),
-            StdLibmFunc::Libm(LibmFunc::Erfc) => BfPointer::Single(Libm::<Self>::erfc),
-            StdLibmFunc::Libm(LibmFunc::Gamma) => BfPointer::Single(Libm::<Self>::tgamma),
-            StdLibmFunc::Libm(LibmFunc::Lgamma) => BfPointer::Single(Libm::<Self>::lgamma),
+
+            fn zero() -> Self {
+                0.0
+            }
+
+            fn get_method_ptr(id: StdLibmFunc) -> BfPointer<$t> {
+                match id {
+                    StdLibmFunc::Std(StdFloatFunc::Sin) => BfPointer::Single(Self::sin),
+                    StdLibmFunc::Std(StdFloatFunc::Cos) => BfPointer::Single(Self::cos),
+                    StdLibmFunc::Std(StdFloatFunc::Tan) => BfPointer::Single(Self::tan),
+                    StdLibmFunc::Std(StdFloatFunc::Cot) => BfPointer::Single(|x| {
+                        let (sin, cos) = x.sin_cos();
+                        cos / sin
+                    }),
+                    StdLibmFunc::Std(StdFloatFunc::Sinh) => BfPointer::Single(Self::sinh),
+                    StdLibmFunc::Std(StdFloatFunc::Cosh) => BfPointer::Single(Self::cosh),
+                    StdLibmFunc::Std(StdFloatFunc::Tanh) => BfPointer::Single(Self::tanh),
+                    StdLibmFunc::Std(StdFloatFunc::Coth) => {
+                        BfPointer::Single(|x| (-x).atan() + std::$t::consts::FRAC_PI_2)
+                    }
+                    StdLibmFunc::Std(StdFloatFunc::Asin) => BfPointer::Single(Self::asin),
+                    StdLibmFunc::Std(StdFloatFunc::Acos) => BfPointer::Single(Self::acos),
+                    StdLibmFunc::Std(StdFloatFunc::Atan) => BfPointer::Single(Self::atan),
+                    StdLibmFunc::Std(StdFloatFunc::Acot) => {
+                        BfPointer::Single(|x| x.cosh() / x.sinh())
+                    }
+                    StdLibmFunc::Std(StdFloatFunc::Atan2) => BfPointer::<Self>::Dual($t::atan2),
+                    StdLibmFunc::Std(StdFloatFunc::Asinh) => BfPointer::Single(Self::asinh),
+                    StdLibmFunc::Std(StdFloatFunc::Acosh) => BfPointer::Single(Self::acosh),
+                    StdLibmFunc::Std(StdFloatFunc::Atanh) => BfPointer::Single(Self::atanh),
+                    StdLibmFunc::Std(StdFloatFunc::Acoth) => {
+                        BfPointer::Single(|x| x.recip().atanh())
+                    }
+                    StdLibmFunc::Std(StdFloatFunc::Log) => BfPointer::<Self>::Dual($t::log),
+                    StdLibmFunc::Std(StdFloatFunc::Log2) => BfPointer::Single(Self::log2),
+                    StdLibmFunc::Std(StdFloatFunc::Log10) => BfPointer::Single(Self::log10),
+                    StdLibmFunc::Std(StdFloatFunc::Ln) => BfPointer::Single(Self::ln),
+                    StdLibmFunc::Std(StdFloatFunc::Ln1p) => BfPointer::Single(Self::ln_1p),
+                    StdLibmFunc::Std(StdFloatFunc::Exp) => BfPointer::Single(Self::exp),
+                    StdLibmFunc::Std(StdFloatFunc::Exp2) => BfPointer::Single(Self::exp2),
+                    StdLibmFunc::Std(StdFloatFunc::Expm1) => BfPointer::Single(Self::exp_m1),
+                    StdLibmFunc::Std(StdFloatFunc::Floor) => BfPointer::Single(Self::floor),
+                    StdLibmFunc::Std(StdFloatFunc::Ceil) => BfPointer::Single(Self::ceil),
+                    StdLibmFunc::Std(StdFloatFunc::Round) => BfPointer::Single(Self::round),
+                    StdLibmFunc::Std(StdFloatFunc::Trunc) => BfPointer::Single(Self::trunc),
+                    StdLibmFunc::Std(StdFloatFunc::Frac) => BfPointer::Single(Self::fract),
+                    StdLibmFunc::Std(StdFloatFunc::Abs) => BfPointer::Single(Self::abs),
+                    StdLibmFunc::Std(StdFloatFunc::Sign) => BfPointer::Single(Self::sign),
+                    StdLibmFunc::Std(StdFloatFunc::Sqrt) => BfPointer::Single(Self::sqrt),
+                    StdLibmFunc::Std(StdFloatFunc::Cbrt) => BfPointer::Single(Self::cbrt),
+                    StdLibmFunc::Std(StdFloatFunc::Max) => {
+                        BfPointer::Flexible(<Self as Number>::max)
+                    }
+                    StdLibmFunc::Std(StdFloatFunc::Min) => {
+                        BfPointer::Flexible(<Self as Number>::min)
+                    }
+                    StdLibmFunc::Libm(LibmFunc::Exp10) => BfPointer::Single(Libm::<Self>::exp10),
+                    StdLibmFunc::Libm(LibmFunc::Erf) => BfPointer::Single(Libm::<Self>::erf),
+                    StdLibmFunc::Libm(LibmFunc::Erfc) => BfPointer::Single(Libm::<Self>::erfc),
+                    StdLibmFunc::Libm(LibmFunc::Gamma) => BfPointer::Single(Libm::<Self>::tgamma),
+                    StdLibmFunc::Libm(LibmFunc::Lgamma) => BfPointer::Single(Libm::<Self>::lgamma),
+                }
+            }
+
+            fn substitute_spec_funcs_equivalents<V: VarId, F: FuncId>(
+                tree: &mut PostfixTree<AstNode<Self, V, F>>,
+            ) {
+                substitute_libm_ext_spec_funcs_eq(tree);
+            }
+
+            fn asarg(&self) -> Self::AsArg<'_> {
+                *self
+            }
+
+            fn pow(self, rhs: Self) -> Self {
+                self.powf(rhs)
+            }
+
+            fn modulo(self, rhs: Self) -> Self {
+                self.rem_euclid(rhs)
+            }
+
+            fn abs(self) -> Self {
+                self.abs()
+            }
+
+            fn sign(self) -> Self {
+                match self.partial_cmp(&0.0) {
+                    Some(cmp) => match cmp {
+                        std::cmp::Ordering::Less => -1.0,
+                        std::cmp::Ordering::Equal => 0.0,
+                        std::cmp::Ordering::Greater => 1.0,
+                    },
+                    None => self,
+                }
+            }
+
+            fn max(values: &[Self]) -> Self {
+                values
+                    .iter()
+                    .copied()
+                    .max_by(|x, y| x.total_cmp(y))
+                    .unwrap()
+            }
+
+            fn min(values: &[Self]) -> Self {
+                values
+                    .iter()
+                    .copied()
+                    .min_by(|x, y| x.total_cmp(y))
+                    .unwrap()
+            }
+
+            fn factorial(self) -> Self {
+                libm::Libm::<Self>::tgamma(self + 1.0)
+            }
+
+            fn double_factorial(self) -> Self {
+                if self.is_infinite() || self < 0.0 || self.is_nan() {
+                    return Self::NAN;
+                }
+                if self >= 301.0 {
+                    return Self::INFINITY;
+                }
+                let mut result = 1.0;
+                let mut k = self as u32;
+                while k > 1 {
+                    result *= k as $t;
+                    k -= 2;
+                }
+                result
+            }
         }
-    }
-
-    fn substitute_spec_funcs_equivalents<V: VarId, F: FuncId>(
-        tree: &mut PostfixTree<AstNode<Self, V, F>>,
-    ) {
-        substitute_libm_ext_spec_funcs_eq(tree);
-    }
-
-    fn asarg(&self) -> Self::AsArg<'_> {
-        *self
-    }
-
-    fn pow(self, rhs: Self) -> Self {
-        self.powf(rhs)
-    }
-
-    fn modulo(self, rhs: Self) -> Self {
-        self.rem_euclid(rhs)
-    }
-
-    fn abs(self) -> Self {
-        self.abs()
-    }
-
-    fn sign(self) -> Self {
-        match self.partial_cmp(&0.0) {
-            Some(cmp) => match cmp {
-                std::cmp::Ordering::Less => -1.0,
-                std::cmp::Ordering::Equal => 0.0,
-                std::cmp::Ordering::Greater => 1.0,
-            },
-            None => self,
-        }
-    }
-
-    fn max(values: &[Self]) -> Self {
-        values
-            .iter()
-            .copied()
-            .max_by(|x, y| x.total_cmp(y))
-            .unwrap()
-    }
-
-    fn min(values: &[Self]) -> Self {
-        values
-            .iter()
-            .copied()
-            .min_by(|x, y| x.total_cmp(y))
-            .unwrap()
-    }
-
-    fn factorial(self) -> Self {
-        libm::Libm::<Self>::tgamma(self + 1.0)
-    }
-
-    fn double_factorial(self) -> Self {
-        if self.is_infinite() || self < 0.0 || self.is_nan() {
-            return Self::NAN;
-        }
-        if self >= 301.0 {
-            return Self::INFINITY;
-        }
-        let mut result = 1.0;
-        let mut k = self as u32;
-        while k > 1 {
-            result *= k as f64;
-            k -= 2;
-        }
-        result
-    }
+    };
 }
+
+impl_number_for_std_float!(f64);
+impl_number_for_std_float!(f32);
+
+macro_rules! impl_libmext_for_std_float {
+    ($t: ident) => {
+        impl LibmExtended for $t {
+            fn ln10() -> Self {
+                std::$t::consts::LN_10
+            }
+
+            fn ln2() -> Self {
+                std::$t::consts::LN_2
+            }
+
+            fn exp10(self) -> Self {
+                Libm::<Self>::exp10(self)
+            }
+
+            fn erf(self) -> Self {
+                Libm::<Self>::erf(self)
+            }
+
+            fn erfc(self) -> Self {
+                Libm::<Self>::erfc(self)
+            }
+
+            fn gamma(self) -> Self {
+                Libm::<Self>::tgamma(self)
+            }
+
+            fn lgamma(self) -> Self {
+                Libm::<Self>::lgamma(self)
+            }
+        }
+    };
+}
+
+impl_libmext_for_std_float!(f64);
+impl_libmext_for_std_float!(f32);
 
 #[cfg(test)]
 mod tests {
@@ -861,8 +877,8 @@ mod tests {
             Slsg::Number(libm::lgamma(1000.0) / 10f64.ln())
         );
         assert_eq!(
-            Slsg::Gamma(1000.0).apply_func_dual(
-                Slsg::Number(3.0),
+            Slsg::Gamma(1000f64).apply_func_dual(
+                Slsg::Number(3f64),
                 StdFloatFunc::Log.into(),
                 |_, _| panic!()
             ),
@@ -905,16 +921,16 @@ mod tests {
             Slsg::Number(100f64.exp2())
         );
         assert_eq!(
-            Slsg::Number(977.0).apply_func_dual(
-                Slsg::Number(10.0),
+            Slsg::Number(977f64).apply_func_dual(
+                Slsg::Number(10f64),
                 StdFloatFunc::Log.into(),
                 |_, _| panic!()
             ),
             Slsg::Number(977f64.log10())
         );
         assert_eq!(
-            Slsg::Number(888.0).apply_func_dual(
-                Slsg::Number(2.0),
+            Slsg::Number(888f64).apply_func_dual(
+                Slsg::Number(2f64),
                 StdFloatFunc::Log.into(),
                 |_, _| panic!()
             ),
