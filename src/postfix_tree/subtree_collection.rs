@@ -114,6 +114,7 @@ impl<T: Node> SubtreeCollection<T> {
         self.orphan_subtrees += 1;
         self.vec
             .extend_from_slice(tree.subtree_slice(target_subtree));
+        self.vec.last_mut().unwrap().parent_distance = None.into();
     }
 
     pub fn clear(&mut self) {
