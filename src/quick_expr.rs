@@ -611,12 +611,12 @@ mod tests {
     }
 
     fn bf_to_markedfn(bf: StdFloatFunc, argc: NonZeroU8) -> MarkedFunc<'static, f64, TestFunc> {
-        let ptr = match f64::get_method_ptr(bf) {
+        let ptr = match f64::get_method_ptr(bf.into()) {
             BfPointer::Single(ptr) => CtxFuncPtr::Single(ptr),
             BfPointer::Dual(ptr) => CtxFuncPtr::<f64>::Dual(ptr),
             BfPointer::Flexible(ptr) => CtxFuncPtr::Flexible(ptr, argc),
         };
-        MarkedFunc::new(ptr, FunctionSource::BuiltinFunction(bf))
+        MarkedFunc::new(ptr, FunctionSource::BuiltinFunction(bf.into()))
     }
 
     #[test]

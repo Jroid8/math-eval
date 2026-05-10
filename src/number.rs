@@ -7,10 +7,15 @@ use std::{
 
 use crate::{
     BinaryOp, FunctionIdentifier as FuncId, UnaryOp, VariableIdentifier as VarId, nz,
-    postfix_tree::PostfixTree, syntax::AstNode, tokenizer::NumberRecognizer, trie::NameTrie,
+    postfix_tree::PostfixTree,
+    syntax::AstNode,
+    tokenizer::NumberRecognizer,
+    trie::NameTrie,
 };
 
 pub mod std_float;
+#[cfg(feature = "libm")]
+pub mod libm_ext;
 
 #[derive(Debug, Clone, Copy, Hash)]
 pub enum BfPointer<N: Number> {

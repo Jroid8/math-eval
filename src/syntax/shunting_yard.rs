@@ -238,12 +238,15 @@ where
             SyOperator::HpNeg => self.args_pop()?.apply_unary_op(UnaryOp::Neg),
             SyOperator::FuncNoParen(FunctionType::Builtin(id)) => match N::get_method_ptr(id) {
                 BfPointer::Single(func) => self.args_pop()?.apply_func_single(id, func),
-                BfPointer::Flexible(func) => N::ImmEvalStabilityGuard::apply_func_flex(
-                    self.args.drain(self.args.len() - 1..),
-                    id,
-                    func,
-                    &mut self.arg_space,
-                ),
+                BfPointer::Flexible(func) => {
+                    self.arg_space.clear();
+                    N::ImmEvalStabilityGuard::apply_func_flex(
+                        self.args.drain(self.args.len() - 1..),
+                        id,
+                        func,
+                        &mut self.arg_space,
+                    )
+                }
                 _ => unreachable!(),
             },
             SyOperator::FuncNoParen(FunctionType::Custom(id)) => {
@@ -279,12 +282,15 @@ where
                     let arg2 = self.args_pop()?;
                     self.args_pop()?.apply_func_dual(arg2, id, func)
                 }
-                BfPointer::Flexible(func) => N::ImmEvalStabilityGuard::apply_func_flex(
-                    self.args.drain(self.args.len() - argc.get() as usize..),
-                    id,
-                    func,
-                    &mut self.arg_space,
-                ),
+                BfPointer::Flexible(func) => {
+                    self.arg_space.clear();
+                    N::ImmEvalStabilityGuard::apply_func_flex(
+                        self.args.drain(self.args.len() - argc.get() as usize..),
+                        id,
+                        func,
+                        &mut self.arg_space,
+                    )
+                }
             },
             AstNode::Function(FunctionType::Custom(cf), args) => {
                 N::ImmEvalStabilityGuard::from_number(match (self.cf2pointer)(cf) {

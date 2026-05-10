@@ -186,7 +186,7 @@ mod tests {
             Some(vec![
                 FragKind::Variable(TestVar::T),
                 FragKind::Function(
-                    FunctionType::Builtin(StdFloatFunc::Cos),
+                    FunctionType::Builtin(StdFloatFunc::Cos.into()),
                     nz!(1),
                     Some(nz!(1))
                 ),
@@ -233,19 +233,19 @@ mod tests {
             fragment("cmin"),
             Some(vec![
                 FragKind::Constant(299792458.0),
-                FragKind::Function(FunctionType::Builtin(StdFloatFunc::Min), nz!(2), None)
+                FragKind::Function(FunctionType::Builtin(StdFloatFunc::Min.into()), nz!(2), None)
             ])
         );
         assert_eq!(
             fragment("sinsinangle"),
             Some(vec![
                 FragKind::Function(
-                    FunctionType::Builtin(StdFloatFunc::Sin),
+                    FunctionType::Builtin(StdFloatFunc::Sin.into()),
                     nz!(1),
                     Some(nz!(1))
                 ),
                 FragKind::Function(
-                    FunctionType::Builtin(StdFloatFunc::Sin),
+                    FunctionType::Builtin(StdFloatFunc::Sin.into()),
                     nz!(1),
                     Some(nz!(1))
                 ),
@@ -258,7 +258,7 @@ mod tests {
                 FragKind::Variable(TestVar::Sigma),
                 FragKind::Literal(55.0),
                 FragKind::Function(
-                    FunctionType::Builtin(StdFloatFunc::Sin),
+                    FunctionType::Builtin(StdFloatFunc::Sin.into()),
                     nz!(1),
                     Some(nz!(1))
                 ),
@@ -270,7 +270,7 @@ mod tests {
             Some(vec![
                 FragKind::Variable(TestVar::Angle),
                 FragKind::Function(
-                    FunctionType::Builtin(StdFloatFunc::Sin),
+                    FunctionType::Builtin(StdFloatFunc::Sin.into()),
                     nz!(1),
                     Some(nz!(1))
                 ),
@@ -284,7 +284,7 @@ mod tests {
                 FragKind::Variable(TestVar::T),
                 FragKind::Variable(TestVar::T),
                 FragKind::Function(
-                    FunctionType::Builtin(StdFloatFunc::Ln),
+                    FunctionType::Builtin(StdFloatFunc::Ln.into()),
                     nz!(1),
                     Some(nz!(1))
                 ),

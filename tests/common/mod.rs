@@ -2,7 +2,7 @@
 
 use math_eval::{
     BinaryOp, FunctionIdentifier, UnaryOp, VariableIdentifier,
-    number::std_float::StdFloatFunc,
+    number::{Number, std_float::StdFloatFunc},
     postfix_tree::Node,
     syntax::{AstNode, FunctionType},
 };
@@ -11,30 +11,52 @@ pub fn rand_f64() -> f64 {
     f64::from_bits(fastrand::u64(..))
 }
 
-fn rand_bf_1p() -> StdFloatFunc {
+fn rand_bf_1p() -> <f64 as Number>::BuiltinFuncId {
     use StdFloatFunc::*;
-    *weighted_choice(&[
-        (Sin, 4),
-        (Cos, 4),
-        (Tan, 3),
-        (Cot, 1),
-        (Asin, 2),
-        (Acos, 2),
-        (Atan, 3),
-        (Acot, 2),
-        (Log2, 2),
-        (Log10, 2),
-        (Ln, 3),
-        (Exp, 2),
-        (Floor, 2),
-        (Ceil, 2),
-        (Round, 2),
-        (Trunc, 1),
-        (Frac, 1),
-        (Abs, 4),
-        (Sign, 2),
-        (Sqrt, 4),
-        (Cbrt, 1),
+    #[cfg(feature = "libm")]
+    use math_eval::number::libm_ext::LibmFunc::*;
+    fastrand::choice([
+        Sin.into(),
+        Cos.into(),
+        Tan.into(),
+        Cot.into(),
+        Asin.into(),
+        Acos.into(),
+        Atan.into(),
+        Acot.into(),
+        Sinh.into(),
+        Cosh.into(),
+        Tanh.into(),
+        Coth.into(),
+        Asinh.into(),
+        Acosh.into(),
+        Atanh.into(),
+        Acoth.into(),
+        Log2.into(),
+        Log10.into(),
+        Ln1p.into(),
+        Ln.into(),
+        Exp.into(),
+        Expm1.into(),
+        Floor.into(),
+        Ceil.into(),
+        Round.into(),
+        Trunc.into(),
+        Frac.into(),
+        Abs.into(),
+        Sign.into(),
+        Sqrt.into(),
+        Cbrt.into(),
+        #[cfg(feature = "libm")]
+        Erf.into(),
+        #[cfg(feature = "libm")]
+        Erfc.into(),
+        #[cfg(feature = "libm")]
+        Exp10.into(),
+        #[cfg(feature = "libm")]
+        Gamma.into(),
+        #[cfg(feature = "libm")]
+        Lgamma.into(),
     ])
     .unwrap()
 }
@@ -49,17 +71,12 @@ fn rand_unaryop() -> UnaryOp {
 }
 
 fn rand_bf_2p() -> StdFloatFunc {
-    match fastrand::u8(0..11) {
-        0..5 => StdFloatFunc::Min,
-        5..10 => StdFloatFunc::Max,
-        10 => StdFloatFunc::Log,
-        _ => unreachable!(),
-    }
+    fastrand::choice([StdFloatFunc::Min, StdFloatFunc::Max, StdFloatFunc::Log]).unwrap()
 }
 
 fn rand_binaryop() -> BinaryOp {
     use BinaryOp::*;
-    *weighted_choice(&[(Add, 3), (Sub, 2), (Mul, 3), (Div, 2), (Pow, 2), (Mod, 1)]).unwrap()
+    fastrand::choice([Add, Sub, Mul, Div, Pow, Mod]).unwrap()
 }
 
 #[inline]
@@ -139,7 +156,7 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             },
             2 => match fastrand::u8(0..20) {
                 0..16 => AstNode::BinaryOp(rand_binaryop()),
-                16..19 => AstNode::Function(FunctionType::Builtin(rand_bf_2p()), nz!(2)),
+                16..19 => AstNode::Function(FunctionType::Builtin(rand_bf_2p().into()), nz!(2)),
                 19 => AstNode::Function(
                     FunctionType::Custom(*fastrand::choice(self.functions_2p).unwrap()),
                     nz!(2),
@@ -148,8 +165,8 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             },
             3 => AstNode::Function(
                 match fastrand::u8(0..7) {
-                    0 => FunctionType::Builtin(StdFloatFunc::Min),
-                    1 => FunctionType::Builtin(StdFloatFunc::Max),
+                    0 => FunctionType::Builtin(StdFloatFunc::Min.into()),
+                    1 => FunctionType::Builtin(StdFloatFunc::Max.into()),
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_3p).unwrap()),
                     _ => unreachable!(),
                 },
@@ -157,8 +174,8 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             ),
             4 => AstNode::Function(
                 match fastrand::u8(0..7) {
-                    0 => FunctionType::Builtin(StdFloatFunc::Min),
-                    1 => FunctionType::Builtin(StdFloatFunc::Max),
+                    0 => FunctionType::Builtin(StdFloatFunc::Min.into()),
+                    1 => FunctionType::Builtin(StdFloatFunc::Max.into()),
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_4p).unwrap()),
                     _ => unreachable!(),
                 },
