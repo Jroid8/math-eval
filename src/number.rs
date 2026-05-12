@@ -130,3 +130,47 @@ pub trait Number:
     fn max(values: &[Self]) -> Self;
     fn min(values: &[Self]) -> Self;
 }
+
+#[derive(Debug)]
+pub struct NoStabilityGuard<N: Number>(N);
+
+impl<N: Number> ImmEvalStabilityGuard<N> for NoStabilityGuard<N> {
+    fn from_number(num: N) -> Self {
+        NoStabilityGuard(num)
+    }
+
+    fn eval(self) -> N {
+        self.0
+    }
+
+    fn apply_unary_op(self, opr: UnaryOp) -> Self {
+        NoStabilityGuard(opr.eval(self.0))
+    }
+
+    fn apply_binary_op(self, rhs: Self, opr: BinaryOp) -> Self {
+        NoStabilityGuard(opr.eval(self.0, rhs.0.asarg()))
+    }
+
+    fn apply_func_single(self, _id: N::BuiltinFuncId, func: fn(N) -> N) -> Self {
+        NoStabilityGuard(func(self.0))
+    }
+
+    fn apply_func_dual(
+        self,
+        arg2: Self,
+        _id: N::BuiltinFuncId,
+        func: for<'a> fn(N, <N as Number>::AsArg<'a>) -> N,
+    ) -> Self {
+        NoStabilityGuard(func(self.0, arg2.0.asarg()))
+    }
+
+    fn apply_func_flex(
+        args: std::vec::Drain<'_, Self>,
+        _id: N::BuiltinFuncId,
+        func: fn(&[N]) -> N,
+        arg_space: &mut Vec<N>,
+    ) -> Self {
+        arg_space.extend(args.map(|a| a.0));
+        NoStabilityGuard(func(&arg_space))
+    }
+}
