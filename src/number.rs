@@ -362,9 +362,10 @@ mod tests {
         let mut symbol_space = SubtreeCollection::new();
         let mut sle = move |nodes: &[AstNode<f64, X, ()>]| {
             let mut ast = MathAst::from_nodes(nodes.iter().copied()).into_tree();
-            let i = 2;
+            let mut i = 2;
             while i < ast.len() {
                 substitute_log_eq(&mut ast, &mut symbol_space, i);
+                i += 1;
             }
             ast.postorder_iter().cloned().collect::<Vec<_>>()
         };
@@ -401,9 +402,10 @@ mod tests {
         let mut symbol_space = SubtreeCollection::new();
         let mut see = move |nodes: &[AstNode<f64, X, ()>]| {
             let mut ast = MathAst::from_nodes(nodes.iter().copied()).into_tree();
-            let i = 2;
+            let mut i = 2;
             while i < ast.len() {
                 substitute_exp_eq(&mut ast, &mut symbol_space, i);
+                i += 1;
             }
             ast.postorder_iter().cloned().collect::<Vec<_>>()
         };
