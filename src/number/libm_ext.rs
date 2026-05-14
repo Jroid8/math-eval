@@ -9,21 +9,19 @@ use crate::{
         BfPointer, BuiltinFuncId, CommonBuiltinFunc, ImmEvalStabilityGuard, Number,
         std_float::{
             StdFloatConstsNameTrie, StdFloatFunc, StdFloatFuncsSuperset, StdFloatLike,
-            substitute_exp2_eq, substitute_expm1_eq, substitute_ln1p_eq, substitute_log_eq,
+            StdFloatRecognizer, substitute_expm1_eq, substitute_ln1p_eq,
         },
+        substitute_exp_eq, substitute_log_eq,
     },
     nz,
     postfix_tree::{PostfixTree, subtree_collection::SubtreeCollection},
     syntax::{AstNode, FunctionType},
-    tokenizer::StandardFloatRecognizer,
     trie::{NameTrie, TrieNode},
 };
 
 pub trait LibmExtended: StdFloatLike {
     fn ln10() -> Self;
     fn ln2() -> Self;
-
-    fn exp10(self) -> Self;
 
     fn erf(self) -> Self;
     fn erfc(self) -> Self;
@@ -37,7 +35,6 @@ pub trait LibmExtended: StdFloatLike {
 pub enum LibmFunc {
     Erf,
     Erfc,
-    Exp10,
     Gamma,
     Lgamma,
 }
@@ -47,7 +44,6 @@ impl LibmFunc {
         match self {
             LibmFunc::Erf => "erf",
             LibmFunc::Erfc => "erfc",
-            LibmFunc::Exp10 => "exp10",
             LibmFunc::Gamma => "gamma",
             LibmFunc::Lgamma => "lgamma",
         }
@@ -91,6 +87,13 @@ impl Display for StdLibmFunc {
 impl BuiltinFuncId for StdLibmFunc {
     fn from_common(id: CommonBuiltinFunc) -> Self {
         StdLibmFunc::Std(StdFloatFunc::from_common(id))
+    }
+
+    fn into_common(self) -> Option<CommonBuiltinFunc> {
+        match self {
+            StdLibmFunc::Std(id) => id.into_common(),
+            StdLibmFunc::Libm(_) => None,
+        }
     }
 
     fn min_args(self) -> NonZeroU8 {
@@ -233,7 +236,7 @@ pub static STD_LIBM_FUNCS_TRIE_NODES: [TrieNode; 165] = [
     TrieNode::Leaf(StdFloatFunc::Exp as u32),
     TrieNode::Branch('1', 2),
     TrieNode::Branch('0', 1),
-    TrieNode::Leaf(LibmFunc::Exp10 as u32 + StdFloatFunc::VARIANTS.len() as u32),
+    TrieNode::Leaf(StdFloatFunc::Exp10 as u32),
     TrieNode::Branch('2', 1),
     TrieNode::Leaf(StdFloatFunc::Exp2 as u32),
     TrieNode::Branch('m', 2),
@@ -358,7 +361,7 @@ where
         match self {
             Self::Number(num) => num,
             Self::Exp(num) => num.exp(),
-            Self::OnePlus(num) => num + N::one(),
+            Self::OnePlus(num) => num + N::from_i8(1),
             Self::Gamma(num) => num.gamma(),
             Self::Erf(num) => num.erf(),
         }
@@ -366,18 +369,18 @@ where
 
     fn apply_unary_op(self, opr: UnaryOp) -> Self {
         if opr == UnaryOp::Fac {
-            return Self::Gamma(self.eval() + N::one());
+            return Self::Gamma(self.eval() + N::from_i8(1));
         }
         Self::Number(opr.eval(self.eval()))
     }
 
     fn apply_binary_op(self, rhs: Self, opr: BinaryOp) -> Self {
         match (self, rhs) {
-            (Self::Exp(x), Self::Number(y)) if opr == BinaryOp::Sub && y == N::one() => {
+            (Self::Exp(x), Self::Number(y)) if opr == BinaryOp::Sub && y == N::from_i8(1) => {
                 Self::Number(x.expm1())
             }
             (Self::Number(x), y) | (y, Self::Number(x))
-                if opr == BinaryOp::Add && x == N::one() =>
+                if opr == BinaryOp::Add && x == N::from_i8(1) =>
             {
                 Self::OnePlus(y.eval())
             }
@@ -392,7 +395,7 @@ where
                     base.pow(exp.asarg())
                 })
             }
-            (Self::Number(x), Self::Erf(y)) if opr == BinaryOp::Sub && x == N::one() => {
+            (Self::Number(x), Self::Erf(y)) if opr == BinaryOp::Sub && x == N::from_i8(1) => {
                 Self::Number(y.erfc())
             }
             (lhs, rhs) => Self::Number(opr.eval(lhs.eval(), rhs.eval())),
@@ -488,7 +491,7 @@ where
         }
         AstNode::UnaryOp(UnaryOp::Fac) => {
             symbol_space.extend_from_tree(tree, tree.nth_child(child, 0).unwrap());
-            symbol_space.push(AstNode::Number(N::one())).unwrap();
+            symbol_space.push(AstNode::Number(N::from_i8(1))).unwrap();
             symbol_space.push(AstNode::BinaryOp(BinaryOp::Add)).unwrap();
         }
         _ => return false,
@@ -535,7 +538,7 @@ where
         if let ((AstNode::Function(FunctionType::Builtin(func), _), idx), (AstNode::Number(lhs), _)) =
             (children.next().unwrap(), children.next().unwrap())
             && func.into_libm() == Some(LibmFunc::Erf)
-            && *lhs == N::one()
+            && *lhs == N::from_i8(1)
         {
             let param = tree.children_iter(idx).next().unwrap().1;
             symbol_space.extend_from_tree(&tree, param);
@@ -556,39 +559,7 @@ where
     }
 }
 
-pub fn substitute_exp10_eq<N, B, V: VarId, F: FuncId>(
-    tree: &mut PostfixTree<AstNode<N, V, F>>,
-    symbol_space: &mut SubtreeCollection<AstNode<N, V, F>>,
-    target: usize,
-) -> bool
-where
-    N: LibmExtended<BuiltinFuncId = B>,
-    B: LibmFuncsSuperset,
-{
-    if matches!(tree[target], AstNode::BinaryOp(BinaryOp::Pow)) {
-        let mut children = tree.children_iter(target);
-        let param = children.next().unwrap().1;
-        match children.next().unwrap() {
-            (AstNode::Number(base), _) if base.is_ten() => {
-                symbol_space.extend_from_tree(&tree, param);
-                symbol_space
-                    .push(AstNode::Function(
-                        FunctionType::Builtin(B::from_libm(LibmFunc::Exp10)),
-                        nz!(1),
-                    ))
-                    .unwrap();
-                let sc_head = symbol_space.len() - 1;
-                tree.replace_from_sc_move(target, symbol_space, sc_head);
-                true
-            }
-            _ => false,
-        }
-    } else {
-        false
-    }
-}
-
-fn substitute_libm_ext_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
+pub fn substitute_libm_ext_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
     tree: &mut PostfixTree<AstNode<N, V, F>>,
 ) where
     N: LibmExtended<BuiltinFuncId = B>,
@@ -599,13 +570,12 @@ fn substitute_libm_ext_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
     let mut idx = 2;
     while idx < tree.len() {
         for subs in [
-            substitute_exp2_eq,
             substitute_expm1_eq,
             substitute_ln1p_eq,
             substitute_log_eq,
             substitute_erfc_eq,
             substitute_lgamma_eq,
-            substitute_exp10_eq,
+            substitute_exp_eq,
         ] {
             if subs(tree, &mut symbol_space, idx) {
                 break;
@@ -632,12 +602,18 @@ macro_rules! impl_number_for_std_float {
             };
             const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = StdLibmFuncsTrie;
 
-            fn one() -> Self {
-                1.0
+            fn from_i8(value: i8) -> Self {
+                value.into()
             }
 
-            fn zero() -> Self {
-                0.0
+            fn as_i8(&self) -> Option<i8> {
+                if self.is_nan() || self.is_infinite() || *self != self.trunc() {
+                    return None;
+                }
+                if *self < i8::MIN as $t || *self > i8::MAX as $t {
+                    return None;
+                }
+                Some(*self as i8)
             }
 
             fn get_method_ptr(id: StdLibmFunc) -> BfPointer<$t> {
@@ -675,6 +651,7 @@ macro_rules! impl_number_for_std_float {
                     StdLibmFunc::Std(StdFloatFunc::Ln1p) => BfPointer::Single(Self::ln_1p),
                     StdLibmFunc::Std(StdFloatFunc::Exp) => BfPointer::Single(Self::exp),
                     StdLibmFunc::Std(StdFloatFunc::Exp2) => BfPointer::Single(Self::exp2),
+                    StdLibmFunc::Std(StdFloatFunc::Exp10) => BfPointer::Single(Self::exp10),
                     StdLibmFunc::Std(StdFloatFunc::Expm1) => BfPointer::Single(Self::exp_m1),
                     StdLibmFunc::Std(StdFloatFunc::Floor) => BfPointer::Single(Self::floor),
                     StdLibmFunc::Std(StdFloatFunc::Ceil) => BfPointer::Single(Self::ceil),
@@ -691,7 +668,6 @@ macro_rules! impl_number_for_std_float {
                     StdLibmFunc::Std(StdFloatFunc::Min) => {
                         BfPointer::Flexible(<Self as Number>::min)
                     }
-                    StdLibmFunc::Libm(LibmFunc::Exp10) => BfPointer::Single(Libm::<Self>::exp10),
                     StdLibmFunc::Libm(LibmFunc::Erf) => BfPointer::Single(Libm::<Self>::erf),
                     StdLibmFunc::Libm(LibmFunc::Erfc) => BfPointer::Single(Libm::<Self>::erfc),
                     StdLibmFunc::Libm(LibmFunc::Gamma) => BfPointer::Single(Libm::<Self>::tgamma),
@@ -711,6 +687,30 @@ macro_rules! impl_number_for_std_float {
 
             fn pow(self, rhs: Self) -> Self {
                 self.powf(rhs)
+            }
+
+            fn exp2(self) -> Self {
+                self.exp2()
+            }
+
+            fn exp10(self) -> Self {
+                Libm::<Self>::exp10(self)
+            }
+
+            fn log(self, base: Self) -> Self {
+                self.log(base)
+            }
+
+            fn log2(self) -> Self {
+                self.log2()
+            }
+
+            fn log10(self) -> Self {
+                self.log10()
+            }
+
+            fn sqrt(self) -> Self {
+                self.sqrt()
             }
 
             fn modulo(self, rhs: Self) -> Self {
@@ -785,10 +785,6 @@ macro_rules! impl_libmext_for_std_float {
                 std::$t::consts::LN_2
             }
 
-            fn exp10(self) -> Self {
-                Libm::<Self>::exp10(self)
-            }
-
             fn erf(self) -> Self {
                 Libm::<Self>::erf(self)
             }
@@ -827,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn precision_guard() {
+    fn stability_guard() {
         assert_eq!(
             Slsg::Number(0.1).apply_func_single(LibmFunc::Erf.into(), |_| panic!()),
             Slsg::Erf(0.1),
@@ -1059,7 +1055,7 @@ mod tests {
             vec![
                 AstNode::Variable(TestVar::X),
                 AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
-                AstNode::Function(FunctionType::Builtin(LibmFunc::Exp10.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Exp10.into()), nz!(1)),
             ]
         );
         assert_eq!(

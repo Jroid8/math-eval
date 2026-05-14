@@ -36,14 +36,10 @@ pub trait StdFloatLike: for<'a> Number<AsArg<'a> = Self> + Copy {
     fn atanh(self) -> Self;
     fn acoth(self) -> Self;
 
-    fn log(self, base: Self) -> Self;
-    fn log2(self) -> Self;
-    fn log10(self) -> Self;
     fn ln(self) -> Self;
     fn ln1p(self) -> Self;
 
     fn exp(self) -> Self;
-    fn exp2(self) -> Self;
     fn expm1(self) -> Self;
 
     fn floor(self) -> Self;
@@ -52,7 +48,6 @@ pub trait StdFloatLike: for<'a> Number<AsArg<'a> = Self> + Copy {
     fn trunc(self) -> Self;
     fn frac(self) -> Self;
 
-    fn sqrt(self) -> Self;
     fn cqrt(self) -> Self;
 }
 
@@ -83,6 +78,7 @@ pub enum StdFloatFunc {
     Ln1p,
     Exp,
     Exp2,
+    Exp10,
     Expm1,
     Floor,
     Ceil,
@@ -124,6 +120,7 @@ impl StdFloatFunc {
             StdFloatFunc::Ln1p => "ln1p",
             StdFloatFunc::Exp => "exp",
             StdFloatFunc::Exp2 => "exp2",
+            StdFloatFunc::Exp10 => "exp10",
             StdFloatFunc::Expm1 => "expm1",
             StdFloatFunc::Floor => "floor",
             StdFloatFunc::Ceil => "ceil",
@@ -143,10 +140,29 @@ impl StdFloatFunc {
 impl BuiltinFuncId for StdFloatFunc {
     fn from_common(id: CommonBuiltinFunc) -> Self {
         match id {
+            CommonBuiltinFunc::Exp2 => Self::Exp2,
+            CommonBuiltinFunc::Exp10 => Self::Exp10,
+            CommonBuiltinFunc::Log => Self::Log,
+            CommonBuiltinFunc::Log2 => Self::Log2,
+            CommonBuiltinFunc::Log10 => Self::Log10,
+            CommonBuiltinFunc::Sqrt => Self::Sqrt,
             CommonBuiltinFunc::Abs => Self::Abs,
             CommonBuiltinFunc::Sign => Self::Sign,
             CommonBuiltinFunc::Min => Self::Min,
             CommonBuiltinFunc::Max => Self::Max,
+        }
+    }
+
+    fn into_common(self) -> Option<CommonBuiltinFunc> {
+        match self {
+            Self::Log => Some(CommonBuiltinFunc::Log),
+            Self::Log2 => Some(CommonBuiltinFunc::Log2),
+            Self::Log10 => Some(CommonBuiltinFunc::Log10),
+            Self::Abs => Some(CommonBuiltinFunc::Abs),
+            Self::Sign => Some(CommonBuiltinFunc::Sign),
+            Self::Min => Some(CommonBuiltinFunc::Min),
+            Self::Max => Some(CommonBuiltinFunc::Max),
+            _ => None,
         }
     }
 
@@ -410,7 +426,7 @@ where
         match self {
             Self::Number(num) => num,
             Self::Exp(num) => num.exp(),
-            Self::OnePlus(num) => num + N::one(),
+            Self::OnePlus(num) => num + N::from_i8(1),
         }
     }
 
@@ -420,17 +436,17 @@ where
 
     fn apply_binary_op(self, rhs: Self, opr: BinaryOp) -> Self {
         match (self, rhs) {
-            (Self::Exp(x), Self::Number(y)) if opr == BinaryOp::Sub && y == N::one() => {
+            (Self::Exp(x), Self::Number(y)) if opr == BinaryOp::Sub && y.as_i8() == Some(1) => {
                 Self::Number(x.expm1())
             }
             (Self::Number(x), y) | (y, Self::Number(x))
-                if opr == BinaryOp::Add && x == N::one() =>
+                if opr == BinaryOp::Add && x.as_i8() == Some(1) =>
             {
                 Self::OnePlus(y.eval())
             }
             (Self::Number(base), exp) if opr == BinaryOp::Pow => {
                 let exp = exp.eval();
-                Self::Number(if base.is_two() {
+                Self::Number(if base.as_i8() == Some(2) {
                     exp.exp2()
                 } else {
                     base.pow(exp.asarg())
@@ -456,9 +472,9 @@ where
         Self::Number(if id == StdFloatFunc::Log {
             let base = arg2.eval();
             let num = self.eval();
-            if base.is_ten() {
+            if base.as_i8() == Some(10) {
                 num.log10()
-            } else if base.is_two() {
+            } else if base.as_i8() == Some(2) {
                 num.log2()
             } else {
                 num.log(base)
@@ -503,7 +519,7 @@ where
             match (children.next().unwrap(), children.next().unwrap()) {
                 ((AstNode::Number(num), _), (_, param))
                 | ((_, param), (AstNode::Number(num), _))
-                    if *num == N::one() =>
+                    if num.as_i8() == Some(1) =>
                 {
                     symbol_space.extend_from_tree(&tree, param);
                     symbol_space
@@ -541,7 +557,7 @@ where
             (
                 (AstNode::Number(rhs), _),
                 (AstNode::Function(FunctionType::Builtin(func), _), idx),
-            ) if func.into_std() == Some(StdFloatFunc::Exp) && *rhs == N::one() => {
+            ) if func.into_std() == Some(StdFloatFunc::Exp) && rhs.as_i8() == Some(1) => {
                 let param = tree.nth_child(idx, 0).unwrap();
                 symbol_space.extend_from_tree(&tree, param);
                 symbol_space
@@ -561,83 +577,8 @@ where
     }
 }
 
-pub fn substitute_log_eq<N, B, V: VarId, F: FuncId>(
-    tree: &mut PostfixTree<AstNode<N, V, F>>,
-    symbol_space: &mut SubtreeCollection<AstNode<N, V, F>>,
-    target: usize,
-) -> bool
-where
-    N: StdFloatLike<BuiltinFuncId = B>,
-    B: StdFloatFuncsSuperset,
-{
-    if matches!(
-        tree[target],
-        AstNode::Function(FunctionType::Builtin(func), _)
-            if func.into_std() == Some(StdFloatFunc::Log)
-    ) {
-        let mut children = tree.children_iter(target);
-        match children.next().unwrap() {
-            (AstNode::Number(base), _) => {
-                let func = if base.is_two() {
-                    StdFloatFunc::Log2
-                } else if base.is_ten() {
-                    StdFloatFunc::Log10
-                } else {
-                    return false;
-                };
-                let param = children.next().unwrap().1;
-                symbol_space.extend_from_tree(&tree, param);
-                symbol_space
-                    .push(AstNode::Function(
-                        FunctionType::Builtin(B::from_std(func)),
-                        nz!(1),
-                    ))
-                    .unwrap();
-                let sc_head = symbol_space.len() - 1;
-                tree.replace_from_sc_move(target, symbol_space, sc_head);
-                true
-            }
-            _ => false,
-        }
-    } else {
-        false
-    }
-}
-
-pub fn substitute_exp2_eq<N, B, V: VarId, F: FuncId>(
-    tree: &mut PostfixTree<AstNode<N, V, F>>,
-    symbol_space: &mut SubtreeCollection<AstNode<N, V, F>>,
-    target: usize,
-) -> bool
-where
-    N: StdFloatLike<BuiltinFuncId = B>,
-    B: StdFloatFuncsSuperset,
-{
-    if matches!(tree[target], AstNode::BinaryOp(BinaryOp::Pow)) {
-        let mut children = tree.children_iter(target);
-        let param = children.next().unwrap().1;
-        match children.next().unwrap() {
-            (AstNode::Number(base), _) if base.is_two() => {
-                symbol_space.extend_from_tree(&tree, param);
-                symbol_space
-                    .push(AstNode::Function(
-                        FunctionType::Builtin(B::from_std(StdFloatFunc::Exp2)),
-                        nz!(1),
-                    ))
-                    .unwrap();
-                let sc_head = symbol_space.len() - 1;
-                tree.replace_from_sc_move(target, symbol_space, sc_head);
-                true
-            }
-            _ => false,
-        }
-    } else {
-        false
-    }
-}
-
-#[cfg(all(not(feature = "libm"), not(feature = "num-traits")))]
-fn substitute_std_float_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
+#[cfg(not(feature = "libm"))]
+pub fn substitute_std_float_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
     tree: &mut PostfixTree<AstNode<N, V, F>>,
 ) where
     N: StdFloatLike<BuiltinFuncId = B>,
@@ -650,8 +591,8 @@ fn substitute_std_float_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
         for subs in [
             substitute_expm1_eq,
             substitute_ln1p_eq,
-            substitute_log_eq,
-            substitute_exp2_eq,
+            super::substitute_log_eq,
+            super::substitute_exp_eq,
         ] {
             if subs(tree, &mut symbol_space, idx) {
                 break;
@@ -663,7 +604,7 @@ fn substitute_std_float_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
 
 macro_rules! impl_number_for_std_float {
     ($t: ident) => {
-        #[cfg(all(not(feature = "libm"), not(feature = "num-traits")))]
+        #[cfg(not(feature = "libm"))]
         impl Number for $t {
             type AsArg<'a> = Self;
             type Recognizer = crate::tokenizer::StandardFloatRecognizer;
@@ -679,12 +620,18 @@ macro_rules! impl_number_for_std_float {
             };
             const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = StdFloatFuncsTrie;
 
-            fn one() -> Self {
-                1.0
+            fn from_i8(value: i8) -> Self {
+                value.into()
             }
 
-            fn zero() -> Self {
-                0.0
+            fn as_i8(&self) -> Option<i8> {
+                if self.is_nan() || self.is_infinite() || *self != self.trunc() {
+                    return None;
+                }
+                if *self < i8::MIN as $t || *self > i8::MAX as $t {
+                    return None;
+                }
+                Some(*self as i8)
             }
 
             fn get_method_ptr(id: StdFloatFunc) -> super::BfPointer<Self> {
@@ -719,6 +666,7 @@ macro_rules! impl_number_for_std_float {
                     StdFloatFunc::Ln1p => BfPointer::Single(Self::ln_1p),
                     StdFloatFunc::Exp => BfPointer::Single(Self::exp),
                     StdFloatFunc::Exp2 => BfPointer::Single(Self::exp2),
+                    StdFloatFunc::Exp10 => BfPointer::Single(Self::exp10),
                     StdFloatFunc::Expm1 => BfPointer::Single(Self::exp_m1),
                     StdFloatFunc::Floor => BfPointer::Single(Self::floor),
                     StdFloatFunc::Ceil => BfPointer::Single(Self::ceil),
@@ -748,6 +696,26 @@ macro_rules! impl_number_for_std_float {
                 self.powf(rhs)
             }
 
+            fn exp2(self) -> Self {
+                self.exp2()
+            }
+
+            fn exp10(self) -> Self {
+                (10 as $t).powf(self)
+            }
+
+            fn log(self, base: Self) -> Self {
+                self.log(base)
+            }
+
+            fn log2(self) -> Self {
+                self.log2()
+            }
+
+            fn log10(self) -> Self {
+                self.log10()
+            }
+
             fn modulo(self, rhs: Self) -> Self {
                 self.rem_euclid(rhs)
             }
@@ -765,6 +733,10 @@ macro_rules! impl_number_for_std_float {
                     },
                     None => self,
                 }
+            }
+
+            fn sqrt(self) -> Self {
+                self.sqrt()
             }
 
             fn max(values: &[Self]) -> Self {
@@ -901,18 +873,6 @@ macro_rules! impl_sfl_for_std_float {
                 self.recip().atanh()
             }
 
-            fn log(self, base: Self) -> Self {
-                self.log(base)
-            }
-
-            fn log2(self) -> Self {
-                self.log2()
-            }
-
-            fn log10(self) -> Self {
-                self.log10()
-            }
-
             fn ln(self) -> Self {
                 self.ln()
             }
@@ -923,10 +883,6 @@ macro_rules! impl_sfl_for_std_float {
 
             fn exp(self) -> Self {
                 self.exp()
-            }
-
-            fn exp2(self) -> Self {
-                self.exp2()
             }
 
             fn expm1(self) -> Self {
@@ -951,10 +907,6 @@ macro_rules! impl_sfl_for_std_float {
 
             fn frac(self) -> Self {
                 self.fract()
-            }
-
-            fn sqrt(self) -> Self {
-                self.sqrt()
             }
 
             fn cqrt(self) -> Self {
@@ -1015,7 +967,7 @@ mod tests {
             Sfsg::Number(100f64.exp2())
         );
         assert_eq!(
-            Sfsg::Number(977.0).apply_func_dual(
+            Sfsg::Number(977f64).apply_func_dual(
                 Sfsg::Number(10.0),
                 StdFloatFunc::Log,
                 |_, _| panic!()
@@ -1023,7 +975,7 @@ mod tests {
             Sfsg::Number(977f64.log10())
         );
         assert_eq!(
-            Sfsg::Number(888.0).apply_func_dual(
+            Sfsg::Number(888f64).apply_func_dual(
                 Sfsg::Number(2.0),
                 StdFloatFunc::Log,
                 |_, _| panic!()

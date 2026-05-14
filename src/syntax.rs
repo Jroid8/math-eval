@@ -446,8 +446,8 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
         symbol_space: &mut SubtreeCollection<AstNode<N, V, F>>,
     ) {
         let (positive, negative, mut lhs) = match head_opr {
-            BinaryOp::Add | BinaryOp::Sub => (BinaryOp::Add, BinaryOp::Sub, N::zero()),
-            BinaryOp::Mul | BinaryOp::Div => (BinaryOp::Mul, BinaryOp::Div, N::one()),
+            BinaryOp::Add | BinaryOp::Sub => (BinaryOp::Add, BinaryOp::Sub, N::from_i8(0)),
+            BinaryOp::Mul | BinaryOp::Div => (BinaryOp::Mul, BinaryOp::Div, N::from_i8(1)),
             _ => return,
         };
         let apply_pos = |parent: BinaryOp, pos: usize| -> BinaryOp {
