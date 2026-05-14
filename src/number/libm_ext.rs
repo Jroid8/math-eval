@@ -1,7 +1,7 @@
 use std::{fmt::Display, num::NonZeroU8};
 
 use libm::Libm;
-use strum::{FromRepr, VariantArray};
+use strum::{EnumIter, FromRepr, VariantArray};
 
 use crate::{
     BinaryOp, FunctionIdentifier as FuncId, UnaryOp, VariableIdentifier as VarId,
@@ -30,7 +30,7 @@ pub trait LibmExtended: StdFloatLike {
     fn lgamma(self) -> Self;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, EnumIter)]
 #[repr(u8)]
 pub enum LibmFunc {
     Erf,
@@ -154,7 +154,7 @@ impl LibmFuncsSuperset for StdLibmFunc {
     }
 }
 
-pub static STD_LIBM_FUNCS_TRIE_NODES: [TrieNode; 165] = [
+pub static STD_LIBM_FUNCS_TRIE_NODES: [TrieNode; 167] = [
     TrieNode::Branch('a', 51),
     TrieNode::Branch('b', 2),
     TrieNode::Branch('s', 1),
@@ -201,10 +201,12 @@ pub static STD_LIBM_FUNCS_TRIE_NODES: [TrieNode; 165] = [
     TrieNode::Leaf(StdFloatFunc::Asin as u32),
     TrieNode::Branch('h', 1),
     TrieNode::Leaf(StdFloatFunc::Asinh as u32),
-    TrieNode::Branch('t', 5),
-    TrieNode::Branch('a', 4),
-    TrieNode::Branch('n', 3),
+    TrieNode::Branch('t', 7),
+    TrieNode::Branch('a', 6),
+    TrieNode::Branch('n', 5),
     TrieNode::Leaf(StdFloatFunc::Atan as u32),
+    TrieNode::Branch('2', 1),
+    TrieNode::Leaf(StdFloatFunc::Atan2 as u32),
     TrieNode::Branch('h', 1),
     TrieNode::Leaf(StdFloatFunc::Atanh as u32),
     TrieNode::Branch('c', 17),
@@ -809,7 +811,7 @@ impl_libmext_for_std_float!(f32);
 
 #[cfg(test)]
 mod tests {
-    use strum::FromRepr;
+    use strum::{FromRepr, IntoEnumIterator};
 
     use super::StdLibmStabilityGuard as Slsg;
     use super::*;
@@ -1076,5 +1078,21 @@ mod tests {
                 AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln1p.into()), nz!(1)),
             ]
         );
+    }
+
+    #[test]
+    fn func_parsing() {
+        for &id in StdFloatFunc::VARIANTS {
+            assert_eq!(
+                StdLibmFuncsTrie.exact_match(id.name()),
+                Some(StdLibmFunc::Std(id))
+            );
+        }
+        for id in LibmFunc::iter() {
+            assert_eq!(
+                StdLibmFuncsTrie.exact_match(id.name()),
+                Some(StdLibmFunc::Libm(id))
+            );
+        }
     }
 }

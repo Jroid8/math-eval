@@ -215,7 +215,7 @@ impl StdFloatFuncsSuperset for StdFloatFunc {
     }
 }
 
-pub static STD_FLOAT_FUNCS_TRIE_NODES: [TrieNode; 146] = [
+pub static STD_FLOAT_FUNCS_TRIE_NODES: [TrieNode; 151] = [
     TrieNode::Branch('a', 51),
     TrieNode::Branch('b', 2),
     TrieNode::Branch('s', 1),
@@ -262,10 +262,12 @@ pub static STD_FLOAT_FUNCS_TRIE_NODES: [TrieNode; 146] = [
     TrieNode::Leaf(StdFloatFunc::Asin as u32),
     TrieNode::Branch('h', 1),
     TrieNode::Leaf(StdFloatFunc::Asinh as u32),
-    TrieNode::Branch('t', 5),
-    TrieNode::Branch('a', 4),
-    TrieNode::Branch('n', 3),
+    TrieNode::Branch('t', 7),
+    TrieNode::Branch('a', 6),
+    TrieNode::Branch('n', 5),
     TrieNode::Leaf(StdFloatFunc::Atan as u32),
+    TrieNode::Branch('2', 1),
+    TrieNode::Leaf(StdFloatFunc::Atan2 as u32),
     TrieNode::Branch('h', 1),
     TrieNode::Leaf(StdFloatFunc::Atanh as u32),
     TrieNode::Branch('c', 17),
@@ -286,10 +288,13 @@ pub static STD_FLOAT_FUNCS_TRIE_NODES: [TrieNode; 146] = [
     TrieNode::Leaf(StdFloatFunc::Cot as u32),
     TrieNode::Branch('h', 1),
     TrieNode::Leaf(StdFloatFunc::Coth as u32),
-    TrieNode::Branch('e', 8),
-    TrieNode::Branch('x', 7),
-    TrieNode::Branch('p', 6),
+    TrieNode::Branch('e', 11),
+    TrieNode::Branch('x', 10),
+    TrieNode::Branch('p', 9),
     TrieNode::Leaf(StdFloatFunc::Exp as u32),
+    TrieNode::Branch('1', 2),
+    TrieNode::Branch('0', 1),
+    TrieNode::Leaf(StdFloatFunc::Exp10 as u32),
     TrieNode::Branch('2', 1),
     TrieNode::Leaf(StdFloatFunc::Exp2 as u32),
     TrieNode::Branch('m', 2),
@@ -1082,5 +1087,12 @@ mod tests {
                 AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln1p.into()), nz!(1)),
             ]
         );
+    }
+
+    #[test]
+    fn func_parsing() {
+        for &id in StdFloatFunc::VARIANTS {
+            assert_eq!(StdFloatFuncsTrie.exact_match(id.name()), Some(id), "name: {}", id.name());
+        }
     }
 }
