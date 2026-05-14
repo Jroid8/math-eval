@@ -279,11 +279,51 @@ pub fn substitute_common_spec_funcs_eq<N: Number, V: VarId, F: FuncId>(
     }
 }
 
+static COMMON_FUNCS_TRIE_NODES: [TrieNode; 37] = [
+    TrieNode::Branch('a', 3),
+    TrieNode::Branch('b', 2),
+    TrieNode::Branch('s', 1),
+    TrieNode::Leaf(CommonBuiltinFunc::Abs as u32),
+    TrieNode::Branch('e', 7),
+    TrieNode::Branch('x', 6),
+    TrieNode::Branch('p', 5),
+    TrieNode::Branch('1', 2),
+    TrieNode::Branch('0', 1),
+    TrieNode::Leaf(CommonBuiltinFunc::Exp10 as u32),
+    TrieNode::Branch('2', 1),
+    TrieNode::Leaf(CommonBuiltinFunc::Exp2 as u32),
+    TrieNode::Branch('l', 8),
+    TrieNode::Branch('o', 7),
+    TrieNode::Branch('g', 6),
+    TrieNode::Leaf(CommonBuiltinFunc::Log as u32),
+    TrieNode::Branch('1', 2),
+    TrieNode::Branch('0', 1),
+    TrieNode::Leaf(CommonBuiltinFunc::Log10 as u32),
+    TrieNode::Branch('2', 1),
+    TrieNode::Leaf(CommonBuiltinFunc::Log2 as u32),
+    TrieNode::Branch('m', 6),
+    TrieNode::Branch('a', 2),
+    TrieNode::Branch('x', 1),
+    TrieNode::Leaf(CommonBuiltinFunc::Max as u32),
+    TrieNode::Branch('i', 2),
+    TrieNode::Branch('n', 1),
+    TrieNode::Leaf(CommonBuiltinFunc::Min as u32),
+    TrieNode::Branch('s', 8),
+    TrieNode::Branch('i', 3),
+    TrieNode::Branch('g', 2),
+    TrieNode::Branch('n', 1),
+    TrieNode::Leaf(CommonBuiltinFunc::Sign as u32),
+    TrieNode::Branch('q', 3),
+    TrieNode::Branch('r', 2),
+    TrieNode::Branch('t', 1),
+    TrieNode::Leaf(CommonBuiltinFunc::Sqrt as u32),
+];
+
 pub struct CommonFuncsTrie;
 
 impl NameTrie<CommonBuiltinFunc> for CommonFuncsTrie {
     fn nodes(&self) -> &[crate::trie::TrieNode] {
-        &[]
+        &COMMON_FUNCS_TRIE_NODES
     }
 
     fn leaf_to_value(&self, leaf: u32) -> CommonBuiltinFunc {
