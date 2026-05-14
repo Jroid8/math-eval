@@ -941,7 +941,11 @@ macro_rules! impl_sfl_for_std_float {
 impl_sfl_for_std_float!(f64);
 impl_sfl_for_std_float!(f32);
 
+#[cfg(test)]
 mod tests {
+    use strum::VariantArray;
+    use super::*;
+
     #[test]
     #[cfg(not(feature = "libm"))]
     fn precision_guard() {
@@ -1036,43 +1040,6 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>()
         };
-        assert_eq!(
-            usf(&[
-                AstNode::Variable(TestVar::X),
-                AstNode::Number(2.0),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log.into()), nz!(2)),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log2.into()), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt.into()), nz!(1)),
-                AstNode::Number(2.0),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log.into()), nz!(2)),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt.into()), nz!(1)),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log2.into()), nz!(1)),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Number(2.0),
-                AstNode::Variable(TestVar::X),
-                AstNode::BinaryOp(BinaryOp::Pow),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Exp2.into()), nz!(1)),
-            ]
-        );
         assert_eq!(
             usf(&[
                 AstNode::Variable(TestVar::X),

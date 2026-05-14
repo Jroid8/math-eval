@@ -308,3 +308,88 @@ where
         CommonBuiltinFunc::Max => BfPointer::Flexible(N::max),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{number::std_float::StdFloatFunc, syntax::MathAst};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct X;
+
+    #[test]
+    fn substitute_log_equivalent() {
+        let mut symbol_space = SubtreeCollection::new();
+        let mut sle = move |nodes: &[AstNode<f64, X, ()>]| {
+            let mut ast = MathAst::from_nodes(nodes.iter().copied()).into_tree();
+            let i = 2;
+            while i < ast.len() {
+                substitute_log_eq(&mut ast, &mut symbol_space, i);
+            }
+            ast.postorder_iter().cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(
+            sle(&[
+                AstNode::Variable(X),
+                AstNode::Number(2.0),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log.into()), nz!(2)),
+            ]),
+            vec![
+                AstNode::Variable(X),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log2.into()), nz!(1)),
+            ]
+        );
+        assert_eq!(
+            sle(&[
+                AstNode::Variable(X),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt.into()), nz!(1)),
+                AstNode::Number(2.0),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log.into()), nz!(2)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+            ]),
+            vec![
+                AstNode::Variable(X),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log2.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+            ]
+        );
+    }
+
+    #[test]
+    fn substitute_exp_equivalent() {
+        let mut symbol_space = SubtreeCollection::new();
+        let mut see = move |nodes: &[AstNode<f64, X, ()>]| {
+            let mut ast = MathAst::from_nodes(nodes.iter().copied()).into_tree();
+            let i = 2;
+            while i < ast.len() {
+                substitute_exp_eq(&mut ast, &mut symbol_space, i);
+            }
+            ast.postorder_iter().cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(
+            see(&[
+                AstNode::Number(2.0),
+                AstNode::Variable(X),
+                AstNode::BinaryOp(BinaryOp::Pow),
+            ]),
+            vec![
+                AstNode::Variable(X),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Exp2.into()), nz!(1)),
+            ]
+        );
+        assert_eq!(
+            see(&[
+                AstNode::Number(10.0),
+                AstNode::Variable(X),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+                AstNode::BinaryOp(BinaryOp::Pow),
+            ]),
+            vec![
+                AstNode::Variable(X),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Exp10.into()), nz!(1)),
+            ]
+        );
+    }
+}

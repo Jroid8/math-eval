@@ -1036,30 +1036,6 @@ mod tests {
         );
         assert_eq!(
             usf(&[
-                AstNode::Number(2.0),
-                AstNode::Variable(TestVar::X),
-                AstNode::BinaryOp(BinaryOp::Pow),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Exp2.into()), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
-                AstNode::Number(10.0),
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
-                AstNode::BinaryOp(BinaryOp::Pow),
-            ]),
-            vec![
-                AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Exp10.into()), nz!(1)),
-            ]
-        );
-        assert_eq!(
-            usf(&[
                 AstNode::Variable(TestVar::X),
                 AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sin.into()), nz!(1)),
                 AstNode::Function(FunctionType::Builtin(StdFloatFunc::Exp.into()), nz!(1)),
