@@ -618,10 +618,13 @@ mod tests {
     use strum::FromRepr;
 
     use super::*;
-    use crate::number::std_float::StdFloatFunc;
-    use crate::tokenizer::{StandardFloatRecognizer as Sfr, TokenStream};
-    use crate::trie::TrieNode;
-    use crate::{VariableStore, nz};
+    use crate::{
+        VariableStore,
+        number::std_float::{StdFloatFunc, StdFloatRecognizer as Sfr},
+        nz,
+        tokenizer::TokenStream,
+        trie::TrieNode,
+    };
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
     #[repr(u8)]

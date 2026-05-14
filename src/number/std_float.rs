@@ -8,6 +8,7 @@ use crate::{
     nz,
     postfix_tree::{PostfixTree, subtree_collection::SubtreeCollection},
     syntax::{AstNode, FunctionType},
+    tokenizer::NumberRecognizer,
     trie::{NameTrie, TrieNode},
 };
 
@@ -602,12 +603,33 @@ pub fn substitute_std_float_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
     }
 }
 
+pub struct StdFloatRecognizer(bool);
+
+impl NumberRecognizer for StdFloatRecognizer {
+    fn new(current: char) -> Option<Self> {
+        match current {
+            '0'..='9' => Some(Self(false)),
+            '.' => Some(Self(true)),
+            _ => None,
+        }
+    }
+
+    fn recognize(&mut self, current: char) -> bool {
+        if (current == 'e' || current == '.') && !self.0 {
+            self.0 = true;
+            true
+        } else {
+            current.is_ascii_digit()
+        }
+    }
+}
+
 macro_rules! impl_number_for_std_float {
     ($t: ident) => {
         #[cfg(not(feature = "libm"))]
         impl Number for $t {
             type AsArg<'a> = Self;
-            type Recognizer = crate::tokenizer::StandardFloatRecognizer;
+            type Recognizer = StdFloatRecognizer;
             type ConstsTrieType = StdFloatConstsNameTrie<Self>;
             type BuiltinFuncId = StdFloatFunc;
             type BuiltinFuncsTrieType = StdFloatFuncsTrie;

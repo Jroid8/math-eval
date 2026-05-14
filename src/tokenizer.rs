@@ -205,27 +205,6 @@ pub trait NumberRecognizer: Sized {
     fn recognize(&mut self, current: char) -> bool;
 }
 
-pub struct StandardFloatRecognizer(bool);
-
-impl NumberRecognizer for StandardFloatRecognizer {
-    fn new(current: char) -> Option<Self> {
-        match current {
-            '0'..='9' => Some(Self(false)),
-            '.' => Some(Self(true)),
-            _ => None,
-        }
-    }
-
-    fn recognize(&mut self, current: char) -> bool {
-        if (current == 'e' || current == '.') && !self.0 {
-            self.0 = true;
-            true
-        } else {
-            current.is_ascii_digit()
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TokenStream<S: AsRef<str>>(pub(crate) Vec<Token<S>>);
 
@@ -349,14 +328,12 @@ impl TokenizationError {
 
 #[cfg(test)]
 mod tests {
-    use super::DelimEdge::*;
-    use super::DelimKind::*;
-    use super::Token::*;
-    use super::*;
+    use super::{DelimEdge::*, DelimKind::*, Token::*, *};
+    use crate::number::std_float::StdFloatRecognizer as Sfr;
 
     #[test]
     fn tokenizer() {
-        let tokenize = |s| TokenStream::new::<StandardFloatRecognizer>(s);
+        let tokenize = |s| TokenStream::new::<Sfr>(s);
         assert_eq!(tokenize("1"), Ok(TokenStream(vec![Number("1")])));
         assert_eq!(tokenize("2291"), Ok(TokenStream(vec![Number("2291")])));
         assert_eq!(

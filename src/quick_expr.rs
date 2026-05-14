@@ -482,10 +482,13 @@ mod tests {
     use strum::FromRepr;
 
     use crate::{
-        number::{BfPointer, std_float::StdFloatFunc},
+        number::{
+            BfPointer,
+            std_float::{StdFloatFunc, StdFloatRecognizer as Sfr},
+        },
         nz,
         syntax::CfInfo,
-        tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
+        tokenizer::TokenStream,
         trie::{EmptyNameTrie, NameTrie, TrieNode},
     };
 

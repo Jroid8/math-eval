@@ -589,7 +589,7 @@ macro_rules! impl_number_for_std_float {
     ($t: ident) => {
         impl Number for $t {
             type AsArg<'a> = Self;
-            type Recognizer = StandardFloatRecognizer;
+            type Recognizer = StdFloatRecognizer;
             type ConstsTrieType = StdFloatConstsNameTrie<Self>;
             type BuiltinFuncId = StdLibmFunc;
             type BuiltinFuncsTrieType = StdLibmFuncsTrie;

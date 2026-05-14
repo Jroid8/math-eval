@@ -2,13 +2,10 @@ use std::{any::Any, fmt::Display, iter::repeat_with, panic};
 
 use math_eval::{
     FunctionPointer, VariableStore,
-    number::std_float::StdFloatFunc,
+    number::std_float::{StdFloatFunc, StdFloatRecognizer as Sfr},
     quick_expr::QuickExpr,
     syntax::{CfInfo, MathAst},
-    tokenizer::{
-        DelimEdge, DelimKind, DelimiterToken, OprToken, StandardFloatRecognizer as Sfr, Token,
-        TokenStream,
-    },
+    tokenizer::{DelimEdge, DelimKind, DelimiterToken, OprToken, Token, TokenStream},
     trie::{EmptyNameTrie, NameTrie, TrieNode, VecNameTrie},
 };
 use strum::{EnumIter, FromRepr, IntoEnumIterator, VariantArray};
@@ -41,7 +38,9 @@ fn fuzz_parser() {
             2 => Token::Variable(fastrand::choice(MyVar::iter()).unwrap().to_string()),
             3 => Token::Function(
                 if fastrand::u8(0..100) < 80 {
-                    fastrand::choice(StdFloatFunc::VARIANTS.iter()).unwrap().to_string()
+                    fastrand::choice(StdFloatFunc::VARIANTS.iter())
+                        .unwrap()
+                        .to_string()
                 } else {
                     fastrand::choice(MyFunc::iter()).unwrap().to_string()
                 },

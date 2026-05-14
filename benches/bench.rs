@@ -6,9 +6,10 @@ use criterion::{
 use fastrand::Rng;
 use math_eval::{
     FunctionPointer, VariableStore,
+    number::std_float::StdFloatRecognizer as Sfr,
     quick_expr::QuickExpr,
     syntax::{CfInfo, MathAst},
-    tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
+    tokenizer::TokenStream,
     trie::{EmptyNameTrie, NameTrie, TrieNode},
 };
 use meval::{Context, Expr};

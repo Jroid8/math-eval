@@ -3,9 +3,10 @@ use std::{f64::consts::PI, fmt::Display, ops::RangeInclusive};
 use fastrand_contrib::f64_range;
 use math_eval::{
     FunctionPointer, VariableStore,
+    number::std_float::StdFloatRecognizer as Sfr,
     quick_expr::QuickExpr,
     syntax::{CfInfo, MathAst},
-    tokenizer::{StandardFloatRecognizer as Sfr, TokenStream},
+    tokenizer::TokenStream,
     trie::{NameTrie, TrieNode},
 };
 use strum::FromRepr;
