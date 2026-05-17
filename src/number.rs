@@ -12,12 +12,13 @@ use crate::{
     postfix_tree::{PostfixTree, subtree_collection::SubtreeCollection},
     syntax::{AstNode, FunctionType},
     tokenizer::NumberRecognizer,
-    trie::NameTrie,
+    trie::{NameTrie, TrieNode},
 };
 
-pub mod std_float;
 #[cfg(feature = "libm")]
 pub mod libm_ext;
+pub mod std_float;
+pub mod std_int;
 
 #[derive(Debug, Clone, Copy, Hash)]
 pub enum BfPointer<N: Number> {

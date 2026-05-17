@@ -769,17 +769,19 @@ macro_rules! impl_number_for_std_float {
             fn max(values: &[Self]) -> Self {
                 values
                     .iter()
-                    .copied()
-                    .max_by(|x, y| x.total_cmp(y))
-                    .unwrap()
+                    .try_fold($t::NEG_INFINITY, |acc, x| {
+                        if x.is_nan() { None } else { Some(acc.max(*x)) }
+                    })
+                    .unwrap_or($t::NAN)
             }
 
             fn min(values: &[Self]) -> Self {
                 values
                     .iter()
-                    .copied()
-                    .min_by(|x, y| x.total_cmp(y))
-                    .unwrap()
+                    .try_fold($t::INFINITY, |acc, x| {
+                        if x.is_nan() { None } else { Some(acc.min(*x)) }
+                    })
+                    .unwrap_or($t::NAN)
             }
 
             fn factorial(self) -> Self {
@@ -948,8 +950,8 @@ impl_sfl_for_std_float!(f32);
 
 #[cfg(test)]
 mod tests {
-    use strum::VariantArray;
     use super::*;
+    use strum::VariantArray;
 
     #[test]
     #[cfg(not(feature = "libm"))]
@@ -1092,7 +1094,12 @@ mod tests {
     #[test]
     fn func_parsing() {
         for &id in StdFloatFunc::VARIANTS {
-            assert_eq!(StdFloatFuncsTrie.exact_match(id.name()), Some(id), "name: {}", id.name());
+            assert_eq!(
+                StdFloatFuncsTrie.exact_match(id.name()),
+                Some(id),
+                "name: {}",
+                id.name()
+            );
         }
     }
 }
