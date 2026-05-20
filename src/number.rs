@@ -126,6 +126,7 @@ pub trait Number:
 
     const CONSTS_TRIE: Self::ConstsTrieType;
     const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType;
+    const DO_DISPLACING_SIMPLIFICATION: bool;
 
     fn get_method_ptr(id: Self::BuiltinFuncId) -> BfPointer<Self>;
     fn asarg(&self) -> Self::AsArg<'_>;

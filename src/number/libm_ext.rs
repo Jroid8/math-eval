@@ -603,6 +603,7 @@ macro_rules! impl_number_for_std_float {
                 tau: std::$t::consts::TAU,
             };
             const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = StdLibmFuncsTrie;
+            const DO_DISPLACING_SIMPLIFICATION: bool = true;
 
             fn from_i8(value: i8) -> Self {
                 value.into()

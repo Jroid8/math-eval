@@ -398,6 +398,9 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
                     | (BinaryOp::Mul | BinaryOp::Div, BinaryOp::Mul | BinaryOp::Div)
             )
         }
+        if !N::DO_DISPLACING_SIMPLIFICATION {
+            return;
+        }
         let mut symbol_space: SubtreeCollection<AstNode<N, V, F>> =
             SubtreeCollection::from_alloc(Vec::with_capacity(0));
         let mut idx = 4;

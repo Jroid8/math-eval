@@ -255,6 +255,7 @@ macro_rules! impl_number_for_pfi {
 
             const CONSTS_TRIE: Self::ConstsTrieType = EmptyNameTrie;
             const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = CommonFuncsTrie;
+            const DO_DISPLACING_SIMPLIFICATION: bool = false;
 
             fn get_method_ptr(id: Self::BuiltinFuncId) -> super::BfPointer<Self> {
                 get_common_method_ptr(id)
