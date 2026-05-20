@@ -4,33 +4,12 @@ use crate::{
     FunctionIdentifier as FuncId, VariableIdentifier as VarId,
     number::{
         CommonBuiltinFunc, CommonFuncsTrie, NoStabilityGuard, Number, get_common_method_ptr,
-        substitute_common_spec_funcs_eq,
+        std_float::StdFloatRecognizer, substitute_common_spec_funcs_eq,
     },
     postfix_tree::PostfixTree,
     syntax::AstNode,
-    tokenizer::NumberRecognizer,
     trie::EmptyNameTrie,
 };
-
-pub struct StdIntRecognizer(bool);
-
-impl NumberRecognizer for StdIntRecognizer {
-    fn new(current: char) -> Option<Self> {
-        match current {
-            '0'..='9' => Some(Self(false)),
-            _ => None,
-        }
-    }
-
-    fn recognize(&mut self, current: char) -> bool {
-        if current == 'e' {
-            self.0 = !self.0;
-            self.0
-        } else {
-            current.is_ascii_digit()
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntMathError {
@@ -268,7 +247,7 @@ macro_rules! impl_number_for_pfi {
     ($($t: ident),+) => {$(
         impl Number for PanicFreeInt<$t> {
             type AsArg<'a> = Self;
-            type Recognizer = StdIntRecognizer;
+            type Recognizer = StdFloatRecognizer;
             type ConstsTrieType = EmptyNameTrie;
             type BuiltinFuncId = CommonBuiltinFunc;
             type BuiltinFuncsTrieType = CommonFuncsTrie;
