@@ -17,6 +17,8 @@ use crate::{
 
 #[cfg(feature = "libm")]
 pub mod libm_ext;
+#[cfg(feature = "num-traits")]
+pub mod num_traits;
 pub mod std_float;
 pub mod std_int;
 
