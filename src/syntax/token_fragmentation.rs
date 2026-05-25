@@ -2,7 +2,7 @@ use std::num::NonZeroU8;
 
 use crate::{
     FunctionIdentifier as FuncId, VariableIdentifier as VarId,
-    number::{BuiltinFuncId, Number},
+    number::Number,
     syntax::{CfInfo, FunctionType},
     tokenizer::NumberRecognizer,
     trie::NameTrie,
@@ -16,7 +16,7 @@ pub(super) enum FragKind<N: Number, V: VarId, F: FuncId> {
     Constant(N),
     Variable(V),
     Function(
-        FunctionType<N::BuiltinFuncId, F>,
+        FunctionType<N::ExtraFuncId, F>,
         NonZeroU8,
         Option<NonZeroU8>,
     ),
@@ -115,7 +115,11 @@ pub(super) fn fragment_token<'c, N: Number, V: VarId, F: FuncId>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{number::std_float::StdFloatFunc, nz, trie::VecNameTrie};
+    use crate::{
+        number::{BasicFunc, std_float::StdFloatFunc},
+        nz,
+        trie::VecNameTrie,
+    };
 
     use super::*;
     use std::f64::consts::*;
@@ -233,7 +237,7 @@ mod tests {
             fragment("cmin"),
             Some(vec![
                 FragKind::Constant(299792458.0),
-                FragKind::Function(FunctionType::Builtin(StdFloatFunc::Min.into()), nz!(2), None)
+                FragKind::Function(BasicFunc::Min.into(), nz!(2), None)
             ])
         );
         assert_eq!(

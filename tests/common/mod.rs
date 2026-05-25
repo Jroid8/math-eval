@@ -2,7 +2,7 @@
 
 use math_eval::{
     BinaryOp, FunctionIdentifier, UnaryOp, VariableIdentifier,
-    number::{Number, std_float::StdFloatFunc},
+    number::{BasicFunc, BuiltinFunc, Number, std_float::StdFloatFunc},
     postfix_tree::Node,
     syntax::{AstNode, FunctionType},
 };
@@ -11,7 +11,8 @@ pub fn rand_f64() -> f64 {
     f64::from_bits(fastrand::u64(..))
 }
 
-fn rand_bf_1p() -> <f64 as Number>::BuiltinFuncId {
+fn rand_bf_1p() -> BuiltinFunc<<f64 as Number>::ExtraFuncId> {
+    use BasicFunc::*;
     use StdFloatFunc::*;
     #[cfg(feature = "libm")]
     use math_eval::number::libm_ext::LibmFunc::*;
@@ -37,6 +38,7 @@ fn rand_bf_1p() -> <f64 as Number>::BuiltinFuncId {
         Ln1p.into(),
         Ln.into(),
         Exp.into(),
+        Exp10.into(),
         Expm1.into(),
         Floor.into(),
         Ceil.into(),
@@ -51,8 +53,6 @@ fn rand_bf_1p() -> <f64 as Number>::BuiltinFuncId {
         Erf.into(),
         #[cfg(feature = "libm")]
         Erfc.into(),
-        #[cfg(feature = "libm")]
-        Exp10.into(),
         #[cfg(feature = "libm")]
         Gamma.into(),
         #[cfg(feature = "libm")]
@@ -70,8 +70,8 @@ fn rand_unaryop() -> UnaryOp {
     }
 }
 
-fn rand_bf_2p() -> StdFloatFunc {
-    fastrand::choice([StdFloatFunc::Min, StdFloatFunc::Max, StdFloatFunc::Log]).unwrap()
+fn rand_bf_2p() -> BasicFunc {
+    fastrand::choice([BasicFunc::Min, BasicFunc::Max, BasicFunc::Log]).unwrap()
 }
 
 fn rand_binaryop() -> BinaryOp {
@@ -156,7 +156,7 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             },
             2 => match fastrand::u8(0..20) {
                 0..16 => AstNode::BinaryOp(rand_binaryop()),
-                16..19 => AstNode::Function(FunctionType::Builtin(rand_bf_2p().into()), nz!(2)),
+                16..19 => AstNode::Function(rand_bf_2p().into(), nz!(2)),
                 19 => AstNode::Function(
                     FunctionType::Custom(*fastrand::choice(self.functions_2p).unwrap()),
                     nz!(2),
@@ -165,8 +165,8 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             },
             3 => AstNode::Function(
                 match fastrand::u8(0..7) {
-                    0 => FunctionType::Builtin(StdFloatFunc::Min.into()),
-                    1 => FunctionType::Builtin(StdFloatFunc::Max.into()),
+                    0 => BasicFunc::Min.into(),
+                    1 => BasicFunc::Max.into(),
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_3p).unwrap()),
                     _ => unreachable!(),
                 },
@@ -174,8 +174,8 @@ impl<'a, V: VariableIdentifier, F: FunctionIdentifier> AstGen<'a, V, F> {
             ),
             4 => AstNode::Function(
                 match fastrand::u8(0..7) {
-                    0 => FunctionType::Builtin(StdFloatFunc::Min.into()),
-                    1 => FunctionType::Builtin(StdFloatFunc::Max.into()),
+                    0 => BasicFunc::Min.into(),
+                    1 => BasicFunc::Max.into(),
                     2..7 => FunctionType::Custom(*fastrand::choice(self.functions_4p).unwrap()),
                     _ => unreachable!(),
                 },

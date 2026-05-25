@@ -6,7 +6,7 @@ use strum::{EnumIter, FromRepr, VariantArray};
 use crate::{
     BinaryOp, FunctionIdentifier as FuncId, UnaryOp, VariableIdentifier as VarId,
     number::{
-        BfPointer, BuiltinFuncId, CommonBuiltinFunc, ImmEvalStabilityGuard, Number,
+        BasicFunc, BfPointer, BuiltinFunc, ExtraFuncId, ImmEvalStabilityGuard, Number,
         std_float::{
             StdFloatConstsNameTrie, StdFloatFunc, StdFloatFuncsSuperset, StdFloatLike,
             StdFloatRecognizer, substitute_expm1_eq, substitute_ln1p_eq,
@@ -69,9 +69,42 @@ impl From<StdFloatFunc> for StdLibmFunc {
     }
 }
 
+impl From<StdFloatFunc> for BuiltinFunc<StdLibmFunc> {
+    fn from(value: StdFloatFunc) -> Self {
+        BuiltinFunc::Ext(StdLibmFunc::Std(value))
+    }
+}
+
+impl From<BuiltinFunc<StdFloatFunc>> for BuiltinFunc<StdLibmFunc> {
+    fn from(value: BuiltinFunc<StdFloatFunc>) -> Self {
+        match value {
+            BuiltinFunc::Basic(id) => BuiltinFunc::Basic(id),
+            BuiltinFunc::Ext(id) => BuiltinFunc::Ext(StdLibmFunc::Std(id)),
+        }
+    }
+}
+
+impl<C: FuncId> From<StdFloatFunc> for FunctionType<StdLibmFunc, C> {
+    fn from(value: StdFloatFunc) -> Self {
+        FunctionType::Builtin(BuiltinFunc::Ext(StdLibmFunc::Std(value)))
+    }
+}
+
 impl From<LibmFunc> for StdLibmFunc {
     fn from(value: LibmFunc) -> Self {
         Self::Libm(value)
+    }
+}
+
+impl From<LibmFunc> for BuiltinFunc<StdLibmFunc> {
+    fn from(value: LibmFunc) -> Self {
+        BuiltinFunc::Ext(StdLibmFunc::Libm(value))
+    }
+}
+
+impl<C: FuncId> From<LibmFunc> for FunctionType<StdLibmFunc, C> {
+    fn from(value: LibmFunc) -> Self {
+        FunctionType::Builtin(BuiltinFunc::Ext(StdLibmFunc::Libm(value)))
     }
 }
 
@@ -84,18 +117,7 @@ impl Display for StdLibmFunc {
     }
 }
 
-impl BuiltinFuncId for StdLibmFunc {
-    fn from_common(id: CommonBuiltinFunc) -> Self {
-        StdLibmFunc::Std(StdFloatFunc::from_common(id))
-    }
-
-    fn into_common(self) -> Option<CommonBuiltinFunc> {
-        match self {
-            StdLibmFunc::Std(id) => id.into_common(),
-            StdLibmFunc::Libm(_) => None,
-        }
-    }
-
+impl ExtraFuncId for StdLibmFunc {
     fn min_args(self) -> NonZeroU8 {
         match self {
             StdLibmFunc::Std(id) => id.min_args(),
@@ -110,17 +132,9 @@ impl BuiltinFuncId for StdLibmFunc {
         }
     }
 
-    fn is_flex(self) -> bool {
-        match self {
-            StdLibmFunc::Std(id) => id.is_flex(),
-            StdLibmFunc::Libm(_) => false,
-        }
-    }
-
-    fn specialize_per_argc(&mut self, argc: NonZeroU8) {
-        match self {
-            StdLibmFunc::Std(id) => id.specialize_per_argc(argc),
-            StdLibmFunc::Libm(_) => (),
+    fn specialize_per_argc(func: &mut super::BuiltinFunc<Self>, argc: NonZeroU8) {
+        if *func == BasicFunc::Log.into() && argc.get() == 1 {
+            *func = StdFloatFunc::Ln.into()
         }
     }
 }
@@ -158,186 +172,191 @@ pub static STD_LIBM_FUNCS_TRIE_NODES: [TrieNode; 167] = [
     TrieNode::Branch('a', 51),
     TrieNode::Branch('b', 2),
     TrieNode::Branch('s', 1),
-    TrieNode::Leaf(StdFloatFunc::Abs as u32),
+    TrieNode::Leaf(BasicFunc::Abs as u32),
     TrieNode::Branch('c', 9),
     TrieNode::Branch('o', 8),
     TrieNode::Branch('s', 3),
-    TrieNode::Leaf(StdFloatFunc::Acos as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Acos as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Acosh as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Acosh as u32)),
     TrieNode::Branch('t', 3),
-    TrieNode::Leaf(StdFloatFunc::Acot as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Acot as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Acoth as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Acoth as u32)),
     TrieNode::Branch('r', 25),
     TrieNode::Branch('c', 24),
     TrieNode::Branch('c', 9),
     TrieNode::Branch('o', 8),
     TrieNode::Branch('s', 3),
-    TrieNode::Leaf(StdFloatFunc::Acos as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Acos as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Acosh as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Acosh as u32)),
     TrieNode::Branch('t', 3),
-    TrieNode::Leaf(StdFloatFunc::Acot as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Acot as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Acoth as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Acoth as u32)),
     TrieNode::Branch('s', 5),
     TrieNode::Branch('i', 4),
     TrieNode::Branch('n', 3),
-    TrieNode::Leaf(StdFloatFunc::Asin as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Asin as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Asinh as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Asinh as u32)),
     TrieNode::Branch('t', 7),
     TrieNode::Branch('a', 6),
     TrieNode::Branch('n', 5),
-    TrieNode::Leaf(StdFloatFunc::Atan as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Atan as u32)),
     TrieNode::Branch('2', 1),
-    TrieNode::Leaf(StdFloatFunc::Atan2 as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Atan2 as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Atanh as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Atanh as u32)),
     TrieNode::Branch('s', 5),
     TrieNode::Branch('i', 4),
     TrieNode::Branch('n', 3),
-    TrieNode::Leaf(StdFloatFunc::Asin as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Asin as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Asinh as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Asinh as u32)),
     TrieNode::Branch('t', 7),
     TrieNode::Branch('a', 6),
     TrieNode::Branch('n', 5),
-    TrieNode::Leaf(StdFloatFunc::Atan as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Atan as u32)),
     TrieNode::Branch('2', 1),
-    TrieNode::Leaf(StdFloatFunc::Atan2 as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Atan2 as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Atanh as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Atanh as u32)),
     TrieNode::Branch('c', 17),
     TrieNode::Branch('b', 3),
     TrieNode::Branch('r', 2),
     TrieNode::Branch('t', 1),
-    TrieNode::Leaf(StdFloatFunc::Cbrt as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Cbrt as u32)),
     TrieNode::Branch('e', 3),
     TrieNode::Branch('i', 2),
     TrieNode::Branch('l', 1),
-    TrieNode::Leaf(StdFloatFunc::Ceil as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Ceil as u32)),
     TrieNode::Branch('o', 8),
     TrieNode::Branch('s', 3),
-    TrieNode::Leaf(StdFloatFunc::Cos as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Cos as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Cosh as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Cosh as u32)),
     TrieNode::Branch('t', 3),
-    TrieNode::Leaf(StdFloatFunc::Cot as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Cot as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Coth as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Coth as u32)),
     TrieNode::Branch('e', 16),
     TrieNode::Branch('r', 4),
     TrieNode::Branch('f', 3),
-    TrieNode::Leaf(LibmFunc::Erf as u32 + StdFloatFunc::VARIANTS.len() as u32),
+    TrieNode::Leaf(StdFloatFunc::ext_id_offset(LibmFunc::Erf as u32)),
     TrieNode::Branch('c', 1),
-    TrieNode::Leaf(LibmFunc::Erfc as u32 + StdFloatFunc::VARIANTS.len() as u32),
+    TrieNode::Leaf(StdFloatFunc::ext_id_offset(LibmFunc::Erfc as u32)),
     TrieNode::Branch('x', 10),
     TrieNode::Branch('p', 9),
-    TrieNode::Leaf(StdFloatFunc::Exp as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Exp as u32)),
     TrieNode::Branch('1', 2),
     TrieNode::Branch('0', 1),
-    TrieNode::Leaf(StdFloatFunc::Exp10 as u32),
+    TrieNode::Leaf(BasicFunc::Exp10 as u32),
     TrieNode::Branch('2', 1),
-    TrieNode::Leaf(StdFloatFunc::Exp2 as u32),
+    TrieNode::Leaf(BasicFunc::Exp2 as u32),
     TrieNode::Branch('m', 2),
     TrieNode::Branch('1', 1),
-    TrieNode::Leaf(StdFloatFunc::Expm1 as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Expm1 as u32)),
     TrieNode::Branch('f', 11),
     TrieNode::Branch('l', 4),
     TrieNode::Branch('o', 3),
     TrieNode::Branch('o', 2),
     TrieNode::Branch('r', 1),
-    TrieNode::Leaf(StdFloatFunc::Floor as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Floor as u32)),
     TrieNode::Branch('r', 5),
     TrieNode::Branch('a', 4),
     TrieNode::Branch('c', 3),
-    TrieNode::Leaf(StdFloatFunc::Frac as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Frac as u32)),
     TrieNode::Branch('t', 1),
-    TrieNode::Leaf(StdFloatFunc::Frac as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Frac as u32)),
     TrieNode::Branch('g', 5),
     TrieNode::Branch('a', 4),
     TrieNode::Branch('m', 3),
     TrieNode::Branch('m', 2),
     TrieNode::Branch('a', 1),
-    TrieNode::Leaf(LibmFunc::Gamma as u32 + StdFloatFunc::VARIANTS.len() as u32),
+    TrieNode::Leaf(StdFloatFunc::ext_id_offset(LibmFunc::Gamma as u32)),
     TrieNode::Branch('l', 22),
     TrieNode::Branch('b', 1),
-    TrieNode::Leaf(StdFloatFunc::Log2 as u32),
+    TrieNode::Leaf(BasicFunc::Log2 as u32),
     TrieNode::Branch('g', 6),
-    TrieNode::Leaf(StdFloatFunc::Log2 as u32),
+    TrieNode::Leaf(BasicFunc::Log2 as u32),
     TrieNode::Branch('a', 4),
     TrieNode::Branch('m', 3),
     TrieNode::Branch('m', 2),
     TrieNode::Branch('a', 1),
-    TrieNode::Leaf(LibmFunc::Lgamma as u32 + StdFloatFunc::VARIANTS.len() as u32),
+    TrieNode::Leaf(StdFloatFunc::ext_id_offset(LibmFunc::Lgamma as u32)),
     TrieNode::Branch('n', 4),
-    TrieNode::Leaf(StdFloatFunc::Ln as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Ln as u32)),
     TrieNode::Branch('1', 2),
     TrieNode::Branch('p', 1),
-    TrieNode::Leaf(StdFloatFunc::Ln1p as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Ln1p as u32)),
     TrieNode::Branch('o', 7),
     TrieNode::Branch('g', 6),
-    TrieNode::Leaf(StdFloatFunc::Log as u32),
+    TrieNode::Leaf(BasicFunc::Log as u32),
     TrieNode::Branch('1', 2),
     TrieNode::Branch('0', 1),
-    TrieNode::Leaf(StdFloatFunc::Log10 as u32),
+    TrieNode::Leaf(BasicFunc::Log10 as u32),
     TrieNode::Branch('2', 1),
-    TrieNode::Leaf(StdFloatFunc::Log2 as u32),
+    TrieNode::Leaf(BasicFunc::Log2 as u32),
     TrieNode::Branch('m', 6),
     TrieNode::Branch('a', 2),
     TrieNode::Branch('x', 1),
-    TrieNode::Leaf(StdFloatFunc::Max as u32),
+    TrieNode::Leaf(BasicFunc::Max as u32),
     TrieNode::Branch('i', 2),
     TrieNode::Branch('n', 1),
-    TrieNode::Leaf(StdFloatFunc::Min as u32),
+    TrieNode::Leaf(BasicFunc::Min as u32),
     TrieNode::Branch('r', 5),
     TrieNode::Branch('o', 4),
     TrieNode::Branch('u', 3),
     TrieNode::Branch('n', 2),
     TrieNode::Branch('d', 1),
-    TrieNode::Leaf(StdFloatFunc::Round as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Round as u32)),
     TrieNode::Branch('s', 12),
     TrieNode::Branch('i', 7),
     TrieNode::Branch('g', 2),
     TrieNode::Branch('n', 1),
-    TrieNode::Leaf(StdFloatFunc::Sign as u32),
+    TrieNode::Leaf(BasicFunc::Sign as u32),
     TrieNode::Branch('n', 3),
-    TrieNode::Leaf(StdFloatFunc::Sin as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Sin as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Sinh as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Sinh as u32)),
     TrieNode::Branch('q', 3),
     TrieNode::Branch('r', 2),
     TrieNode::Branch('t', 1),
-    TrieNode::Leaf(StdFloatFunc::Sqrt as u32),
+    TrieNode::Leaf(BasicFunc::Sqrt as u32),
     TrieNode::Branch('t', 10),
     TrieNode::Branch('a', 4),
     TrieNode::Branch('n', 3),
-    TrieNode::Leaf(StdFloatFunc::Tan as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Tan as u32)),
     TrieNode::Branch('h', 1),
-    TrieNode::Leaf(StdFloatFunc::Tanh as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Tanh as u32)),
     TrieNode::Branch('r', 4),
     TrieNode::Branch('u', 3),
     TrieNode::Branch('n', 2),
     TrieNode::Branch('c', 1),
-    TrieNode::Leaf(StdFloatFunc::Trunc as u32),
+    TrieNode::Leaf(BasicFunc::ext_id_offset(StdFloatFunc::Trunc as u32)),
 ];
 
 pub struct StdLibmFuncsTrie;
 
-impl NameTrie<StdLibmFunc> for StdLibmFuncsTrie {
+impl NameTrie<BuiltinFunc<StdLibmFunc>> for StdLibmFuncsTrie {
     fn nodes(&self) -> &[TrieNode] {
         &STD_LIBM_FUNCS_TRIE_NODES
     }
 
-    fn leaf_to_value(&self, leaf: u32) -> StdLibmFunc {
-        const STD_FUNC_COUNT: u8 = StdFloatFunc::VARIANTS.len() as u8;
-        let leaf = leaf as u8;
-        if leaf >= STD_FUNC_COUNT {
-            StdLibmFunc::Libm(LibmFunc::from_repr(leaf - STD_FUNC_COUNT).unwrap())
+    fn leaf_to_value(&self, leaf: u32) -> BuiltinFunc<StdLibmFunc> {
+        let mut leaf = leaf as u8;
+        if let Some(id) = BasicFunc::from_repr(leaf) {
+            BuiltinFunc::Basic(id)
         } else {
-            StdLibmFunc::Std(StdFloatFunc::from_repr(leaf).unwrap())
+            leaf -= BasicFunc::VARIANTS.len() as u8;
+            BuiltinFunc::Ext(if let Some(id) = StdFloatFunc::from_repr(leaf) {
+                StdLibmFunc::Std(id)
+            } else {
+                leaf -= StdFloatFunc::VARIANTS.len() as u8;
+                StdLibmFunc::Libm(LibmFunc::from_repr(leaf).unwrap())
+            })
         }
     }
 }
@@ -353,7 +372,7 @@ pub enum StdLibmStabilityGuard<N> {
 
 impl<N> ImmEvalStabilityGuard<N> for StdLibmStabilityGuard<N>
 where
-    N: LibmExtended<BuiltinFuncId = StdLibmFunc>,
+    N: LibmExtended<ExtraFuncId = StdLibmFunc>,
 {
     fn from_number(num: N) -> Self {
         Self::Number(num)
@@ -404,26 +423,37 @@ where
         }
     }
 
-    fn apply_func_single(self, id: StdLibmFunc, func: fn(N) -> N) -> Self {
+    fn apply_func_single(self, id: BuiltinFunc<StdLibmFunc>, func: fn(N) -> N) -> Self {
         match (id, self) {
-            (StdLibmFunc::Std(StdFloatFunc::Exp), _) => Self::Exp(self.eval()),
-            (StdLibmFunc::Std(StdFloatFunc::Ln), Self::OnePlus(num)) => Self::Number(num.ln1p()),
-            (StdLibmFunc::Std(StdFloatFunc::Ln), Self::Gamma(num)) => Self::Number(num.lgamma()),
-            (StdLibmFunc::Std(StdFloatFunc::Ln), Self::Exp(num)) => Self::Number(num),
-            (StdLibmFunc::Std(StdFloatFunc::Log10), Self::Gamma(num)) => {
+            (BuiltinFunc::Ext(StdLibmFunc::Std(StdFloatFunc::Exp)), _) => Self::Exp(self.eval()),
+            (BuiltinFunc::Ext(StdLibmFunc::Std(StdFloatFunc::Ln)), Self::OnePlus(num)) => {
+                Self::Number(num.ln1p())
+            }
+            (BuiltinFunc::Ext(StdLibmFunc::Std(StdFloatFunc::Ln)), Self::Gamma(num)) => {
+                Self::Number(num.lgamma())
+            }
+            (BuiltinFunc::Ext(StdLibmFunc::Std(StdFloatFunc::Ln)), Self::Exp(num)) => {
+                Self::Number(num)
+            }
+            (BuiltinFunc::Basic(BasicFunc::Log10), Self::Gamma(num)) => {
                 Self::Number(num.lgamma() / N::ln10())
             }
-            (StdLibmFunc::Std(StdFloatFunc::Log2), Self::Gamma(num)) => {
+            (BuiltinFunc::Basic(BasicFunc::Log2), Self::Gamma(num)) => {
                 Self::Number(num.lgamma() / N::ln2())
             }
-            (StdLibmFunc::Libm(LibmFunc::Gamma), _) => Self::Gamma(self.eval()),
-            (StdLibmFunc::Libm(LibmFunc::Erf), _) => Self::Erf(self.eval()),
+            (BuiltinFunc::Ext(StdLibmFunc::Libm(LibmFunc::Gamma)), _) => Self::Gamma(self.eval()),
+            (BuiltinFunc::Ext(StdLibmFunc::Libm(LibmFunc::Erf)), _) => Self::Erf(self.eval()),
             _ => Self::Number(func(self.eval())),
         }
     }
 
-    fn apply_func_dual(self, arg2: Self, id: StdLibmFunc, func: fn(N, N) -> N) -> Self {
-        Self::Number(if id == StdLibmFunc::Std(StdFloatFunc::Log) {
+    fn apply_func_dual(
+        self,
+        arg2: Self,
+        id: BuiltinFunc<StdLibmFunc>,
+        func: fn(N, N) -> N,
+    ) -> Self {
+        Self::Number(if id == BasicFunc::Log.into() {
             let base = arg2.eval();
             if let Self::Gamma(num) = self {
                 return Self::Number(num.lgamma() / base.ln());
@@ -443,14 +473,14 @@ where
 
     fn apply_func_flex(
         args: std::vec::Drain<'_, Self>,
-        id: StdLibmFunc,
+        id: BuiltinFunc<StdLibmFunc>,
         _func: fn(&[N]) -> N,
         arg_space: &mut Vec<N>,
     ) -> Self {
         arg_space.extend(args.map(Self::eval));
         Self::Number(match id {
-            StdLibmFunc::Std(StdFloatFunc::Min) => N::min(&arg_space),
-            StdLibmFunc::Std(StdFloatFunc::Max) => N::max(&arg_space),
+            BuiltinFunc::Basic(BasicFunc::Min) => N::min(&arg_space),
+            BuiltinFunc::Basic(BasicFunc::Max) => N::max(&arg_space),
             _ => unreachable!(),
         })
     }
@@ -462,7 +492,7 @@ pub fn substitute_lgamma_eq<N, B, V: VarId, F: FuncId>(
     target: usize,
 ) -> bool
 where
-    N: LibmExtended<BuiltinFuncId = B>,
+    N: LibmExtended<ExtraFuncId = B>,
     B: LibmFuncsSuperset,
 {
     #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -474,11 +504,13 @@ where
     }
 
     let base = if let AstNode::Function(FunctionType::Builtin(func), _) = tree[target] {
-        match func.into_std() {
-            Some(StdFloatFunc::Ln) => LogBase::E,
-            Some(StdFloatFunc::Log10) => LogBase::Ten,
-            Some(StdFloatFunc::Log2) => LogBase::Two,
-            Some(StdFloatFunc::Log) => LogBase::Value(tree.nth_child(target, 1).unwrap()),
+        match func {
+            BuiltinFunc::Basic(BasicFunc::Log10) => LogBase::Ten,
+            BuiltinFunc::Basic(BasicFunc::Log2) => LogBase::Two,
+            BuiltinFunc::Basic(BasicFunc::Log) => {
+                LogBase::Value(tree.nth_child(target, 1).unwrap())
+            }
+            BuiltinFunc::Ext(id) if id.into_std() == Some(StdFloatFunc::Ln) => LogBase::E,
             _ => return false,
         }
     } else {
@@ -486,7 +518,7 @@ where
     };
     let child = tree.nth_child(target, 0).unwrap();
     match tree[child] {
-        AstNode::Function(FunctionType::Builtin(func), _)
+        AstNode::Function(FunctionType::Builtin(BuiltinFunc::Ext(func)), _)
             if func.into_libm() == Some(LibmFunc::Gamma) =>
         {
             symbol_space.extend_from_tree(tree, tree.nth_child(child, 0).unwrap());
@@ -500,7 +532,7 @@ where
     };
     symbol_space
         .push(AstNode::Function(
-            FunctionType::Builtin(B::from_libm(LibmFunc::Lgamma)),
+            FunctionType::Builtin(BuiltinFunc::Ext(B::from_libm(LibmFunc::Lgamma))),
             nz!(1),
         ))
         .unwrap();
@@ -512,7 +544,7 @@ where
             symbol_space.extend_from_tree(tree, idx);
             symbol_space
                 .push(AstNode::Function(
-                    FunctionType::Builtin(B::from_std(StdFloatFunc::Ln)),
+                    FunctionType::Builtin(BuiltinFunc::Ext(B::from_std(StdFloatFunc::Ln))),
                     nz!(1),
                 ))
                 .unwrap();
@@ -532,13 +564,15 @@ pub fn substitute_erfc_eq<N, B, V: VarId, F: FuncId>(
     target: usize,
 ) -> bool
 where
-    N: LibmExtended<BuiltinFuncId = B>,
+    N: LibmExtended<ExtraFuncId = B>,
     B: LibmFuncsSuperset,
 {
     if matches!(tree[target], AstNode::BinaryOp(BinaryOp::Sub)) {
         let mut children = tree.children_iter(target);
-        if let ((AstNode::Function(FunctionType::Builtin(func), _), idx), (AstNode::Number(lhs), _)) =
-            (children.next().unwrap(), children.next().unwrap())
+        if let (
+            (AstNode::Function(FunctionType::Builtin(BuiltinFunc::Ext(func)), _), idx),
+            (AstNode::Number(lhs), _),
+        ) = (children.next().unwrap(), children.next().unwrap())
             && func.into_libm() == Some(LibmFunc::Erf)
             && *lhs == N::from_i8(1)
         {
@@ -546,7 +580,7 @@ where
             symbol_space.extend_from_tree(&tree, param);
             symbol_space
                 .push(AstNode::Function(
-                    FunctionType::Builtin(B::from_libm(LibmFunc::Erfc)),
+                    FunctionType::Builtin(BuiltinFunc::Ext(B::from_libm(LibmFunc::Erfc))),
                     nz!(1),
                 ))
                 .unwrap();
@@ -564,7 +598,7 @@ where
 pub fn substitute_libm_ext_spec_funcs_eq<N, B, V: VarId, F: FuncId>(
     tree: &mut PostfixTree<AstNode<N, V, F>>,
 ) where
-    N: LibmExtended<BuiltinFuncId = B>,
+    N: LibmExtended<ExtraFuncId = B>,
     B: LibmFuncsSuperset,
 {
     let mut symbol_space: SubtreeCollection<AstNode<N, V, F>> =
@@ -593,7 +627,7 @@ macro_rules! impl_number_for_std_float {
             type AsArg<'a> = Self;
             type Recognizer = StdFloatRecognizer;
             type ConstsTrieType = StdFloatConstsNameTrie<Self>;
-            type BuiltinFuncId = StdLibmFunc;
+            type ExtraFuncId = StdLibmFunc;
             type BuiltinFuncsTrieType = StdLibmFuncsTrie;
             type ImmEvalStabilityGuard = StdLibmStabilityGuard<Self>;
 
@@ -647,30 +681,16 @@ macro_rules! impl_number_for_std_float {
                     StdLibmFunc::Std(StdFloatFunc::Acoth) => {
                         BfPointer::Single(|x| x.recip().atanh())
                     }
-                    StdLibmFunc::Std(StdFloatFunc::Log) => BfPointer::<Self>::Dual($t::log),
-                    StdLibmFunc::Std(StdFloatFunc::Log2) => BfPointer::Single(Self::log2),
-                    StdLibmFunc::Std(StdFloatFunc::Log10) => BfPointer::Single(Self::log10),
                     StdLibmFunc::Std(StdFloatFunc::Ln) => BfPointer::Single(Self::ln),
                     StdLibmFunc::Std(StdFloatFunc::Ln1p) => BfPointer::Single(Self::ln_1p),
                     StdLibmFunc::Std(StdFloatFunc::Exp) => BfPointer::Single(Self::exp),
-                    StdLibmFunc::Std(StdFloatFunc::Exp2) => BfPointer::Single(Self::exp2),
-                    StdLibmFunc::Std(StdFloatFunc::Exp10) => BfPointer::Single(Self::exp10),
                     StdLibmFunc::Std(StdFloatFunc::Expm1) => BfPointer::Single(Self::exp_m1),
                     StdLibmFunc::Std(StdFloatFunc::Floor) => BfPointer::Single(Self::floor),
                     StdLibmFunc::Std(StdFloatFunc::Ceil) => BfPointer::Single(Self::ceil),
                     StdLibmFunc::Std(StdFloatFunc::Round) => BfPointer::Single(Self::round),
                     StdLibmFunc::Std(StdFloatFunc::Trunc) => BfPointer::Single(Self::trunc),
                     StdLibmFunc::Std(StdFloatFunc::Frac) => BfPointer::Single(Self::fract),
-                    StdLibmFunc::Std(StdFloatFunc::Abs) => BfPointer::Single(Self::abs),
-                    StdLibmFunc::Std(StdFloatFunc::Sign) => BfPointer::Single(Self::sign),
-                    StdLibmFunc::Std(StdFloatFunc::Sqrt) => BfPointer::Single(Self::sqrt),
                     StdLibmFunc::Std(StdFloatFunc::Cbrt) => BfPointer::Single(Self::cbrt),
-                    StdLibmFunc::Std(StdFloatFunc::Max) => {
-                        BfPointer::Flexible(<Self as Number>::max)
-                    }
-                    StdLibmFunc::Std(StdFloatFunc::Min) => {
-                        BfPointer::Flexible(<Self as Number>::min)
-                    }
                     StdLibmFunc::Libm(LibmFunc::Erf) => BfPointer::Single(Libm::<Self>::erf),
                     StdLibmFunc::Libm(LibmFunc::Erfc) => BfPointer::Single(Libm::<Self>::erfc),
                     StdLibmFunc::Libm(LibmFunc::Gamma) => BfPointer::Single(Libm::<Self>::tgamma),
@@ -868,17 +888,17 @@ mod tests {
             Slsg::Number(8f64.ln())
         );
         assert_eq!(
-            Slsg::Gamma(1000.0).apply_func_single(StdFloatFunc::Log2.into(), |_| panic!()),
+            Slsg::Gamma(1000.0).apply_func_single(BasicFunc::Log2.into(), |_| panic!()),
             Slsg::Number(libm::lgamma(1000.0) / 2f64.ln())
         );
         assert_eq!(
-            Slsg::Gamma(1000.0).apply_func_single(StdFloatFunc::Log10.into(), |_| panic!()),
+            Slsg::Gamma(1000.0).apply_func_single(BasicFunc::Log10.into(), |_| panic!()),
             Slsg::Number(libm::lgamma(1000.0) / 10f64.ln())
         );
         assert_eq!(
             Slsg::Gamma(1000f64).apply_func_dual(
                 Slsg::Number(3f64),
-                StdFloatFunc::Log.into(),
+                BasicFunc::Log.into(),
                 |_, _| panic!()
             ),
             Slsg::Number(libm::lgamma(1000.0) / 3f64.ln())
@@ -922,7 +942,7 @@ mod tests {
         assert_eq!(
             Slsg::Number(977f64).apply_func_dual(
                 Slsg::Number(10f64),
-                StdFloatFunc::Log.into(),
+                BasicFunc::Log.into(),
                 |_, _| panic!()
             ),
             Slsg::Number(977f64.log10())
@@ -930,7 +950,7 @@ mod tests {
         assert_eq!(
             Slsg::Number(888f64).apply_func_dual(
                 Slsg::Number(2f64),
-                StdFloatFunc::Log.into(),
+                BasicFunc::Log.into(),
                 |_, _| panic!()
             ),
             Slsg::Number(888f64.log2())
@@ -1015,26 +1035,26 @@ mod tests {
             usf(&[
                 AstNode::Variable(TestVar::X),
                 AstNode::Number(2.0),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log.into()), nz!(2)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Log.into()), nz!(2)),
             ]),
             vec![
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log2.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Log2.into()), nz!(1)),
             ]
         );
         assert_eq!(
             usf(&[
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Sqrt.into()), nz!(1)),
                 AstNode::Number(2.0),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log.into()), nz!(2)),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Log.into()), nz!(2)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Abs.into()), nz!(1)),
             ]),
             vec![
                 AstNode::Variable(TestVar::X),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Sqrt.into()), nz!(1)),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Log2.into()), nz!(1)),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Sqrt.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Log2.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Abs.into()), nz!(1)),
             ]
         );
         assert_eq!(
@@ -1054,14 +1074,14 @@ mod tests {
         assert_eq!(
             usf(&[
                 AstNode::Variable(TestVar::Y),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Abs.into()), nz!(1)),
                 AstNode::Number(1.0),
                 AstNode::BinaryOp(BinaryOp::Add),
                 AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln.into()), nz!(1)),
             ]),
             vec![
                 AstNode::Variable(TestVar::Y),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Abs.into()), nz!(1)),
                 AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln1p.into()), nz!(1)),
             ]
         );
@@ -1069,13 +1089,13 @@ mod tests {
             usf(&[
                 AstNode::Number(1.0),
                 AstNode::Variable(TestVar::Y),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Abs.into()), nz!(1)),
                 AstNode::BinaryOp(BinaryOp::Add),
                 AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln.into()), nz!(1)),
             ]),
             vec![
                 AstNode::Variable(TestVar::Y),
-                AstNode::Function(FunctionType::Builtin(StdFloatFunc::Abs.into()), nz!(1)),
+                AstNode::Function(FunctionType::Builtin(BasicFunc::Abs.into()), nz!(1)),
                 AstNode::Function(FunctionType::Builtin(StdFloatFunc::Ln1p.into()), nz!(1)),
             ]
         );
@@ -1083,16 +1103,28 @@ mod tests {
 
     #[test]
     fn func_parsing() {
+        for &id in BasicFunc::VARIANTS {
+            assert_eq!(
+                StdLibmFuncsTrie.exact_match(id.name()),
+                Some(BuiltinFunc::Basic(id)),
+                "name: {}",
+                id.name()
+            );
+        }
         for &id in StdFloatFunc::VARIANTS {
             assert_eq!(
                 StdLibmFuncsTrie.exact_match(id.name()),
-                Some(StdLibmFunc::Std(id))
+                Some(BuiltinFunc::Ext(StdLibmFunc::Std(id))),
+                "name: {}",
+                id.name()
             );
         }
         for id in LibmFunc::iter() {
             assert_eq!(
                 StdLibmFuncsTrie.exact_match(id.name()),
-                Some(StdLibmFunc::Libm(id))
+                Some(BuiltinFunc::Ext(StdLibmFunc::Libm(id))),
+                "name: {}",
+                id.name()
             );
         }
     }

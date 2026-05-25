@@ -3,8 +3,8 @@ use std::{cmp::Ordering, str::FromStr};
 use crate::{
     FunctionIdentifier as FuncId, VariableIdentifier as VarId,
     number::{
-        CommonBuiltinFunc, CommonFuncsTrie, NoStabilityGuard, Number, get_common_method_ptr,
-        std_float::StdFloatRecognizer, substitute_common_spec_funcs_eq,
+        BasicFuncsTrie, NoExtFunc, NoStabilityGuard, Number, std_float::StdFloatRecognizer,
+        substitute_basic_funcs_eq,
     },
     postfix_tree::PostfixTree,
     syntax::AstNode,
@@ -249,22 +249,22 @@ macro_rules! impl_number_for_pfi {
             type AsArg<'a> = Self;
             type Recognizer = StdFloatRecognizer;
             type ConstsTrieType = EmptyNameTrie;
-            type BuiltinFuncId = CommonBuiltinFunc;
-            type BuiltinFuncsTrieType = CommonFuncsTrie;
+            type ExtraFuncId = NoExtFunc;
+            type BuiltinFuncsTrieType = BasicFuncsTrie;
             type ImmEvalStabilityGuard = NoStabilityGuard<Self>;
 
             const CONSTS_TRIE: Self::ConstsTrieType = EmptyNameTrie;
-            const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = CommonFuncsTrie;
+            const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = BasicFuncsTrie;
             const DO_DISPLACING_SIMPLIFICATION: bool = false;
 
-            fn get_method_ptr(id: Self::BuiltinFuncId) -> super::BfPointer<Self> {
-                get_common_method_ptr(id)
+            fn get_method_ptr(id: NoExtFunc) -> super::BfPointer<Self> {
+                match id {}
             }
 
             fn substitute_spec_funcs_equivalents<V: VarId, F: FuncId>(
                 tree: &mut PostfixTree<AstNode<Self, V, F>>,
             ) {
-                substitute_common_spec_funcs_eq(tree);
+                substitute_basic_funcs_eq(tree);
             }
 
             fn asarg(&self) -> Self::AsArg<'_> {

@@ -12,7 +12,8 @@ use crate::{
     number::{
         BfPointer, Number,
         std_float::{
-            STD_FLOAT_CONSTS_TRIE_NODES, StdFloatFunc, StdFloatFuncsTrie, StdFloatLike, StdFloatPrecisionGuard, StdFloatRecognizer, substitute_std_float_spec_funcs_eq
+            STD_FLOAT_CONSTS_TRIE_NODES, StdFloatFunc, StdFloatFuncsTrie, StdFloatLike,
+            StdFloatPrecisionGuard, StdFloatRecognizer, substitute_std_float_spec_funcs_eq,
         },
     },
     postfix_tree::PostfixTree,
@@ -96,7 +97,7 @@ where
     type AsArg<'a> = Self;
     type Recognizer = StdFloatRecognizer;
     type ConstsTrieType = NumRealConstsNameTrie<N>;
-    type BuiltinFuncId = StdFloatFunc;
+    type ExtraFuncId = StdFloatFunc;
     type BuiltinFuncsTrieType = StdFloatFuncsTrie;
     type ImmEvalStabilityGuard = StdFloatPrecisionGuard<Self>;
 
@@ -104,7 +105,7 @@ where
     const BUILTIN_FUNCS_TRIE: Self::BuiltinFuncsTrieType = StdFloatFuncsTrie;
     const DO_DISPLACING_SIMPLIFICATION: bool = true;
 
-    fn get_method_ptr(id: Self::BuiltinFuncId) -> super::BfPointer<Self> {
+    fn get_method_ptr(id: StdFloatFunc) -> super::BfPointer<Self> {
         match id {
             StdFloatFunc::Sin => BfPointer::Single(Self::sin),
             StdFloatFunc::Cos => BfPointer::Single(Self::cos),
@@ -123,26 +124,16 @@ where
             StdFloatFunc::Acosh => BfPointer::Single(Self::acosh),
             StdFloatFunc::Atanh => BfPointer::Single(Self::atanh),
             StdFloatFunc::Acoth => BfPointer::Single(Self::acot),
-            StdFloatFunc::Log => BfPointer::<Self>::Dual(Self::log),
-            StdFloatFunc::Log2 => BfPointer::Single(Self::log2),
-            StdFloatFunc::Log10 => BfPointer::Single(Self::log10),
             StdFloatFunc::Ln => BfPointer::Single(Self::ln),
             StdFloatFunc::Ln1p => BfPointer::Single(Self::ln1p),
             StdFloatFunc::Exp => BfPointer::Single(Self::exp),
-            StdFloatFunc::Exp2 => BfPointer::Single(Self::exp2),
-            StdFloatFunc::Exp10 => BfPointer::Single(Self::exp10),
             StdFloatFunc::Expm1 => BfPointer::Single(Self::expm1),
             StdFloatFunc::Floor => BfPointer::Single(Self::floor),
             StdFloatFunc::Ceil => BfPointer::Single(Self::ceil),
             StdFloatFunc::Round => BfPointer::Single(Self::round),
             StdFloatFunc::Trunc => BfPointer::Single(Self::trunc),
             StdFloatFunc::Frac => BfPointer::Single(Self::frac),
-            StdFloatFunc::Abs => BfPointer::Single(Self::abs),
-            StdFloatFunc::Sign => BfPointer::Single(Self::sign),
-            StdFloatFunc::Sqrt => BfPointer::Single(Self::sqrt),
             StdFloatFunc::Cbrt => BfPointer::Single(Self::cqrt),
-            StdFloatFunc::Max => BfPointer::Flexible(Self::max),
-            StdFloatFunc::Min => BfPointer::Flexible(Self::min),
         }
     }
 

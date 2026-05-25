@@ -3,7 +3,7 @@ use std::{fmt::Debug, marker::PhantomData, num::NonZeroU8, slice::Iter};
 use crate::{
     BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, UnaryOp, VariableIdentifier as VarId,
     VariableStore,
-    number::{BuiltinFuncId, Number},
+    number::{BuiltinFunc, ExtraFuncId, Number},
     nz,
     syntax::{AstNode, FunctionType, MathAst},
 };
@@ -109,10 +109,10 @@ impl<N: Number> From<UnaryOp> for CtxFuncPtr<'static, N> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FunctionSource<B: BuiltinFuncId, C: FuncId> {
+pub(crate) enum FunctionSource<B: ExtraFuncId, C: FuncId> {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
-    BuiltinFunction(B),
+    BuiltinFunction(BuiltinFunc<B>),
     CustomFunction(C),
 }
 
@@ -121,12 +121,12 @@ pub(crate) struct MarkedFunc<'a, N: Number, F: FuncId> {
     pub(crate) func: CtxFuncPtr<'a, N>,
     pub(crate) _src: PhantomData<F>,
     #[cfg(debug_assertions)]
-    pub(crate) src: FunctionSource<N::BuiltinFuncId, F>,
+    pub(crate) src: FunctionSource<N::ExtraFuncId, F>,
 }
 
 impl<'a, N: Number, F: FuncId> MarkedFunc<'a, N, F> {
     #[allow(unused_variables)]
-    pub(crate) fn new(func: CtxFuncPtr<'a, N>, src: FunctionSource<N::BuiltinFuncId, F>) -> Self {
+    pub(crate) fn new(func: CtxFuncPtr<'a, N>, src: FunctionSource<N::ExtraFuncId, F>) -> Self {
         Self {
             func,
             _src: PhantomData,
@@ -280,7 +280,7 @@ impl<'a, N: Number, V: VarId, F: FuncId> QuickExpr<'a, N, V, F> {
                     }
                     arg_cons = argc.get();
                     instructions.push(Instr::Calculate(MarkedFunc::new(
-                        CtxFuncPtr::from_ptr_args(N::get_method_ptr(bf).into(), argc),
+                        CtxFuncPtr::from_ptr_args(bf.get_method_ptr().into(), argc),
                         FunctionSource::BuiltinFunction(bf),
                     )));
                 }
@@ -483,7 +483,7 @@ mod tests {
 
     use crate::{
         number::{
-            BfPointer,
+            BasicFunc, BfPointer,
             std_float::{StdFloatFunc, StdFloatRecognizer as Sfr},
         },
         nz,
@@ -613,13 +613,20 @@ mod tests {
         }
     }
 
-    fn bf_to_markedfn(bf: StdFloatFunc, argc: NonZeroU8) -> MarkedFunc<'static, f64, TestFunc> {
-        let ptr = match f64::get_method_ptr(bf.into()) {
+    fn bf_to_markedfn(
+        bf: BuiltinFunc<StdFloatFunc>,
+        argc: NonZeroU8,
+    ) -> MarkedFunc<'static, f64, TestFunc> {
+        let ptr = match bf {
+            BuiltinFunc::Basic(id) => id.get_method_ptr(),
+            BuiltinFunc::Ext(id) => <f64 as Number>::get_method_ptr(id.into()),
+        };
+        let ctx_ptr = match ptr {
             BfPointer::Single(ptr) => CtxFuncPtr::Single(ptr),
             BfPointer::Dual(ptr) => CtxFuncPtr::<f64>::Dual(ptr),
             BfPointer::Flexible(ptr) => CtxFuncPtr::Flexible(ptr, argc),
         };
-        MarkedFunc::new(ptr, FunctionSource::BuiltinFunction(bf.into()))
+        MarkedFunc::new(ctx_ptr, FunctionSource::BuiltinFunction(bf.into()))
     }
 
     #[test]
@@ -664,23 +671,26 @@ mod tests {
                 param_sources: vec![Source::Variable],
                 literals: vec![],
                 variables: vec![TestVar::X],
-                instructions: vec![Instr::Calculate(bf_to_markedfn(StdFloatFunc::Sin, nz!(1)))],
+                instructions: vec![Instr::Calculate(bf_to_markedfn(
+                    StdFloatFunc::Sin.into(),
+                    nz!(1)
+                ))],
             },
         );
         assert_eq!(
-            convert("sin(x)+1"),
+            convert("sqrt(x)+1"),
             QuickExpr {
                 param_sources: vec![Source::Variable, Source::Stack, Source::Literal],
                 literals: vec![1.0],
                 variables: vec![TestVar::X],
                 instructions: vec![
-                    Instr::Calculate(bf_to_markedfn(StdFloatFunc::Sin, nz!(1))),
+                    Instr::Calculate(bf_to_markedfn(BasicFunc::Sqrt.into(), nz!(1))),
                     Instr::Calculate(BinaryOp::Add.into())
                 ],
             },
         );
         assert_eq!(
-            convert("ysin(x)+1"),
+            convert("yln(x)+1"),
             QuickExpr {
                 param_sources: vec![
                     Source::Variable,
@@ -692,7 +702,7 @@ mod tests {
                 literals: vec![1.0],
                 variables: vec![TestVar::X, TestVar::Y],
                 instructions: vec![
-                    Instr::Calculate(bf_to_markedfn(StdFloatFunc::Sin, nz!(1))),
+                    Instr::Calculate(bf_to_markedfn(StdFloatFunc::Ln.into(), nz!(1))),
                     Instr::Calculate(BinaryOp::Mul.into()),
                     Instr::Calculate(BinaryOp::Add.into())
                 ],
@@ -726,12 +736,12 @@ mod tests {
                     Instr::Push(Source::Variable),
                     Instr::Calculate(BinaryOp::Mul.into()),
                     Instr::Push(Source::Literal),
-                    Instr::Calculate(bf_to_markedfn(StdFloatFunc::Max, nz!(3))),
+                    Instr::Calculate(bf_to_markedfn(BasicFunc::Max.into(), nz!(3))),
                 ]
             }
         );
         assert_eq!(
-            convert("x^2 + sin(y)"),
+            convert("x^2 + cbrt(y)"),
             QuickExpr {
                 param_sources: vec![
                     Source::Variable,
@@ -744,7 +754,7 @@ mod tests {
                 variables: vec![TestVar::X, TestVar::Y],
                 instructions: vec![
                     Instr::Calculate(BinaryOp::Pow.into()),
-                    Instr::Calculate(bf_to_markedfn(StdFloatFunc::Sin, nz!(1))),
+                    Instr::Calculate(bf_to_markedfn(StdFloatFunc::Cbrt.into(), nz!(1))),
                     Instr::Calculate(BinaryOp::Add.into())
                 ]
             }
@@ -759,7 +769,7 @@ mod tests {
                     Instr::Push(Source::Literal),
                     Instr::Push(Source::Variable),
                     Instr::Push(Source::Literal),
-                    Instr::Calculate(bf_to_markedfn(StdFloatFunc::Min, nz!(3))),
+                    Instr::Calculate(bf_to_markedfn(BasicFunc::Min.into(), nz!(3))),
                     Instr::Calculate(BinaryOp::Add.into()),
                 ]
             }
@@ -797,7 +807,7 @@ mod tests {
                     Instr::<f64, TestFunc>::Push(Source::Literal),
                     Instr::Push(Source::Variable),
                     Instr::Push(Source::Literal),
-                    Instr::Calculate(bf_to_markedfn(StdFloatFunc::Min, nz!(3))),
+                    Instr::Calculate(bf_to_markedfn(BasicFunc::Min.into(), nz!(3))),
                     Instr::Calculate(BinaryOp::Add.into()),
                 ]
             }

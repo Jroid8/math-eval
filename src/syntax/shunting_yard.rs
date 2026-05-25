@@ -4,7 +4,7 @@ use super::{AstNode, FunctionType, MathAst, SyntaxError, SyntaxErrorKind};
 use crate::{
     BinaryOp, FunctionIdentifier as FuncId, FunctionPointer, UnaryOp, VariableIdentifier as VarId,
     VariableStore,
-    number::{BfPointer, BuiltinFuncId, CommonBuiltinFunc, ImmEvalStabilityGuard, Number},
+    number::{BasicFunc, BfPointer, BuiltinFunc, ExtraFuncId, ImmEvalStabilityGuard, Number},
     nz,
     postfix_tree::subtree_collection::{MultipleRoots, NotEnoughOrphans, SubtreeCollection},
     syntax::{
@@ -16,13 +16,13 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SyFunction<B: BuiltinFuncId, C: FuncId> {
-    Builtin(B),
+pub(super) enum SyFunction<B: ExtraFuncId, C: FuncId> {
+    Builtin(BuiltinFunc<B>),
     Custom(C, NonZeroU8, Option<NonZeroU8>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SyOperator<B: BuiltinFuncId, C: FuncId> {
+pub(super) enum SyOperator<B: ExtraFuncId, C: FuncId> {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
     HpNeg,
@@ -31,7 +31,7 @@ pub(super) enum SyOperator<B: BuiltinFuncId, C: FuncId> {
     Parentheses,
 }
 
-impl<B: BuiltinFuncId, C: FuncId> SyOperator<B, C> {
+impl<B: ExtraFuncId, C: FuncId> SyOperator<B, C> {
     fn precedence(&self) -> u8 {
         match self {
             SyOperator::BinaryOp(BinaryOp::Add) => 0,
@@ -60,7 +60,7 @@ impl<B: BuiltinFuncId, C: FuncId> SyOperator<B, C> {
     }
     fn to_syn<N, V: VarId>(self) -> AstNode<N, V, C>
     where
-        N: Number<BuiltinFuncId = B>,
+        N: Number<ExtraFuncId = B>,
     {
         match self {
             SyOperator::BinaryOp(opr) => AstNode::BinaryOp(opr),
@@ -78,13 +78,19 @@ impl<B: BuiltinFuncId, C: FuncId> SyOperator<B, C> {
     }
 }
 
-impl<B: BuiltinFuncId, C: FuncId> From<CfInfo<C>> for SyFunction<B, C> {
+impl<B: ExtraFuncId, C: FuncId> From<BasicFunc> for SyFunction<B, C> {
+    fn from(value: BasicFunc) -> Self {
+        SyFunction::Builtin(BuiltinFunc::Basic(value))
+    }
+}
+
+impl<B: ExtraFuncId, C: FuncId> From<CfInfo<C>> for SyFunction<B, C> {
     fn from(cfi: CfInfo<C>) -> Self {
         SyFunction::Custom(cfi.ident, cfi.min_args, cfi.max_args)
     }
 }
 
-impl<B: BuiltinFuncId, C: FuncId> From<ResOprToken> for SyOperator<B, C> {
+impl<B: ExtraFuncId, C: FuncId> From<ResOprToken> for SyOperator<B, C> {
     fn from(value: ResOprToken) -> Self {
         match value {
             ResOprToken::Add => Self::BinaryOp(BinaryOp::Add),
@@ -106,15 +112,15 @@ pub(super) trait ShuntingYardOutput<N: Number, V: VarId, F: FuncId>: Debug {
 
     fn pop_opr(
         &mut self,
-        operator_stack: &mut Vec<SyOperator<N::BuiltinFuncId, F>>,
+        operator_stack: &mut Vec<SyOperator<N::ExtraFuncId, F>>,
     ) -> Result<(), NotEnoughOrphans>;
     fn build(self) -> Result<Self::Output, MultipleRoots>;
     fn push(&mut self, node: AstNode<N, V, F>) -> Result<(), NotEnoughOrphans>;
 
     fn push_opr(
         &mut self,
-        operator: SyOperator<N::BuiltinFuncId, F>,
-        operator_stack: &mut Vec<SyOperator<N::BuiltinFuncId, F>>,
+        operator: SyOperator<N::ExtraFuncId, F>,
+        operator_stack: &mut Vec<SyOperator<N::ExtraFuncId, F>>,
     ) -> Result<(), NotEnoughOrphans> {
         while let Some(top_opr) = operator_stack.last()
             && matches!(top_opr, SyOperator::BinaryOp(_) | SyOperator::UnaryOp(_))
@@ -128,7 +134,7 @@ pub(super) trait ShuntingYardOutput<N: Number, V: VarId, F: FuncId>: Debug {
     }
     fn flush(
         &mut self,
-        operator_stack: &mut Vec<SyOperator<N::BuiltinFuncId, F>>,
+        operator_stack: &mut Vec<SyOperator<N::ExtraFuncId, F>>,
     ) -> Result<(), NotEnoughOrphans> {
         while let Some(opr) = operator_stack.last()
             && matches!(
@@ -155,7 +161,7 @@ impl<N: Number, V: VarId, F: FuncId> ShuntingYardOutput<N, V, F> for SyAstOutput
 
     fn pop_opr(
         &mut self,
-        operator_stack: &mut Vec<SyOperator<N::BuiltinFuncId, F>>,
+        operator_stack: &mut Vec<SyOperator<N::ExtraFuncId, F>>,
     ) -> Result<(), NotEnoughOrphans> {
         let opr = operator_stack.pop().unwrap();
         if let Some(AstNode::Number(num)) = self.0.last_mut()
@@ -227,7 +233,7 @@ where
 
     fn pop_opr(
         &mut self,
-        operator_stack: &mut Vec<SyOperator<N::BuiltinFuncId, F>>,
+        operator_stack: &mut Vec<SyOperator<N::ExtraFuncId, F>>,
     ) -> Result<(), NotEnoughOrphans> {
         let res = match operator_stack.pop().unwrap() {
             SyOperator::UnaryOp(opr) => self.args_pop()?.apply_unary_op(opr),
@@ -236,7 +242,7 @@ where
                 self.args_pop()?.apply_binary_op(rhs, opr)
             }
             SyOperator::HpNeg => self.args_pop()?.apply_unary_op(UnaryOp::Neg),
-            SyOperator::FuncNoParen(FunctionType::Builtin(id)) => match N::get_method_ptr(id) {
+            SyOperator::FuncNoParen(FunctionType::Builtin(id)) => match id.get_method_ptr() {
                 BfPointer::Single(func) => self.args_pop()?.apply_func_single(id, func),
                 BfPointer::Flexible(func) => {
                     self.arg_space.clear();
@@ -276,7 +282,7 @@ where
             AstNode::Variable(var) => {
                 N::ImmEvalStabilityGuard::from_number(self.variable_store.get(var).to_owned())
             }
-            AstNode::Function(FunctionType::Builtin(id), argc) => match N::get_method_ptr(id) {
+            AstNode::Function(FunctionType::Builtin(id), argc) => match id.get_method_ptr() {
                 BfPointer::Single(func) => self.args_pop()?.apply_func_single(id, func),
                 BfPointer::Dual(func) => {
                     let arg2 = self.args_pop()?;
@@ -378,7 +384,7 @@ fn find_opening<S: AsRef<str>>(stream: &ResolvedTkStream<'_, S>, target: usize) 
 
 fn push_fragments<N, V, F, O>(
     fragments: &mut Vec<ParsedFragment<N, V, F>>,
-    operator_stack: &mut Vec<SyOperator<N::BuiltinFuncId, F>>,
+    operator_stack: &mut Vec<SyOperator<N::ExtraFuncId, F>>,
     output_queue: &mut O,
 ) -> Result<(), SyntaxErrorKind>
 where
@@ -428,7 +434,7 @@ where
 {
     // Dijkstra's shunting yard algorithm
     let mut was_pow = false;
-    let mut operator_stack: Vec<SyOperator<N::BuiltinFuncId, F>> = Vec::new();
+    let mut operator_stack: Vec<SyOperator<N::ExtraFuncId, F>> = Vec::new();
     let mut fragments = Vec::with_capacity(0);
     for (pos, token) in stream.iter().enumerate() {
         if stream.has_implied_mult(pos) {
@@ -627,21 +633,16 @@ where
                 }
             }
             ResToken::OpenPipe => {
-                operator_stack.push(SyOperator::Function(
-                    SyFunction::Builtin(N::BuiltinFuncId::from_common(CommonBuiltinFunc::Abs)),
-                    nz!(1),
-                ));
+                operator_stack.push(SyOperator::Function(BasicFunc::Abs.into(), nz!(1)));
             }
             ResToken::ClosePipe => {
-                let abs_id = N::BuiltinFuncId::from_common(CommonBuiltinFunc::Abs);
                 output_queue.flush(&mut operator_stack)?;
                 if let Some(SyOperator::Function(SyFunction::Builtin(bf), args)) =
                     operator_stack.pop()
-                    && bf == abs_id
+                    && bf == BasicFunc::Abs.into()
                 {
                     if args.get() == 1 {
-                        output_queue
-                            .push(AstNode::Function(FunctionType::Builtin(abs_id), nz!(1)))?;
+                        output_queue.push(AstNode::Function(BasicFunc::Abs.into(), nz!(1)))?;
                     } else {
                         return Err(SyntaxError(
                             SyntaxErrorKind::TooManyArguments,
