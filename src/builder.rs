@@ -109,11 +109,7 @@ impl<'n, 'f, N: Number, V> EvalBuilder<'n, 'f, N, V> {
         self
     }
 
-    pub fn add_dyn_fn1(
-        mut self,
-        name: &'n str,
-        function: &'f dyn for<'b> Fn(N) -> N,
-    ) -> Self {
+    pub fn add_dyn_fn1(mut self, name: &'n str, function: &'f dyn for<'b> Fn(N) -> N) -> Self {
         self.function_identifier.push((
             name,
             CfInfo::new(self.functions.len(), nz!(1), Some(nz!(1))),
@@ -623,14 +619,18 @@ mod tests {
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, f64>::new().add_variable("y").add_variable("x"),
+            EvalBuilder::<'_, '_, f64>::new()
+                .add_variable("y")
+                .add_variable("x"),
             [].into_iter(),
             [].into_iter(),
             TwoVariables([("y", 0), ("x", 1)]),
         ));
 
         test!(compare(
-            EvalBuilder::<'_, '_, f64>::new().add_variable("y").add_variable("x"),
+            EvalBuilder::<'_, '_, f64>::new()
+                .add_variable("y")
+                .add_variable("x"),
             [].into_iter(),
             [].into_iter(),
             TwoVariables([("y", 0), ("x", 1)]),
