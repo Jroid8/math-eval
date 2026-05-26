@@ -287,6 +287,11 @@ where
                 BfPointer::Dual(func) => {
                     let arg2 = self.args_pop()?;
                     self.args_pop()?.apply_func_dual(arg2, id, func)
+                },
+                BfPointer::Triple(func) => {
+                    let arg3 = self.args_pop()?;
+                    let arg2 = self.args_pop()?;
+                    self.args_pop()?.apply_func_triple(arg2, arg3, id, func)
                 }
                 BfPointer::Flexible(func) => {
                     self.arg_space.clear();

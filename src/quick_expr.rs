@@ -624,6 +624,7 @@ mod tests {
         let ctx_ptr = match ptr {
             BfPointer::Single(ptr) => CtxFuncPtr::Single(ptr),
             BfPointer::Dual(ptr) => CtxFuncPtr::<f64>::Dual(ptr),
+            BfPointer::Triple(ptr) => CtxFuncPtr::<f64>::Triple(ptr),
             BfPointer::Flexible(ptr) => CtxFuncPtr::Flexible(ptr, argc),
         };
         MarkedFunc::new(ctx_ptr, FunctionSource::BuiltinFunction(bf.into()))

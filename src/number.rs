@@ -26,7 +26,7 @@ pub mod std_int;
 pub enum BfPointer<N: Number> {
     Single(for<'a> fn(N) -> N),
     Dual(for<'a> fn(N, N::AsArg<'a>) -> N),
-    // Triple(for<'a, 'b> fn(N, N::AsArg<'a>, N::AsArg<'b>) -> N),
+    Triple(for<'a, 'b> fn(N, N::AsArg<'a>, N::AsArg<'b>) -> N),
     Flexible(fn(&[N]) -> N),
 }
 
@@ -47,6 +47,13 @@ pub trait ImmEvalStabilityGuard<N: Number>: Sized + Debug {
         arg2: Self,
         id: BuiltinFunc<N::ExtraFuncId>,
         func: for<'a> fn(N, N::AsArg<'a>) -> N,
+    ) -> Self;
+    fn apply_func_triple(
+        self,
+        arg2: Self,
+        arg3: Self,
+        id: BuiltinFunc<N::ExtraFuncId>,
+        func: for<'a, 'b> fn(N, N::AsArg<'a>, N::AsArg<'b>) -> N,
     ) -> Self;
     fn apply_func_flex(
         args: std::vec::Drain<'_, Self>,
@@ -79,6 +86,7 @@ pub enum BasicFunc {
     Sqrt,
     Abs,
     Sign,
+    Clamp,
     Min,
     Max,
 }
@@ -94,6 +102,7 @@ impl BasicFunc {
             BasicFunc::Sqrt => BfPointer::Single(N::sqrt),
             BasicFunc::Abs => BfPointer::Single(N::abs),
             BasicFunc::Sign => BfPointer::Single(N::sign),
+            BasicFunc::Clamp => BfPointer::Triple(N::clamp),
             BasicFunc::Min => BfPointer::Flexible(N::min),
             BasicFunc::Max => BfPointer::Flexible(N::max),
         }
@@ -109,6 +118,7 @@ impl BasicFunc {
             BasicFunc::Sqrt => nz!(1),
             BasicFunc::Abs => nz!(1),
             BasicFunc::Sign => nz!(1),
+            BasicFunc::Clamp => nz!(3),
             BasicFunc::Min => nz!(2),
             BasicFunc::Max => nz!(2),
         }
@@ -135,6 +145,7 @@ impl BasicFunc {
             BasicFunc::Sqrt => "sqrt",
             BasicFunc::Abs => "abs",
             BasicFunc::Sign => "sign",
+            BasicFunc::Clamp => "clamp",
             BasicFunc::Min => "min",
             BasicFunc::Max => "max",
         }
@@ -235,7 +246,7 @@ pub trait Number:
     + Debug
     + 'static
 {
-    type AsArg<'a>: ToOwned<Owned = Self> + Neg<Output = Self> + PartialEq + Copy + Debug;
+    type AsArg<'a>: PartialEq + Copy + Debug;
     type Recognizer: NumberRecognizer;
     type ConstsTrieType: NameTrie<Self>;
     type ExtraFuncId: ExtraFuncId;
@@ -268,8 +279,10 @@ pub trait Number:
     fn sign(self) -> Self;
     fn factorial(self) -> Self;
     fn double_factorial(self) -> Self;
-    fn max(values: &[Self]) -> Self;
+
+    fn clamp(self, min: Self::AsArg<'_>, max: Self::AsArg<'_>) -> Self;
     fn min(values: &[Self]) -> Self;
+    fn max(values: &[Self]) -> Self;
 }
 
 #[derive(Debug)]
@@ -303,6 +316,16 @@ impl<N: Number> ImmEvalStabilityGuard<N> for NoStabilityGuard<N> {
         func: for<'a> fn(N, <N as Number>::AsArg<'a>) -> N,
     ) -> Self {
         NoStabilityGuard(func(self.0, arg2.0.asarg()))
+    }
+
+    fn apply_func_triple(
+        self,
+        arg2: Self,
+        arg3: Self,
+        _id: BuiltinFunc<N::ExtraFuncId>,
+        func: for<'a, 'b> fn(N, <N as Number>::AsArg<'a>, <N as Number>::AsArg<'b>) -> N,
+    ) -> Self {
+        NoStabilityGuard(func(self.0, arg2.0.asarg(), arg3.0.asarg()))
     }
 
     fn apply_func_flex(
@@ -398,11 +421,17 @@ pub fn substitute_basic_funcs_eq<N: Number, V: VarId, F: FuncId>(
     }
 }
 
-static BASIC_FUNCS_TRIE_NODES: [TrieNode; 37] = [
+pub static BASIC_FUNCS_TRIE_NODES: [TrieNode; 43] = [
     TrieNode::Branch('a', 3),
     TrieNode::Branch('b', 2),
     TrieNode::Branch('s', 1),
     TrieNode::Leaf(BasicFunc::Abs as u32),
+    TrieNode::Branch('c', 5),
+    TrieNode::Branch('l', 4),
+    TrieNode::Branch('a', 3),
+    TrieNode::Branch('m', 2),
+    TrieNode::Branch('p', 1),
+    TrieNode::Leaf(BasicFunc::Clamp as u32),
     TrieNode::Branch('e', 7),
     TrieNode::Branch('x', 6),
     TrieNode::Branch('p', 5),

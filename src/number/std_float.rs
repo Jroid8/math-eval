@@ -435,6 +435,16 @@ where
         }
     }
 
+    fn apply_func_triple(
+        self,
+        arg2: Self,
+        arg3: Self,
+        _id: BuiltinFunc<<N as Number>::ExtraFuncId>,
+        func: for<'a, 'b> fn(N, <N as Number>::AsArg<'a>, <N as Number>::AsArg<'b>) -> N,
+    ) -> Self {
+        Self::Number(func(self.eval(), arg2.eval(), arg3.eval()))
+    }
+
     fn apply_func_dual(
         self,
         arg2: Self,
@@ -726,6 +736,14 @@ macro_rules! impl_number_for_std_float {
 
             fn sqrt(self) -> Self {
                 self.sqrt()
+            }
+
+            fn clamp(self, min: Self, max: Self) -> Self {
+                if min > max || min.is_nan() || max.is_nan() {
+                    $t::NAN
+                } else {
+                    self.clamp(min, max)
+                }
             }
 
             fn max(values: &[Self]) -> Self {

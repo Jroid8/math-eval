@@ -447,6 +447,16 @@ where
         }
     }
 
+    fn apply_func_triple(
+        self,
+        arg2: Self,
+        arg3: Self,
+        _id: BuiltinFunc<<N as Number>::ExtraFuncId>,
+        func: for<'a, 'b> fn(N, <N as Number>::AsArg<'a>, <N as Number>::AsArg<'b>) -> N,
+    ) -> Self {
+        Self::Number(func(self.eval(), arg2.eval(), arg3.eval()))
+    }
+
     fn apply_func_dual(
         self,
         arg2: Self,
@@ -755,20 +765,30 @@ macro_rules! impl_number_for_std_float {
                 }
             }
 
+            fn clamp(self, min: Self, max: Self) -> Self {
+                if min > max || min.is_nan() || max.is_nan() {
+                    $t::NAN
+                } else {
+                    self.clamp(min, max)
+                }
+            }
+
             fn max(values: &[Self]) -> Self {
                 values
                     .iter()
-                    .copied()
-                    .max_by(|x, y| x.total_cmp(y))
-                    .unwrap()
+                    .try_fold($t::NEG_INFINITY, |acc, x| {
+                        if x.is_nan() { None } else { Some(acc.max(*x)) }
+                    })
+                    .unwrap_or($t::NAN)
             }
 
             fn min(values: &[Self]) -> Self {
                 values
                     .iter()
-                    .copied()
-                    .min_by(|x, y| x.total_cmp(y))
-                    .unwrap()
+                    .try_fold($t::INFINITY, |acc, x| {
+                        if x.is_nan() { None } else { Some(acc.min(*x)) }
+                    })
+                    .unwrap_or($t::NAN)
             }
 
             fn factorial(self) -> Self {

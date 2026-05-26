@@ -316,6 +316,7 @@ impl<N: Number> From<BfPointer<N>> for FunctionPointer<'static, N> {
         match value {
             BfPointer::Single(func) => FunctionPointer::Single(func),
             BfPointer::Dual(func) => FunctionPointer::Dual(func),
+            BfPointer::Triple(func) => FunctionPointer::Triple(func),
             BfPointer::Flexible(func) => FunctionPointer::Flexible(func),
         }
     }

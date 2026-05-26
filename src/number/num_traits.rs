@@ -233,6 +233,10 @@ where
         NumReal(result)
     }
 
+    fn clamp(self, min: Self, max: Self) -> Self {
+        NumReal(<N as Real>::min(<N as Real>::max(self.0, min.0), max.0))
+    }
+
     fn min(values: &[Self]) -> Self {
         NumReal(
             values

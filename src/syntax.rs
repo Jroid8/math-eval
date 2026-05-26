@@ -299,6 +299,11 @@ impl<N: Number, V: VarId, F: FuncId> MathAst<N, V, F> {
                         let arg2 = pop()?;
                         func(pop()?, arg2.asarg())
                     }
+                    BfPointer::Triple(func) => {
+                        let arg3 = pop()?;
+                        let arg2 = pop()?;
+                        func(pop()?, arg2.asarg(), arg3.asarg())
+                    }
                     BfPointer::Flexible(func) => {
                         let new_len = stack.len() - argc.get() as usize;
                         let res = func(&stack[new_len..]);

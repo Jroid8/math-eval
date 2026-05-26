@@ -18,6 +18,7 @@ pub enum IntMathError {
     LogDomainViolation,
     SqrtDomainViolation,
     FactorialDomainViolation,
+    ClampMinGtMax,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -374,6 +375,15 @@ macro_rules! impl_number_for_pfi {
 
             fn sign(self) -> Self {
                 Self(self.0.map($t::signum))
+            }
+
+            fn clamp(self, min: Self, max: Self) -> Self {
+                let (min, max) = (pfi_inner!(min), pfi_inner!(max));
+                if min > max {
+                    Self(Err(IntMathError::ClampMinGtMax))
+                } else {
+                    Self(Ok(pfi_inner!(self).clamp(min, max)))
+                }
             }
 
             fn min(values: &[Self]) -> Self {
